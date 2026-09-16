@@ -23,6 +23,13 @@ packaging mistake.
 
     pip install mesc-io
 
+For development, install it too — the package lives under `src/`, so the tests import what is
+installed rather than the working tree, and a packaging mistake fails the tests instead of
+hiding behind them:
+
+    pip install -e ".[tiff,dev]"
+    pytest
+
 ## Use
 
 ```python

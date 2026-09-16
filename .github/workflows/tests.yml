@@ -22,11 +22,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install
         run: pip install ".[tiff,dev]"
-      - name: Test from a directory that is not the checkout
-        # installed-package tests, not source-tree tests: this is what a user gets
-        run: |
-          mkdir -p ../elsewhere
-          cd ../elsewhere
-          python -m pytest ../mesc_io/tests -q
+      - name: Test the installed package, from outside the checkout
+        # Not the working tree: this is what a user gets, and a packaging mistake must fail
+        # here rather than hide behind a source import.
+        working-directory: ${{ runner.temp }}
+        run: python -m pytest ${{ github.workspace }}/tests -q
       - name: The console command exists
         run: mesc-io --version

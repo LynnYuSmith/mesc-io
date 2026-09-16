@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from mesc_io import MescFile
-from tests.conftest import FRAME_PERIOD_MS, OFFSET_CH0, PIXEL_UM
+from conftest import FRAME_PERIOD_MS, OFFSET_CH0, PIXEL_UM
 
 
 def test_units_are_found_in_numeric_order(mesc):

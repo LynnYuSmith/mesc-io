@@ -35,6 +35,31 @@ with MescFile("recording.mesc") as f:
 `reader_units=True` returns what the Femtonics reader displays. `False` returns the stored
 integers untouched. Nothing in between, and no silent conversion.
 
+## From the command line
+
+```
+mesc-io info recording.mesc                        # what is in the file
+mesc-io export recording.mesc MUnit_0 unit0.h5     # one unit out
+mesc-io export recording.mesc MUnit_0 unit0.tif    # ...or a TIFF ImageJ can scale
+```
+
+`info` prints, per unit: frames, frame size, frame rate, pixel size and the comment typed at
+the rig. A unit whose file does not state its frame rate prints `unknown` — never a plausible
+default.
+
+`export` picks its writer from the output suffix. Both carry the frame rate, the pixel size
+and the conversion that produced the values; the TIFF puts them where ImageJ and Fiji read
+them back as frame interval and spatial scale. Reader values are written as float32, since
+they can be negative — which makes an exported stack four times the size of the stored
+integers. Pass `--stored-units` for the file's own uint16 if size matters more than meaning.
+
+## What this package will not do
+
+It does not parse the unit comment. `area1 axon stim 550 …` is a convention some lab agreed
+on, not part of the format, so the comment comes back verbatim and what it means is yours to
+decide. It does not motion-correct, segment, or compute anything about the signal. It reads
+files and writes them out correctly, which is the part that is fiddly and shared.
+
 ## Licence
 
-Not yet chosen. Until a LICENSE file is present, no rights are granted.
+MIT — see [LICENSE](LICENSE).

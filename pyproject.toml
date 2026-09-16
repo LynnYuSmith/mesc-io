@@ -8,6 +8,14 @@ version = "0.1.0.dev0"
 description = "Read Femtonics .mesc two-photon recordings, in the units the native reader shows"
 readme = "README.md"
 requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
 dependencies = ["h5py>=3.6", "numpy>=1.21"]
 
 [project.optional-dependencies]

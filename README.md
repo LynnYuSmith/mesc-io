@@ -53,6 +53,29 @@ them back as frame interval and spatial scale. Reader values are written as floa
 they can be negative — which makes an exported stack four times the size of the stored
 integers. Pass `--stored-units` for the file's own uint16 if size matters more than meaning.
 
+## Writing processed frames back
+
+Registration and denoising happen outside the Femtonics software, and the result usually
+stays outside it. `write_frames` puts the processed movie back into a `.mesc`, so whoever
+records the data can open it the way they already know how.
+
+```python
+from mesc_io.writeback import write_frames
+
+report = write_frames("recording.mesc", "recording_MC.mesc",
+                      {"MUnit_0": {"Channel_0": registered}})
+```
+
+It copies the file and edits the copy, never the original. Before a single frame is written
+it compares the new frames with the ones they would replace, on a statistic a translation
+does not move, and **refuses** if they disagree — because frames handed over in the wrong
+units produce a movie that still looks like tissue and is quantitatively wrong, which is the
+mistake nobody catches. The units it did write get a tag appended to their comment, so a
+corrected file cannot pass for the original.
+
+Frames shorter than the original are aligned to the end of the recording, on the assumption
+that whatever was dropped came off the front; the report says when that happened.
+
 ## What this package will not do
 
 It does not parse the unit comment. `area1 axon stim 550 …` is a convention some lab agreed

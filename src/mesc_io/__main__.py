@@ -10,9 +10,25 @@ from .errors import MescIOError
 from .reader import MescFile
 
 
+def _as_json(payload) -> int:
+    import json
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
 def _info(args) -> int:
     with MescFile(args.file) as f:
         units = f.units()
+        if args.json:
+            return _as_json([{"unit": u.path, "frames": u.n_frames,
+                              "height": u.height, "width": u.width, "dtype": u.dtype,
+                              "frame_rate_hz": u.frame_rate_hz,
+                              "duration_s": u.duration_s,
+                              "pixel_size_um": u.pixel_size_um,
+                              "comment": u.comment,
+                              "channels": [{"name": c.name, "offset": c.offset,
+                                            "scale": c.scale} for c in u.channels]}
+                             for u in units])
         print(f"{Path(args.file).name}: {len(units)} unit(s)")
         print(f"{'unit':<18}{'frames':>8}{'size':>12}{'rate':>11}{'pixel':>11}  comment")
         for u in units:
@@ -26,6 +42,11 @@ def _info(args) -> int:
 def _check(args) -> int:
     from .check import check
     rep = check(args.file)
+    if args.json:
+        return _as_json({"file": rep.path, "units": rep.n_units, "ok": rep.ok,
+                         "findings": [{"level": f.level, "code": f.code,
+                                       "message": f.message, "units": list(f.units)}
+                                      for f in rep.findings]})
     print(rep)
     if rep.ok:
         print("  nothing that would mislead an analysis")
@@ -80,10 +101,12 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("info", help="list the units in a .mesc and what they say about themselves")
     p.add_argument("file")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=_info)
 
     p = sub.add_parser("check", help="report what in a .mesc disagrees with itself")
     p.add_argument("file")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=_check)
 
     p = sub.add_parser("export", help="write one unit to .h5 or .tif (by the output's suffix)")

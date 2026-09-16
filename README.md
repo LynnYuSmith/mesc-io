@@ -13,7 +13,11 @@ rather than hardcoding them, and refuses to guess when a file disagrees with its
 
 ## Status
 
-Early. The API may change before 0.1.0. See `docs/` for what is in scope.
+Early. The API may change before 0.1.0.
+
+Tested on Python 3.9, 3.12, 3.13 and 3.14 — each with a real install, run from outside the
+source tree, because that is what a user gets and a source-tree test would not catch a
+packaging mistake.
 
 ## Install
 
@@ -50,6 +54,8 @@ mesc-io check recording.mesc                       # what in it disagrees with i
 mesc-io export recording.mesc MUnit_0 unit0.h5     # one unit out
 mesc-io export recording.mesc MUnit_0 unit0.tif    # ...or a TIFF ImageJ can scale
 ```
+
+`info` and `check` take `--json` when something other than a person is reading.
 
 `check` is worth running before you build anything on a file. It reports, and never repairs,
 the disagreements that quietly wreck an analysis: units recorded at different frame rates or

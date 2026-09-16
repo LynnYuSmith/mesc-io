@@ -1,11 +1,6 @@
 # mesc-io
 
-Read Femtonics `.mesc` two-photon recordings in Python, in the units the native reader shows.
-
-A `.mesc` is an HDF5 container. What it does not tell you plainly: the frame rate is a frame
-*period* in an axis attribute and differs per unit, the pixel size is another attribute, and
-the stored integers are not the displayed values — each channel carries its own linear
-conversion. This package reads all of that from the file's own attributes.
+Read Femtonics `.mesc` two-photon recordings in Python.
 
 ## Install
 
@@ -41,11 +36,6 @@ mesc-io writeback recording.mesc out.mesc MUnit_0 u0.h5     # processed frames b
 ```
 
 `info` and `check` take `--json`.
-
-`export` records which units the values are in; `writeback` reads that record, and asks if the
-file does not carry one. Before writing it compares the new frames with the ones they replace
-and refuses on disagreement. It copies the source, never modifies it, and tags the written
-unit's comment (`_MC`).
 
 
 ## Development

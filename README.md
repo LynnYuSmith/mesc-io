@@ -47,10 +47,6 @@ file does not carry one. Before writing it compares the new frames with the ones
 and refuses on disagreement. It copies the source, never modifies it, and tags the written
 unit's comment (`_MC`).
 
-## Not in scope
-
-Unit comments are returned verbatim, never parsed — their format is a lab convention, not the
-file's. No motion correction, no segmentation, no signal analysis.
 
 ## Development
 

@@ -69,6 +69,23 @@ them back as frame interval and spatial scale. Reader values are written as floa
 they can be negative — which makes an exported stack four times the size of the stored
 integers. Pass `--stored-units` for the file's own uint16 if size matters more than meaning.
 
+## The round trip
+
+Get a unit out, process it with whatever you already use, put it back — without anyone having
+to remember which units the numbers were in:
+
+```
+mesc-io export    recording.mesc MUnit_0 u0.h5
+#   ...register, denoise, whatever, in any tool...
+mesc-io writeback recording.mesc corrected.mesc MUnit_0 u0.h5
+```
+
+The exported file records which units its values are in, and `writeback` reads that record.
+A file this package did not write carries no such record, and then you are asked to say —
+`--reader-units` or `--stored-units` — rather than the tool guessing from the dtype. That
+guess would be a coin flip, and losing it writes a movie that looks right and is
+quantitatively wrong.
+
 ## Writing processed frames back
 
 Registration and denoising happen outside the Femtonics software, and the result usually
@@ -91,6 +108,13 @@ corrected file cannot pass for the original.
 
 Frames shorter than the original are aligned to the end of the recording, on the assumption
 that whatever was dropped came off the front; the report says when that happened.
+
+## Errors
+
+Everything this package raises on purpose derives from `mesc_io.MescIOError`, so a program
+that only wants to know "the file could not be used" needs one except clause. The specific
+classes still say what happened, and Python's own exceptions are left as they are — a missing
+file is a `FileNotFoundError`, an unknown unit is a `KeyError`.
 
 ## What this package will not do
 

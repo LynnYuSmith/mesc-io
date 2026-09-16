@@ -31,6 +31,7 @@ from typing import Dict, Mapping, Optional
 import h5py
 import numpy as np
 
+from .errors import MescIOError
 from .values import from_reader_units
 
 __all__ = ["write_frames", "WritebackError", "DEFAULT_TAG"]
@@ -39,7 +40,7 @@ DEFAULT_TAG = "_MC"
 _CHUNK = 500
 
 
-class WritebackError(RuntimeError):
+class WritebackError(MescIOError, RuntimeError):
     """The frames do not fit, or do not agree with the file they would replace."""
 
 

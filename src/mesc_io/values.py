@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import numpy as np
 
+from .errors import MescIOError
+
 __all__ = ["to_reader_units", "from_reader_units", "ConversionError"]
 
 
-class ConversionError(ValueError):
+class ConversionError(MescIOError, ValueError):
     """A file's conversion attributes are missing, or disagree with its own data."""
 
 

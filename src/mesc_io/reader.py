@@ -25,12 +25,13 @@ from typing import Dict, Iterator, List, Optional
 import h5py
 import numpy as np
 
+from .errors import MescIOError
 from .values import to_reader_units
 
 __all__ = ["MescFile", "Unit", "Channel", "MescError"]
 
 
-class MescError(RuntimeError):
+class MescError(MescIOError, RuntimeError):
     """The file is not shaped like a `.mesc`, or is missing something required."""
 
 

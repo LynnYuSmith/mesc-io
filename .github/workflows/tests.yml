@@ -29,3 +29,16 @@ jobs:
         run: python -m pytest ${{ github.workspace }}/tests -q
       - name: The console command exists
         run: mesc-io --version
+
+  # Suite2p is a heavy optional extra, so it gets one job rather than the whole matrix.
+  # Without it the registration tests skip, and a skipped test proves nothing.
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ".[tiff,register,dev]"
+      - working-directory: ${{ runner.temp }}
+        run: python -m pytest ${{ github.workspace }}/tests -q

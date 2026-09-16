@@ -97,3 +97,38 @@ def two_session_mesc(tmp_path):
                 u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
                 u.attrs["ZAxisConversionConversionLinearScale"] = FRAME_PERIOD_MS
     return path
+
+
+@pytest.fixture
+def moving_mesc(tmp_path):
+    """A recording of a fixed scene that the stage moved under, by shifts we know.
+
+    Nine flat frames at the front (only noise, the state a real recording opens in), then a
+    field of blobs displaced by a known sequence. Registration should recover the negatives of
+    those displacements and leave the flat head alone.
+    """
+    rng = np.random.RandomState(0)
+    h = w = 128
+    scene = np.zeros((h, w), dtype=np.float64)
+    ys, xs = np.mgrid[0:h, 0:w]
+    for cy, cx, amp in [(30, 40, 900), (70, 90, 1200), (100, 35, 700), (50, 64, 1000)]:
+        scene += amp * np.exp(-((ys - cy) ** 2 + (xs - cx) ** 2) / (2 * 3.5 ** 2))
+
+    n_flat, n_move = 9, 40
+    shifts = [(0, 0)] * 6 + [(2, -3)] * 8 + [(-4, 1)] * 8 + [(3, 3)] * 8 + [(-1, -2)] * 10
+    frames = np.empty((n_flat + n_move, h, w), dtype=np.uint16)
+    frames[:n_flat] = (1040 + rng.normal(0, 6, (n_flat, h, w))).clip(0).astype(np.uint16)
+    for i, (dy, dx) in enumerate(shifts[:n_move]):
+        moved = np.roll(np.roll(scene, dy, axis=0), dx, axis=1)
+        frames[n_flat + i] = (1040 + moved + rng.normal(0, 6, (h, w))).clip(0).astype(np.uint16)
+
+    path = tmp_path / "moving.mesc"
+    with h5py.File(path, "w") as f:
+        u = f.create_group("MSession_0").create_group("MUnit_0")
+        u.create_dataset("Channel_0", data=frames)
+        u.attrs["Channel_0_Conversion_ConversionLinearOffset"] = OFFSET_CH0
+        u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
+        u.attrs["ZAxisConversionConversionLinearScale"] = FRAME_PERIOD_MS
+        u.attrs["XAxisConversionConversionLinearScale"] = PIXEL_UM
+        u.attrs["Comment"] = _text("a field that moved")
+    return path, n_flat, shifts[:n_move]

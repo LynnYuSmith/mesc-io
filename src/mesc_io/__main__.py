@@ -94,6 +94,25 @@ def _writeback(args) -> int:
     return 0
 
 
+def _register(args) -> int:
+    from .registration import register_file
+
+    def _say(path, info):
+        print(f"  {path}: {info['n_frames']} frames, {info['n_channels']} channel(s), "
+              f"{info['leading_flat_frames']} flat at the front, "
+              f"shift |y|<={abs(info['y_shift']).max()} |x|<={abs(info['x_shift']).max()} px")
+
+    rep = register_file(args.source, args.out, units=args.units or None, channel=args.channel,
+                        reference_from=args.reference_from, nonrigid=args.nonrigid,
+                        block_size=args.block_size, max_shift=args.max_shift,
+                        max_shift_nr=args.max_shift_nr,
+                        tag=None if args.no_tag else args.tag, progress=_say)
+    print(f"  reference from {rep['reference_from']}"
+          f"{' (non-rigid)' if rep['nonrigid'] else ''}")
+    print(f"  {rep['out']}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="mesc-io", description=__doc__)
     ap.add_argument("--version", action="version", version=f"mesc-io {__version__}")
@@ -139,6 +158,29 @@ def main(argv=None) -> int:
                    help="how far, in stored counts, the new frames may differ from the ones "
                         "they replace before the write is refused (default: 60)")
     p.set_defaults(func=_writeback)
+
+    p = sub.add_parser("register",
+                       help="motion-correct units against one shared reference (needs Suite2p)")
+    p.add_argument("source")
+    p.add_argument("out")
+    p.add_argument("--units", nargs="*", default=None,
+                   help="which units; all of them by default. Name them when the file holds "
+                        "more than one field — one reference across two fields is meaningless")
+    p.add_argument("--channel", type=int, default=0,
+                   help="the channel registration is computed on; the others take its shifts")
+    p.add_argument("--reference-from", default=None,
+                   help="anchor unit (default: the first one), so the reference is the state "
+                        "the session started in rather than an average over it")
+    p.add_argument("--nonrigid", action="store_true",
+                   help="also correct a smooth position-dependent warp")
+    p.add_argument("--block-size", type=int, default=128)
+    p.add_argument("--max-shift", type=float, default=0.1,
+                   help="rigid cap, as a fraction of the frame (default: 0.1)")
+    p.add_argument("--max-shift-nr", type=float, default=5.0,
+                   help="non-rigid cap in px; keep it small (default: 5)")
+    p.add_argument("--tag", default="_MC")
+    p.add_argument("--no-tag", action="store_true")
+    p.set_defaults(func=_register)
 
     args = ap.parse_args(argv)
     try:

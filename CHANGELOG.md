@@ -54,6 +54,25 @@ First working version. Nothing is released yet, so nothing here is stable.
 - `write_frames` reaches any session; it previously looked only in the first and reported a
   unit in any other as "not in the file".
 
+### Motion correction
+
+- `register_file` / `mesc-io register` — Suite2p registration of the units of one field
+  against **one shared reference**, taken from the **first** unit rather than sampled across
+  the whole session, so everything is anchored to the state the session started in instead of
+  to an average of early and late. Other channels take the registration channel's shifts.
+  Optional extra: `pip install mesc-io[register]`.
+- **The flat head.** A recording opens with a run of frames that are not dark — their mean
+  sits at the recording's own level — but hold no structure, only detector noise. Registration
+  matches them to that noise: on a real recording it moved them by up to 22 px while the rest
+  of the unit needed 1. Those frames are now found by contrast (not brightness), left exactly
+  as they were, and reported. The count varies per unit, 6 to 9 on one file, so a fixed trim
+  is the wrong model.
+- Measured on a real awake recording: registration raises the sharpness of the average field
+  by 12.3 % and the frame-to-mean correlation by 1.4 %, with motion of only +-2 px.
+- The reported shifts carry the same sign as the displacement, and are absolute only up to
+  one constant per unit — the reference comes from the data, so it sits at some average state.
+  Verified against known displacements on a synthetic recording.
+
 ### Everything else
 
 - Every error raised on purpose derives from `MescIOError`, while staying its specific self.

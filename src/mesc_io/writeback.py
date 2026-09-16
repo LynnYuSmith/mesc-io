@@ -59,6 +59,10 @@ def _append_tag(unit_grp, tag: str) -> None:
         add = np.array([ord(ch) for ch in tag], dtype=c.dtype)
         unit_grp.attrs["Comment"] = np.concatenate(
             [body, add, np.array([0], c.dtype)]).astype(c.dtype)
+    else:
+        # A unit with no comment would otherwise come out unmarked, and a corrected copy that
+        # cannot be told from its source is the situation the tag exists to prevent.
+        unit_grp.attrs["Comment"] = np.array([ord(ch) for ch in tag] + [0], dtype=np.uint8)
 
 
 def _resolve_unit(f, sessions, name: str, filename: str) -> str:

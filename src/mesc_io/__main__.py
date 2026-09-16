@@ -22,6 +22,15 @@ def _info(args) -> int:
     return 0
 
 
+def _check(args) -> int:
+    from .check import check
+    rep = check(args.file)
+    print(rep)
+    if rep.ok:
+        print("  nothing that would mislead an analysis")
+    return 0
+
+
 def _export(args) -> int:
     from . import export as _ex
     with MescFile(args.file) as f:
@@ -41,6 +50,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("info", help="list the units in a .mesc and what they say about themselves")
     p.add_argument("file")
     p.set_defaults(func=_info)
+
+    p = sub.add_parser("check", help="report what in a .mesc disagrees with itself")
+    p.add_argument("file")
+    p.set_defaults(func=_check)
 
     p = sub.add_parser("export", help="write one unit to .h5 or .tif (by the output's suffix)")
     p.add_argument("file")

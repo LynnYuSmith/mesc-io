@@ -30,7 +30,14 @@ with MescFile("recording.mesc") as f:
               f"{unit.pixel_size_um:.4f} um/px")
 
     frames = f.read(unit="MUnit_0", channel=0, reader_units=True)
+
+    for block in f.iter_frames("MUnit_0", block=500):   # a file bigger than memory
+        ...
 ```
+
+`read` refuses a request that would not plausibly fit in memory — a recording is commonly
+several gigabytes and converting it produces float64, four times the size of the stored
+integers — and tells you the two ways round it. `max_gb=None` lifts the guard.
 
 `reader_units=True` returns what the Femtonics reader displays. `False` returns the stored
 integers untouched. Nothing in between, and no silent conversion.
@@ -39,9 +46,18 @@ integers untouched. Nothing in between, and no silent conversion.
 
 ```
 mesc-io info recording.mesc                        # what is in the file
+mesc-io check recording.mesc                       # what in it disagrees with itself
 mesc-io export recording.mesc MUnit_0 unit0.h5     # one unit out
 mesc-io export recording.mesc MUnit_0 unit0.tif    # ...or a TIFF ImageJ can scale
 ```
+
+`check` is worth running before you build anything on a file. It reports, and never repairs,
+the disagreements that quietly wreck an analysis: units recorded at different frame rates or
+different pixel sizes, channels with no conversion attributes, a conversion that is not
+constant across the file, units holding a single frame. On a real session it found a z-stack
+saved beside the recordings, reporting a frame period that is not a frame rate, at half the
+pixel size and twice the frame width — three ways to get a wrong answer from a file that
+opens perfectly.
 
 `info` prints, per unit: frames, frame size, frame rate, pixel size and the comment typed at
 the rig. A unit whose file does not state its frame rate prints `unknown` — never a plausible

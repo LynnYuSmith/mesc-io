@@ -148,24 +148,66 @@ class MescFile:
         raise KeyError(f"{name!r} not in {self.path.name}")
 
     # -- pixels ------------------------------------------------------------
-    def read(self, unit: str, channel: int = 0, frames=None, reader_units: bool = True):
+    def read(self, unit: str, channel: int = 0, frames=None, reader_units: bool = True,
+             max_gb: Optional[float] = 4.0):
         """Frames of one channel. `frames` is a slice or index array; None means all.
 
         With `reader_units=True` (the default) the values are what the native Femtonics
         reader displays, as float64. With False you get the stored integers untouched.
+
+        A recording is commonly several gigabytes and converting it produces float64, four
+        times the size of the stored uint16. So a request that would not plausibly fit in
+        memory is **refused** with the number it would have needed and the two ways round it
+        — a frame range, or `iter_frames`. Pass `max_gb=None` to lift the guard when you know
+        the machine can take it.
         """
         u = self.unit(unit)
-        try:
-            ch = u.channels[channel] if isinstance(channel, int) else next(
-                c for c in u.channels if c.name == channel)
-        except (IndexError, StopIteration):
-            raise KeyError(f"{u.path} has no channel {channel!r} "
-                           f"(has {[c.name for c in u.channels]})") from None
+        ch = self._channel(u, channel)
         ds = self._f[f"{u.path}/{ch.dataset}"]
+        if max_gb is not None:
+            self._check_size(ds, frames, reader_units, max_gb, f"{u.path}/{ch.name}")
         block = ds[:] if frames is None else ds[frames]
         if not reader_units:
             return block
         return to_reader_units(block, offset=ch.offset, scale=ch.scale)
+
+    def iter_frames(self, unit: str, channel: int = 0, block: int = 500,
+                    reader_units: bool = True) -> Iterator[np.ndarray]:
+        """Whole recording, `block` frames at a time — the way to touch a file bigger than RAM.
+
+        Yields arrays of `(block, height, width)`, the last one short. The conversion is
+        applied per block, so nothing larger than one block is ever materialised.
+        """
+        u = self.unit(unit)
+        ch = self._channel(u, channel)
+        ds = self._f[f"{u.path}/{ch.dataset}"]
+        if block < 1:
+            raise ValueError("block must be at least 1 frame")
+        for start in range(0, ds.shape[0], block):
+            chunk = ds[start:start + block]
+            yield (to_reader_units(chunk, offset=ch.offset, scale=ch.scale)
+                   if reader_units else chunk)
+
+    def _channel(self, u: "Unit", channel) -> Channel:
+        try:
+            return u.channels[channel] if isinstance(channel, int) else next(
+                c for c in u.channels if c.name == channel)
+        except (IndexError, StopIteration):
+            raise KeyError(f"{u.path} has no channel {channel!r} "
+                           f"(has {[c.name for c in u.channels]})") from None
+
+    @staticmethod
+    def _check_size(ds, frames, reader_units, max_gb: float, what: str) -> None:
+        n = ds.shape[0] if frames is None else len(range(*frames.indices(ds.shape[0]))) \
+            if isinstance(frames, slice) else len(np.atleast_1d(frames))
+        itemsize = 8 if reader_units else ds.dtype.itemsize
+        gb = n * int(np.prod(ds.shape[1:])) * itemsize / 1e9
+        if gb > max_gb:
+            raise MemoryError(
+                f"{what}: reading {n} frames "
+                f"{'as float64 ' if reader_units else ''}needs about {gb:.1f} GB, over the "
+                f"{max_gb:g} GB guard. Read a range (frames=slice(0, 1000)), stream it with "
+                f"iter_frames(), or pass max_gb=None if this machine can take it.")
 
     # -- internals ---------------------------------------------------------
     def _read_unit(self, session: str, name: str) -> Optional[Unit]:

@@ -47,3 +47,36 @@ def mesc_without_rate(tmp_path):
         u = f.create_group("MSession_0").create_group("MUnit_0")
         u.create_dataset("Channel_0", data=np.zeros((3, 2, 2), dtype=np.uint16))
     return path
+
+
+@pytest.fixture
+def dirty_mesc(tmp_path):
+    """A file that disagrees with itself in every way `check` is meant to notice.
+
+    Modelled on a real session: a z-stack saved beside the recordings reports a frame period
+    that is not a frame rate, at half the pixel size and twice the frame width, and one unit
+    was aborted after a single frame.
+    """
+    path = tmp_path / "dirty.mesc"
+    with h5py.File(path, "w") as f:
+        sess = f.create_group("MSession_0")
+
+        u = sess.create_group("MUnit_0")                      # an ordinary recording
+        u.create_dataset("Channel_0", data=np.zeros((10, 4, 4), dtype=np.uint16))
+        u.attrs["Channel_0_Conversion_ConversionLinearOffset"] = OFFSET_CH0
+        u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
+        u.attrs["ZAxisConversionConversionLinearScale"] = FRAME_PERIOD_MS
+        u.attrs["XAxisConversionConversionLinearScale"] = PIXEL_UM
+
+        u = sess.create_group("MUnit_1")                      # the z-stack
+        u.create_dataset("Channel_0", data=np.zeros((10, 8, 8), dtype=np.uint16))
+        u.attrs["Channel_0_Conversion_ConversionLinearOffset"] = OFFSET_CH0
+        u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
+        u.attrs["ZAxisConversionConversionLinearScale"] = 1.0          # -> "1000 Hz"
+        u.attrs["XAxisConversionConversionLinearScale"] = PIXEL_UM / 2
+
+        u = sess.create_group("MUnit_2")                      # aborted, and no conversion
+        u.create_dataset("Channel_0", data=np.zeros((1, 4, 4), dtype=np.uint16))
+        u.attrs["ZAxisConversionConversionLinearScale"] = FRAME_PERIOD_MS
+        u.attrs["XAxisConversionConversionLinearScale"] = PIXEL_UM
+    return path

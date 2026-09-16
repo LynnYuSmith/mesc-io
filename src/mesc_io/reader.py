@@ -142,10 +142,26 @@ class MescFile:
         return list(self._units.values())
 
     def unit(self, name: str) -> Unit:
-        """One unit by `MUnit_3` or by its full `MSession_0/MUnit_3` path."""
-        for u in self.units():
-            if name in (u.name, u.path):
+        """One unit by its full `MSession_0/MUnit_3` path, or by `MUnit_3` when that is
+        unambiguous.
+
+        Most files hold a single session and the short name is fine. A file with more than one
+        can hold two units of the same name, and returning the first would be handing back the
+        wrong recording without saying so — so an ambiguous short name raises and lists the
+        paths to choose from.
+        """
+        units = self.units()
+        for u in units:                                   # a full path always wins
+            if name == u.path:
                 return u
+        matches = [u for u in units if name == u.name]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            raise MescError(
+                f"{name!r} is ambiguous in {self.path.name} — it exists in "
+                f"{len(matches)} sessions ({', '.join(u.path for u in matches)}). "
+                f"Name the one you mean.")
         raise KeyError(f"{name!r} not in {self.path.name}")
 
     # -- pixels ------------------------------------------------------------

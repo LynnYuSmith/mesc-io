@@ -80,3 +80,20 @@ def dirty_mesc(tmp_path):
         u.attrs["ZAxisConversionConversionLinearScale"] = FRAME_PERIOD_MS
         u.attrs["XAxisConversionConversionLinearScale"] = PIXEL_UM
     return path
+
+
+@pytest.fixture
+def two_session_mesc(tmp_path):
+    """Two sessions, each with a `MUnit_0` — so a bare name cannot identify a recording."""
+    path = tmp_path / "two_sessions.mesc"
+    with h5py.File(path, "w") as f:
+        for si in (0, 1):
+            s = f.create_group(f"MSession_{si}")
+            for ui in (0, 1):
+                u = s.create_group(f"MUnit_{ui}")
+                u.create_dataset("Channel_0",
+                                 data=np.full((6, 4, 4), 1000 + si * 100 + ui, dtype=np.uint16))
+                u.attrs["Channel_0_Conversion_ConversionLinearOffset"] = OFFSET_CH0
+                u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
+                u.attrs["ZAxisConversionConversionLinearScale"] = FRAME_PERIOD_MS
+    return path

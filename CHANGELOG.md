@@ -44,6 +44,16 @@ First working version. Nothing is released yet, so nothing here is stable.
 - The round trip needs nobody to remember the units: export records them, writeback reads
   that record, and a file we did not write makes the tool ask rather than guess.
 
+### Files with more than one session
+
+- A `.mesc` can hold several sessions, and two of them can hold a `MUnit_0`. A bare unit name
+  that matches in more than one is now **refused**, listing the paths to choose from, instead
+  of quietly returning the first — which would hand back the wrong recording, or write over
+  it. A full `MSession_1/MUnit_0` path always works, and a bare name that is unique still
+  works.
+- `write_frames` reaches any session; it previously looked only in the first and reported a
+  unit in any other as "not in the file".
+
 ### Everything else
 
 - Every error raised on purpose derives from `MescIOError`, while staying its specific self.

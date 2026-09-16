@@ -61,6 +61,27 @@ def _append_tag(unit_grp, tag: str) -> None:
             [body, add, np.array([0], c.dtype)]).astype(c.dtype)
 
 
+def _resolve_unit(f, sessions, name: str, filename: str) -> str:
+    """`MSession_i/MUnit_j` for `name`, which may be a full path or a bare unit name.
+
+    A file with more than one session can hold two units of the same name. Silently taking the
+    first would write over the wrong recording, so an ambiguous name is refused with the paths
+    to choose from — the same rule the reader applies.
+    """
+    if "/" in name:
+        if name in f:
+            return name
+        raise WritebackError(f"{name} is not in {filename}")
+    hits = [f"{s}/{name}" for s in sessions if name in f[s]]
+    if len(hits) == 1:
+        return hits[0]
+    if hits:
+        raise WritebackError(
+            f"{name!r} is ambiguous in {filename} — it exists in {len(hits)} sessions "
+            f"({', '.join(hits)}). Name the one you mean.")
+    raise WritebackError(f"{name} is not in {filename}")
+
+
 def _agreement(new_stored, original, offset_frames: int, n_sample: int = 4) -> float:
     """Median over sampled frames of `original − new`, in stored units.
 
@@ -99,29 +120,27 @@ def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
 
     # Validate everything first, against the SOURCE, so a refusal leaves no half-written copy.
     with h5py.File(str(source), "r") as f:
-        sess_name = next((k for k in f if k.startswith("MSession_")), None)
-        if sess_name is None:
+        sessions = [k for k in f if k.startswith("MSession_")]
+        if not sessions:
             raise WritebackError(f"{source.name}: no MSession_* group — not a .mesc?")
-        sess = f[sess_name]
         plan = []
         for unit, per_channel in frames.items():
-            if unit not in sess:
-                raise WritebackError(f"{unit} is not in {source.name}/{sess_name}")
+            unit_path = _resolve_unit(f, sessions, unit, source.name)
             for channel, arr in per_channel.items():
-                if channel not in sess[unit]:
-                    raise WritebackError(f"{unit} has no {channel}")
-                original = sess[unit][channel]
+                if channel not in f[unit_path]:
+                    raise WritebackError(f"{unit_path} has no {channel}")
+                original = f[unit_path][channel]
                 a = np.asarray(arr)
                 if a.ndim != 3 or a.shape[1:] != original.shape[1:]:
                     raise WritebackError(
-                        f"{unit}/{channel}: frames are {a.shape}, the file holds "
+                        f"{unit_path}/{channel}: frames are {a.shape}, the file holds "
                         f"{original.shape} — frame size must match")
                 lead = original.shape[0] - a.shape[0]
                 if lead < 0:
                     raise WritebackError(
-                        f"{unit}/{channel}: {a.shape[0]} frames offered, the file holds only "
-                        f"{original.shape[0]}")
-                attrs = sess[unit].attrs
+                        f"{unit_path}/{channel}: {a.shape[0]} frames offered, the file holds "
+                        f"only {original.shape[0]}")
+                attrs = f[unit_path].attrs
                 off = attrs.get(f"{channel}_Conversion_ConversionLinearOffset", 0.0)
                 sc = attrs.get(f"{channel}_Conversion_ConversionLinearScale", 1.0)
                 stored = (from_reader_units(a, offset=float(off), scale=float(sc),
@@ -130,27 +149,27 @@ def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
                 delta = _agreement(stored, original, lead)
                 if abs(delta) > tolerance:
                     raise WritebackError(
-                        f"{unit}/{channel}: the frames differ from the ones they would replace "
+                        f"{unit_path}/{channel}: the frames differ from the ones they would "
+                        f"replace "
                         f"by {delta:.0f} counts (tolerance {tolerance:.0f}) — refusing to "
                         f"write. Check whether they are in the units you think they are.")
-                report["agreement"][f"{unit}/{channel}"] = delta
-                plan.append((unit, channel, stored, lead))
+                report["agreement"][f"{unit_path}/{channel}"] = delta
+                plan.append((unit_path, channel, stored, lead))
                 if lead:
                     report["warnings"].append(
-                        f"{unit}/{channel}: {lead} frame(s) shorter — aligned to the end")
+                        f"{unit_path}/{channel}: {lead} frame(s) shorter — aligned to the end")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, out)
     with h5py.File(str(out), "r+") as d:
-        sess = d[next(k for k in d if k.startswith("MSession_"))]
-        for unit, channel, stored, lead in plan:
-            ds = sess[unit][channel]
+        for unit_path, channel, stored, lead in plan:
+            ds = d[unit_path][channel]
             n = stored.shape[0]
             for c0 in range(0, n, chunk):
                 c1 = min(c0 + chunk, n)
                 ds[lead + c0:lead + c1] = stored[c0:c1]
-            report["written"].append(f"{unit}/{channel}")
+            report["written"].append(f"{unit_path}/{channel}")
         if tag:
-            for unit in {u for u, _, _, _ in plan}:
-                _append_tag(sess[unit], tag)
+            for unit_path in {u for u, _, _, _ in plan}:
+                _append_tag(d[unit_path], tag)
     return report

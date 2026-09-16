@@ -115,6 +115,13 @@ corrected file cannot pass for the original.
 Frames shorter than the original are aligned to the end of the recording, on the assumption
 that whatever was dropped came off the front; the report says when that happened.
 
+## Files with more than one session
+
+Most `.mesc` files hold one session and `MUnit_0` names a recording unambiguously. Some hold
+several, and then two sessions can each have a `MUnit_0`. A name that matches more than one is
+refused with the paths to choose from, rather than resolved to the first — the alternative is
+being handed the wrong recording with nothing said. `MSession_1/MUnit_0` always works.
+
 ## Errors
 
 Everything this package raises on purpose derives from `mesc_io.MescIOError`, so a program

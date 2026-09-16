@@ -37,7 +37,6 @@ mesc-io writeback recording.mesc out.mesc MUnit_0 u0.h5     # processed frames b
 
 `info` and `check` take `--json`.
 
-
 ## Development
 
 ```

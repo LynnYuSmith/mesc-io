@@ -37,6 +37,7 @@ import base64
 import io
 import json
 import sys
+import subprocess
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -357,6 +358,56 @@ class _Handler(BaseHTTPRequestHandler):
                            "values": [round(float(v), 2) for v in trace]})
 
 
+PRIVATE_FLAGS = {          # how each browser is asked for a window that remembers nothing
+    "Google Chrome": "--incognito",
+    "Brave Browser": "--incognito",
+    "Microsoft Edge": "--inprivate",
+    "Chromium": "--incognito",
+    "Firefox": "-private-window",
+}
+
+
+def open_private(url: str) -> str:
+    """Open *url* in a private window. Returns what actually happened, in words.
+
+    Private on purpose: the viewer is opened dozens of times a day against different
+    recordings, and a normal window turns that into a history full of `127.0.0.1:8020` entries
+    that all look the same and none of which can be gone back to. A private window also starts
+    with an empty page state every time, so a stale cached page cannot be mistaken for the
+    current recording.
+
+    Nothing of value is lost by it: the regions live in a file on disk, served by this process,
+    not in the browser's storage.
+
+    Falls back to the default browser, and SAYS so — a viewer that silently opens the wrong
+    kind of window is worse than one that tells you it could not find Chrome.
+    """
+    if sys.platform == "darwin":
+        for app, flag in PRIVATE_FLAGS.items():
+            if not Path(f"/Applications/{app}.app").is_dir():
+                continue
+            try:
+                subprocess.Popen(["open", "-na", app, "--args", flag, url],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return f"{app}, private window"
+            except OSError:
+                continue
+        # Safari has no command-line switch for a private window, so it is not attempted:
+        # opening a normal Safari window while claiming privacy would be the worst outcome.
+        webbrowser.open(url)
+        return "default browser (no Chrome/Firefox/Edge found — NOT private)"
+    for exe, flag in (("google-chrome", "--incognito"), ("chromium", "--incognito"),
+                      ("firefox", "-private-window")):
+        try:
+            subprocess.Popen([exe, flag, url],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return f"{exe}, private window"
+        except OSError:
+            continue
+    webbrowser.open(url)
+    return "default browser (NOT private)"
+
+
 def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
           rois_path: Path = None) -> None:
     _Handler.mesc_path = Path(mesc_path)
@@ -369,7 +420,9 @@ def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
     url = f"http://127.0.0.1:{port}/"
     print(f"  {Path(mesc_path).name}: {n} units  →  {url}   (ctrl-c to stop)")
     if open_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+        def _launch():
+            print(f"  opening: {open_private(url)}", flush=True)
+        threading.Timer(0.6, _launch).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

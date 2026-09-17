@@ -1,47 +1,78 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta name="color-scheme" content="dark">
 <title>mesc viewer</title>
 <style>
-  :root { --ink:#1a1a1a; --mute:#767676; --line:#e3e3e3; --accent:#2e86c1; --warn:#c0392b; }
+  /* Dark by default, and only dark. A viewer for two-photon data is looked at beside the
+     microscope, in a room kept dark for the photomultipliers; a white page there is a lamp
+     pointed at the person using it. The greys are picked so the FRAME stays the brightest
+     thing on screen — every panel sits below the image in luminance, because the eye judges
+     a field's brightness against its surround, and bright chrome makes a dim field look
+     dimmer than it is. */
+  :root {
+    --bg:#121417;        /* the page */
+    --panel:#181b1f;     /* asides */
+    --panel-2:#1e2228;   /* rows, inputs, the trace box */
+    --ink:#e6e8ea;
+    --mute:#8b939c;      /* labels, secondary text */
+    --line:#2a2f36;
+    --accent:#4ea3dd;    /* lighter than the light theme's blue: it has to carry on a dark
+                            ground, where a mid-blue reads as almost black */
+    --warn:#e5736a;
+    --warn-bg:#2a1b1a;
+    --note-bg:#1c1f24;
+    --sel:#20303c;
+    --hover:#1b2228;
+  }
   * { box-sizing: border-box; }
   body { margin:0; font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-         color:var(--ink); background:#fafafa; }
+         color:var(--ink); background:var(--bg); }
   #wrap { display:grid; grid-template-columns: 300px 1fr 320px; height:100vh; }
   aside, section { overflow:auto; }
-  aside { border-right:1px solid var(--line); background:#fff; }
-  #side  { border-right:none; border-left:1px solid var(--line); background:#fff; padding:12px; }
+  aside { border-right:1px solid var(--line); background:var(--panel); }
+  #side  { border-right:none; border-left:1px solid var(--line); background:var(--panel);
+           padding:12px; }
   h1 { font-size:13px; margin:0; padding:12px; border-bottom:1px solid var(--line);
        font-weight:600; }
   h1 small { display:block; color:var(--mute); font-weight:400; margin-top:2px;
              word-break:break-all; }
   .u { padding:8px 12px; border-bottom:1px solid var(--line); cursor:pointer; }
-  .u:hover { background:#f2f7fb; }
-  .u.on { background:#e8f2fa; box-shadow: inset 3px 0 0 var(--accent); }
+  .u:hover { background:var(--hover); }
+  .u.on { background:var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
   .u b { font-weight:600; }
   .u span { color:var(--mute); }
   .u i { display:block; color:var(--mute); font-style:normal; font-size:11px; margin-top:2px;
          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   main { padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0; }
-  #canvasWrap { position:relative; background:#000; align-self:start; line-height:0; }
+  /* The frame sits on pure black, not on the panel grey: a grey surround raises the apparent
+     black level of the image and hides exactly the dim structure one is looking for. */
+  #canvasWrap { position:relative; background:#000; align-self:start; line-height:0;
+                border:1px solid var(--line); }
   canvas { image-rendering: pixelated; display:block; cursor:crosshair; }
-  #marker { position:absolute; border:1.5px solid #e74c3c; border-radius:50%;
+  #marker { position:absolute; border:1.5px solid #ff6b5e; border-radius:50%;
             pointer-events:none; display:none; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .row label { color:var(--mute); }
-  input[type=range] { width:220px; }
-  button { font:inherit; padding:3px 10px; border:1px solid var(--line); background:#fff;
-           border-radius:4px; cursor:pointer; }
-  button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  input[type=range] { width:220px; accent-color:var(--accent); }
+  input, select { color:var(--ink); background:var(--panel-2); border:1px solid var(--line);
+                  border-radius:4px; }
+  button { font:inherit; padding:3px 10px; border:1px solid var(--line);
+           background:var(--panel-2); color:var(--ink); border-radius:4px; cursor:pointer; }
+  button:hover { background:var(--hover); border-color:var(--accent); }
+  button.on { background:var(--accent); color:#0f1114; border-color:var(--accent);
+              font-weight:600; }
   table { border-collapse:collapse; width:100%; font-size:12px; }
   td { padding:2px 0; vertical-align:top; }
   td:first-child { color:var(--mute); padding-right:8px; white-space:nowrap; }
   .finding { border-left:3px solid var(--warn); padding:4px 8px; margin:6px 0;
-             background:#fdf3f2; font-size:12px; }
-  .finding.note { border-color:var(--mute); background:#f6f6f6; }
-  #trace { width:100%; height:120px; border:1px solid var(--line); background:#fff; }
+             background:var(--warn-bg); font-size:12px; }
+  .finding.note { border-color:var(--mute); background:var(--note-bg); }
+  #trace { width:100%; height:120px; border:1px solid var(--line); background:var(--panel-2); }
   .hint { color:var(--mute); font-size:12px; }
-  #roiList { border:1px solid var(--line); border-radius:4px; max-height:190px; overflow:auto; }
-  .r { display:flex; align-items:center; gap:6px; padding:3px 6px; border-bottom:1px solid var(--line); }
+  #roiList { border:1px solid var(--line); border-radius:4px; max-height:190px; overflow:auto;
+             background:var(--panel-2); }
+  .r { display:flex; align-items:center; gap:6px; padding:3px 6px;
+       border-bottom:1px solid var(--line); }
   .r:last-child { border-bottom:none; }
   .r .sw { width:10px; height:10px; border-radius:2px; flex:0 0 auto; }
   .r input { border:0; font:inherit; width:100%; background:transparent; color:inherit; }
@@ -49,10 +80,14 @@
   .r .px { color:var(--mute); font-size:11px; white-space:nowrap; }
   .r .x { cursor:pointer; color:var(--mute); padding:0 2px; }
   .r .x:hover { color:var(--warn); }
-  .r.sel { background:#eef6fc; }
+  .r.sel { background:var(--sel); }
   #side a { color:var(--accent); text-decoration:none; border:1px solid var(--line);
             padding:3px 8px; border-radius:4px; }
-  #side a:hover { background:#f2f7fb; }
+  #side a:hover { background:var(--hover); }
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-track { background:var(--bg); }
+  ::-webkit-scrollbar-thumb { background:var(--line); border-radius:5px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--mute); }
 </style>
 
 <div id="wrap">

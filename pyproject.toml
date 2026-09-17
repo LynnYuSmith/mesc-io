@@ -28,3 +28,9 @@ mesc-io = "mesc_io.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The viewer's page ships inside the package. Without this it is missing from the wheel and
+# `mesc-io view` fails at the first request with a file-not-found — on someone else's machine,
+# not on the one it was built on.
+[tool.setuptools.package-data]
+mesc_io = ["viewer.html"]

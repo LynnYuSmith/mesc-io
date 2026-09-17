@@ -1,0 +1,326 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>mesc viewer</title>
+<style>
+  :root { --ink:#1a1a1a; --mute:#767676; --line:#e3e3e3; --accent:#2e86c1; --warn:#c0392b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         color:var(--ink); background:#fafafa; }
+  #wrap { display:grid; grid-template-columns: 300px 1fr 320px; height:100vh; }
+  aside, section { overflow:auto; }
+  aside { border-right:1px solid var(--line); background:#fff; }
+  #side  { border-right:none; border-left:1px solid var(--line); background:#fff; padding:12px; }
+  h1 { font-size:13px; margin:0; padding:12px; border-bottom:1px solid var(--line);
+       font-weight:600; }
+  h1 small { display:block; color:var(--mute); font-weight:400; margin-top:2px;
+             word-break:break-all; }
+  .u { padding:8px 12px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .u:hover { background:#f2f7fb; }
+  .u.on { background:#e8f2fa; box-shadow: inset 3px 0 0 var(--accent); }
+  .u b { font-weight:600; }
+  .u span { color:var(--mute); }
+  .u i { display:block; color:var(--mute); font-style:normal; font-size:11px; margin-top:2px;
+         white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  main { padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0; }
+  #canvasWrap { position:relative; background:#000; align-self:start; line-height:0; }
+  canvas { image-rendering: pixelated; display:block; cursor:crosshair; }
+  #marker { position:absolute; border:1.5px solid #e74c3c; border-radius:50%;
+            pointer-events:none; display:none; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .row label { color:var(--mute); }
+  input[type=range] { width:220px; }
+  button { font:inherit; padding:3px 10px; border:1px solid var(--line); background:#fff;
+           border-radius:4px; cursor:pointer; }
+  button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  td { padding:2px 0; vertical-align:top; }
+  td:first-child { color:var(--mute); padding-right:8px; white-space:nowrap; }
+  .finding { border-left:3px solid var(--warn); padding:4px 8px; margin:6px 0;
+             background:#fdf3f2; font-size:12px; }
+  .finding.note { border-color:var(--mute); background:#f6f6f6; }
+  #trace { width:100%; height:120px; border:1px solid var(--line); background:#fff; }
+  .hint { color:var(--mute); font-size:12px; }
+  #roiList { border:1px solid var(--line); border-radius:4px; max-height:190px; overflow:auto; }
+  .r { display:flex; align-items:center; gap:6px; padding:3px 6px; border-bottom:1px solid var(--line); }
+  .r:last-child { border-bottom:none; }
+  .r .sw { width:10px; height:10px; border-radius:2px; flex:0 0 auto; }
+  .r input { border:0; font:inherit; width:100%; background:transparent; color:inherit; }
+  .r input:focus { outline:1px solid var(--accent); }
+  .r .px { color:var(--mute); font-size:11px; white-space:nowrap; }
+  .r .x { cursor:pointer; color:var(--mute); padding:0 2px; }
+  .r .x:hover { color:var(--warn); }
+  .r.sel { background:#eef6fc; }
+  #side a { color:var(--accent); text-decoration:none; border:1px solid var(--line);
+            padding:3px 8px; border-radius:4px; }
+  #side a:hover { background:#f2f7fb; }
+</style>
+
+<div id="wrap">
+  <aside>
+    <h1>units<small id="fname">loading…</small></h1>
+    <div id="units"></div>
+  </aside>
+
+  <main>
+    <div class="row">
+      <button id="playBtn">play</button>
+      <input type="range" id="frame" min="0" max="0" value="0">
+      <span id="frameLbl" class="hint">—</span>
+      <span id="chans"></span>
+      <button id="meanBtn">mean</button>
+    </div>
+    <div class="row">
+      <label>contrast</label>
+      <input type="range" id="lo" min="0" max="20"  step="0.5" value="1">
+      <input type="range" id="hi" min="90" max="100" step="0.1" value="99.5">
+      <span id="winLbl" class="hint"></span>
+      <label>zoom</label>
+      <input type="range" id="zoom" min="1" max="4" step="0.5" value="2">
+    </div>
+    <div id="canvasWrap"><canvas id="view"></canvas><div id="marker"></div></div>
+    <div class="hint">click the field for the time course of that spot</div>
+  </main>
+
+  <section id="side">
+    <table id="meta"></table>
+    <div id="findings"></div>
+
+    <h1 style="padding:14px 0 4px;border:0">ROIs</h1>
+    <div class="row" style="margin-bottom:6px">
+      <button id="toolSpot" class="on">spot</button>
+      <button id="toolPoly">polygon</button>
+      <button id="clearAll">clear</button>
+    </div>
+    <div id="roiList"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="doTraces">traces</button>
+      <a id="dlCsv" href="#">csv</a>
+      <a id="dlZip" href="#">imagej</a>
+      <a id="dlJson" href="#">json</a>
+    </div>
+    <div id="roiHint" class="hint" style="margin-top:4px">
+      spot: click the field · polygon: click points, double-click to close
+    </div>
+
+    <h1 style="padding:14px 0 4px;border:0">time course</h1>
+    <canvas id="trace"></canvas>
+    <div id="traceLbl" class="hint">—</div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let FILE = null, unit = null, ch = 0, showMean = true, playing = null;
+
+const win = () => `lo=${$("lo").value}&hi=${$("hi").value}`;
+
+async function boot() {
+  FILE = await (await fetch("/api/file")).json();
+  $("fname").textContent = FILE.file;
+  $("units").innerHTML = FILE.units.map((u, i) => `
+    <div class="u" data-i="${i}">
+      <b>${u.name}</b> <span>${u.frames} fr ·
+      ${u.frame_rate_hz ? u.frame_rate_hz.toFixed(2) + " Hz" : "rate unknown"}</span>
+      <i title="${u.comment}">${u.comment || "&nbsp;"}</i>
+    </div>`).join("");
+  $("units").onclick = e => {
+    const d = e.target.closest(".u"); if (d) pick(+d.dataset.i);
+  };
+  $("findings").innerHTML = FILE.findings.map(f =>
+    `<div class="finding ${f.level}">${f.message}${f.units.length
+      ? "<br><small>" + f.units.join(", ") + "</small>" : ""}</div>`).join("");
+  if (FILE.units.length) pick(0);
+}
+
+function pick(i) {
+  unit = FILE.units[i];
+  document.querySelectorAll(".u").forEach((d, k) => d.classList.toggle("on", k === i));
+  ch = 0;
+  $("chans").innerHTML = unit.channels.map((c, k) =>
+    `<button class="chan ${k === 0 ? "on" : ""}" data-c="${k}">${c.replace("Channel_", "ch")}</button>`
+  ).join(" ");
+  document.querySelectorAll(".chan").forEach(b => b.onclick = () => {
+    ch = +b.dataset.c;
+    document.querySelectorAll(".chan").forEach(x => x.classList.toggle("on", x === b));
+    draw();
+  });
+  $("frame").max = unit.frames - 1;
+  $("frame").value = 0;
+  $("meta").innerHTML = [
+    ["unit", unit.path],
+    ["frames", `${unit.frames}`],
+    ["size", `${unit.width} × ${unit.height} px`],
+    ["frame rate", unit.frame_rate_hz ? unit.frame_rate_hz.toFixed(3) + " Hz" : "not stated"],
+    ["duration", unit.duration_s ? unit.duration_s.toFixed(1) + " s" : "—"],
+    ["pixel", unit.pixel_size_um ? unit.pixel_size_um.toFixed(4) + " µm" : "not stated"],
+    ["field", unit.pixel_size_um
+        ? (unit.width * unit.pixel_size_um).toFixed(1) + " × " +
+          (unit.height * unit.pixel_size_um).toFixed(1) + " µm" : "—"],
+    ["comment", unit.comment || "—"],
+  ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+  showMean = true; $("meanBtn").classList.add("on");
+  $("marker").style.display = "none";
+  draw();
+}
+
+function draw() {
+  if (!unit) return;
+  const z = +$("zoom").value;
+  const c = $("view"), g = c.getContext("2d");
+  c.width = unit.width * z; c.height = unit.height * z;
+  const i = +$("frame").value;
+  const url = showMean ? `/api/mean/${unit.path}/${ch}?${win()}`
+                       : `/api/frame/${unit.path}/${ch}/${i}?${win()}`;
+  const img = new Image();
+  img.onload = () => { g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, c.width, c.height); };
+  img.src = url;
+  $("frameLbl").textContent = showMean ? "mean of the recording"
+    : `frame ${i}` + (unit.frame_rate_hz ? ` · ${(i / unit.frame_rate_hz).toFixed(2)} s` : "");
+  $("winLbl").textContent = `${$("lo").value}–${$("hi").value} %`;
+}
+
+for (const id of ["lo", "hi", "zoom"]) $(id).oninput = draw;
+$("frame").oninput = () => { showMean = false; $("meanBtn").classList.remove("on"); draw(); };
+$("meanBtn").onclick = () => {
+  showMean = !showMean; $("meanBtn").classList.toggle("on", showMean); draw();
+};
+$("playBtn").onclick = () => {
+  if (playing) { clearInterval(playing); playing = null; $("playBtn").textContent = "play"; return; }
+  showMean = false; $("meanBtn").classList.remove("on");
+  $("playBtn").textContent = "stop";
+  playing = setInterval(() => {
+    const f = $("frame");
+    f.value = (+f.value + 1) % (+f.max + 1);
+    draw();
+  }, 50);
+};
+
+// ---- ROIs -----------------------------------------------------------------
+const PALETTE = ["#e74c3c","#27ae60","#8e44ad","#e67e22","#16a085","#2980b9",
+                 "#d35400","#c0392b","#7f8c8d","#2c3e50"];
+let ROIS = [], tool = "spot", draft = [], sel = -1;
+const colour = i => PALETTE[i % PALETTE.length];
+const disc = (x, y, r = 3, n = 16) =>
+  Array.from({length: n}, (_, k) => {
+    const a = 2 * Math.PI * k / n;
+    return [Math.round(x + r * Math.cos(a)), Math.round(y + r * Math.sin(a))];
+  });
+
+async function loadRois() {
+  const d = await (await fetch("/api/rois")).json();
+  ROIS = d.rois || []; renderRois(); overlay();
+}
+async function saveRois() {
+  await fetch("/api/rois", { method: "PUT", headers: {"Content-Type": "application/json"},
+                             body: JSON.stringify({ rois: ROIS }) });
+}
+function renderRois() {
+  $("roiList").innerHTML = ROIS.length ? ROIS.map((r, i) => `
+    <div class="r ${i === sel ? "sel" : ""}" data-i="${i}">
+      <span class="sw" style="background:${colour(i)}"></span>
+      <input value="${r.name}" data-i="${i}">
+      <span class="px">${r.points.length}p</span>
+      <span class="x" data-del="${i}">×</span>
+    </div>`).join("") : '<div class="r"><span class="px">none yet</span></div>';
+  $("roiList").querySelectorAll("input").forEach(inp => {
+    inp.onchange = () => { ROIS[+inp.dataset.i].name = inp.value.trim() || "roi"; saveRois(); };
+  });
+  $("roiList").querySelectorAll("[data-del]").forEach(b => {
+    b.onclick = e => { e.stopPropagation();
+      ROIS.splice(+b.dataset.del, 1); sel = -1; renderRois(); overlay(); saveRois(); };
+  });
+  $("roiList").querySelectorAll(".r").forEach(d => {
+    d.onclick = () => { sel = +d.dataset.i; renderRois(); overlay(); };
+  });
+}
+function overlay() {
+  const z = +$("zoom").value, c = $("view"), g = c.getContext("2d");
+  g.lineWidth = 1.5;
+  ROIS.forEach((r, i) => {
+    g.strokeStyle = colour(i);
+    g.beginPath();
+    r.points.forEach(([x, y], k) => k ? g.lineTo(x * z, y * z) : g.moveTo(x * z, y * z));
+    g.closePath(); g.stroke();
+    if (i === sel) { g.fillStyle = colour(i) + "33"; g.fill(); }
+    g.fillStyle = colour(i); g.font = "10px sans-serif";
+    g.fillText(r.name, r.points[0][0] * z + 4, r.points[0][1] * z - 3);
+  });
+  if (draft.length) {
+    g.strokeStyle = "#fff"; g.setLineDash([3, 3]); g.beginPath();
+    draft.forEach(([x, y], k) => k ? g.lineTo(x * z, y * z) : g.moveTo(x * z, y * z));
+    g.stroke(); g.setLineDash([]);
+  }
+}
+
+function pointAt(ev) {
+  const z = +$("zoom").value, r = $("view").getBoundingClientRect();
+  return [Math.round((ev.clientX - r.left) / z), Math.round((ev.clientY - r.top) / z)];
+}
+$("view").onclick = ev => {
+  const [x, y] = pointAt(ev);
+  if (tool === "spot") {
+    ROIS.push({ name: `roi${ROIS.length + 1}`, points: disc(x, y) });
+    sel = ROIS.length - 1; renderRois(); draw(); saveRois();
+  } else {
+    draft.push([x, y]); overlay();
+  }
+};
+$("view").ondblclick = () => {
+  if (tool === "polygon" && draft.length >= 3) {
+    ROIS.push({ name: `roi${ROIS.length + 1}`, points: draft.slice() });
+    sel = ROIS.length - 1;
+  }
+  draft = []; renderRois(); draw(); saveRois();
+};
+$("toolSpot").onclick = () => { tool = "spot";
+  $("toolSpot").classList.add("on"); $("toolPoly").classList.remove("on"); draft = []; draw(); };
+$("toolPoly").onclick = () => { tool = "polygon";
+  $("toolPoly").classList.add("on"); $("toolSpot").classList.remove("on"); };
+$("clearAll").onclick = () => {
+  if (ROIS.length && confirm(`delete all ${ROIS.length} ROIs?`)) {
+    ROIS = []; sel = -1; renderRois(); draw(); saveRois();
+  }
+};
+
+// ---- traces ---------------------------------------------------------------
+$("doTraces").onclick = async () => {
+  if (!ROIS.length) { $("traceLbl").textContent = "draw something first"; return; }
+  $("traceLbl").textContent = "one pass over the recording…";
+  const d = await (await fetch(`/api/traces/${unit.path}/${ch}`)).json();
+  if (d.error) { $("traceLbl").textContent = d.error; return; }
+  plotAll(d);
+  $("traceLbl").textContent = `${d.names.length} ROIs · ${d.traces[0].length} frames · ` +
+    d.names.map((n, i) => `${n} ${d.areas_px[i]}px`).join(" · ");
+};
+function href(p) { return p; }
+$("dlCsv").onclick  = e => { e.preventDefault();
+  location.href = `/api/export/traces/${unit.path}/${ch}.csv`; };
+$("dlZip").onclick  = e => { e.preventDefault(); location.href = "/api/export/rois.zip"; };
+$("dlJson").onclick = e => { e.preventDefault(); location.href = "/api/export/rois.json"; };
+
+function plotAll(d) {
+  const c = $("trace"), g = c.getContext("2d");
+  c.width = c.clientWidth * 2; c.height = c.clientHeight * 2;
+  g.clearRect(0, 0, c.width, c.height);
+  const pad = 6 * 2, n = d.traces.length, band = (c.height - 2 * pad) / n;
+  d.traces.forEach((v, i) => {
+    // one band per ROI, each scaled to itself: a weak bouton beside a strong one is still
+    // readable, and the label carries the counts so nothing about the size is hidden
+    const lo = Math.min(...v), hi = Math.max(...v);
+    g.strokeStyle = colour(i); g.lineWidth = 1.6; g.beginPath();
+    v.forEach((y, k) => {
+      const px = pad + k / (v.length - 1) * (c.width - 2 * pad);
+      const py = pad + (i + 1) * band - (y - lo) / ((hi - lo) || 1) * (band * 0.86);
+      k ? g.lineTo(px, py) : g.moveTo(px, py);
+    });
+    g.stroke();
+    g.fillStyle = colour(i); g.font = "18px sans-serif";
+    g.fillText(`${d.names[i]}  ${(hi - lo).toFixed(0)}`, pad, pad + i * band + 16);
+  });
+}
+
+const _draw = draw;
+draw = function () { _draw(); setTimeout(overlay, 60); };
+
+boot().then(loadRois);
+</script>

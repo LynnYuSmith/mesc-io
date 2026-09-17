@@ -94,6 +94,14 @@ def _writeback(args) -> int:
     return 0
 
 
+def _view(args) -> int:
+    from .viewer import serve
+
+    serve(args.source, port=args.port, open_browser=not args.no_browser,
+          rois_path=args.rois)
+    return 0
+
+
 def _register(args) -> int:
     from .registration import register_file
 
@@ -158,6 +166,18 @@ def main(argv=None) -> int:
                    help="how far, in stored counts, the new frames may differ from the ones "
                         "they replace before the write is refused (default: 60)")
     p.set_defaults(func=_writeback)
+
+    p = sub.add_parser("view",
+                       help="open the recording in a browser: the movie, the file's own "
+                            "numbers, and traces of regions you draw")
+    p.add_argument("source")
+    p.add_argument("--port", type=int, default=8020)
+    p.add_argument("--no-browser", action="store_true",
+                   help="do not open a browser; print the address and wait")
+    p.add_argument("--rois", default=None,
+                   help="where the drawn regions are kept (default: beside the CWD, never "
+                        "beside the raw file — raw data is not ours to add files to)")
+    p.set_defaults(func=_view)
 
     p = sub.add_parser("register",
                        help="motion-correct units against one shared reference (needs Suite2p)")

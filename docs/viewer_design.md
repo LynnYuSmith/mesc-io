@@ -168,6 +168,10 @@ What it is not: the master's number. The ROI is what was drawn here (a 3-px disc
 Suite2p mask) and the leading trim is not applied (the frames stay aligned with the movie;
 the black head is greyed instead). Same method, this ROI.
 
+Typed vertical limits are kept **per signal**: raw and dF/F live on different scales, so a
+switch neither throws yours away nor applies raw's numbers to dF/F — each signal comes back
+with the limits it had.
+
 ## Three kinds of ROI, and a size you can change (2026-09-18)
 
 `spot · rect · polygon`. A spot is a centre and a radius, a rect a centre and w × h; both

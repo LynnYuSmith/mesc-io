@@ -236,7 +236,17 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   for (let i = 0; i < 40; i++) { await sleep(250); if (await ev("TR && TR.params && TR.params.window_s === 20")) break; }
   if (await ev("TR.params.window_s") !== 20) fail("changing the window did not refetch with it");
   console.log("  dF/F knobs refetch: window", await ev("TR.params.window_s"), "q", await ev("TR.params.quantile"));
-  await ev("document.getElementById('sigRaw').click(); 'ok'");
+  // typed limits survive the raw | dF/F switch, one set per signal
+  await ev("(()=>{const a=document.getElementById('yLo'), b=document.getElementById('yHi'); a.value='-0.5'; b.value='1.5'; b.dispatchEvent(new Event('change'));})(); 'ok'"); await sleep(100);
+  await ev("document.getElementById('sigRaw').click(); 'ok'"); await sleep(100);
+  if (await ev("V.yFixed") !== null) fail("dF/F's typed limits were applied to raw");
+  await ev("(()=>{const a=document.getElementById('yLo'), b=document.getElementById('yHi'); a.value='-400'; b.value='-100'; b.dispatchEvent(new Event('change'));})(); 'ok'"); await sleep(100);
+  await ev("document.getElementById('sigDff').click(); 'ok'"); await sleep(100);
+  let yb = JSON.parse(await ev("JSON.stringify(V.yFixed)")); if (!yb || yb[0] !== -0.5 || yb[1] !== 1.5) fail("dF/F's limits did not come back: " + JSON.stringify(yb));
+  await ev("document.getElementById('sigRaw').click(); 'ok'"); await sleep(100);
+  yb = JSON.parse(await ev("JSON.stringify(V.yFixed)")); if (!yb || yb[0] !== -400) fail("raw's limits did not come back: " + JSON.stringify(yb));
+  console.log("  typed limits kept per signal across the switch:", "raw", yb, "dff", JSON.parse(await ev("JSON.stringify(V.yFixedBy.dff)")));
+  await ev("document.getElementById('yAuto').click(); 'ok'");
 
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);

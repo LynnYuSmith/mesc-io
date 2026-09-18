@@ -22,13 +22,19 @@ Endpoints:
     GET  /api/view                          → the saved view (unit, frame, zoom, …) or {}
     PUT  /api/view                          → replace the saved view (written beside the ROIs)
     GET  /api/trace/{unit}/{ch}?x=&y=&r=    → JSON time course of a disc, in reader units
-    GET  /api/rois                          → the ROI set
-    PUT  /api/rois                          → replace the ROI set (whole list, atomically)
+    GET  /api/rois?unit=                    → that unit's ROI set (+ which units have any)
+    PUT  /api/rois                          → replace ONE unit's set  <- {"unit": ..., "rois": [...]}
+    POST /api/rois/copy                     → copy a unit's set onto another  <- {"from": ..., "to": ...}
     GET  /api/traces/{unit}/{ch}            → JSON: every ROI's time course, in ONE pass
     GET  /api/export/traces/{unit}/{ch}.csv → CSV, one column per ROI
-    GET  /api/export/rois.json              → the ROI set as stored
-    GET  /api/export/rois.zip               → ImageJ ROI set, openable in Fiji and by our own
-                                              pipeline, which reads exactly this format
+    GET  /api/export/rois.json              → every unit's ROI set, as stored
+    GET  /api/export/rois.zip?unit=         → that unit's ROIs as an ImageJ set, openable in Fiji
+                                              and by our own pipeline, which reads exactly this format
+
+ROIs belong to a UNIT. The field moves between areas and even between repeats of one area,
+so a set drawn on MUnit_3 says nothing about MUnit_7; the store is keyed by unit path. A file
+in the old shape (one flat list) is carried over onto the first unit and written back in the
+new shape, with a line in the log saying so.
 
 The `.mesc` is opened read-only and never written. ROIs live in a sidecar JSON of their own,
 NOT beside the raw file: raw data is not ours to add files to.
@@ -191,14 +197,19 @@ class _Handler(BaseHTTPRequestHandler):
             if parts[:2] == ["api", "trace"] and len(parts) >= 4:
                 return self._trace("/".join(parts[2:-1]), int(parts[-1]), q)
             if parts[:2] == ["api", "rois"]:
-                return self._json({"rois": self._load_rois(), "path": str(self.rois_path)})
+                unit = (q.get("unit") or [""])[0]
+                store = self._load_store()
+                return self._json({"unit": unit, "rois": store.get(unit, []) if unit else [],
+                                   "units_with_rois": {k: len(v) for k, v in store.items() if v},
+                                   "path": str(self.rois_path)})
             if parts[:2] == ["api", "traces"] and len(parts) >= 4:
                 return self._json(self._roi_traces("/".join(parts[2:-1]), int(parts[-1])))
             if parts[:3] == ["api", "export", "rois.json"]:
-                body = json.dumps({"rois": self._load_rois()}, indent=2).encode()
+                body = json.dumps({"source": str(self.mesc_path), "units": self._load_store()},
+                                  indent=2).encode()
                 return self._download(body, "application/json", "rois.json")
             if parts[:3] == ["api", "export", "rois.zip"]:
-                return self._export_imagej()
+                return self._export_imagej((q.get("unit") or [""])[0])
             if parts[:3] == ["api", "export", "traces"] and len(parts) >= 5:
                 return self._export_csv("/".join(parts[3:-1]), int(parts[-1].split(".")[0]))
             self._json({"error": f"no route for {url.path}"}, 404)
@@ -220,29 +231,73 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "no route"}, 404)
             n = int(self.headers.get("Content-Length", 0))
             payload = json.loads(self.rfile.read(n) or b"{}")
-            rois = payload.get("rois", [])
+            unit, rois = payload.get("unit"), payload.get("rois", [])
+            if not unit or not isinstance(unit, str):
+                raise ValueError("expected {'unit': 'MSession_0/MUnit_3', 'rois': [...]}")
             if not isinstance(rois, list):
                 raise ValueError("expected {'rois': [...]}")
-            self._save_rois(rois)
-            self._json({"saved": len(rois), "path": str(self.rois_path)})
+            store = self._load_store()
+            if rois:
+                store[unit] = rois
+            else:
+                store.pop(unit, None)
+            self._save_store(store)
+            self._json({"unit": unit, "saved": len(rois), "path": str(self.rois_path)})
         except Exception as exc:                             # noqa: BLE001
             self._fail(exc)
 
-    # -- the ROI set ------------------------------------------------------
-    def _load_rois(self):
-        if not self.rois_path.exists():
-            return []
+    def do_POST(self):                                       # noqa: N802
+        url = urlparse(self.path)
         try:
-            return json.loads(self.rois_path.read_text()).get("rois", [])
-        except (json.JSONDecodeError, OSError):
-            return []
+            if [p for p in url.path.split("/") if p] != ["api", "rois", "copy"]:
+                return self._json({"error": "no route"}, 404)
+            n = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(n) or b"{}")
+            src, dst = payload.get("from"), payload.get("to")
+            if not (src and dst) or src == dst:
+                raise ValueError("expected {'from': <unit>, 'to': <another unit>}")
+            store = self._load_store()
+            if not store.get(src):
+                raise ValueError(f"{src} has no ROIs to copy")
+            store[dst] = [dict(r) for r in store[src]]
+            self._save_store(store)
+            self._json({"unit": dst, "copied": len(store[dst]), "from": src})
+        except Exception as exc:                             # noqa: BLE001
+            self._fail(exc)
 
-    def _save_rois(self, rois):
+    # -- the ROI store: {unit path: [roi, ...]} ---------------------------------
+    def _load_store(self) -> dict:
+        if not self.rois_path.exists():
+            return {}
+        try:
+            data = json.loads(self.rois_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+        units = data.get("units")
+        if isinstance(units, dict):
+            return {k: v for k, v in units.items() if isinstance(v, list)}
+        # the old shape: one flat list for the whole file. Carry it onto the first unit rather
+        # than lose it, and say so -- it may or may not be the unit it was drawn on.
+        legacy = data.get("rois")
+        if isinstance(legacy, list) and legacy:
+            with self._file() as f:
+                first = f.units()[0].path
+            print(f"  {self.rois_path.name}: {len(legacy)} ROIs in the old file-wide shape, "
+                  f"carried onto {first}; check they belong there", flush=True)
+            store = {first: legacy}
+            self._save_store(store)
+            return store
+        return {}
+
+    def _load_rois(self, unit: str) -> list:
+        return self._load_store().get(unit, [])
+
+    def _save_store(self, store: dict):
         """Written through a temporary file and renamed: a crash mid-write would otherwise
         leave a truncated set, and the set is the only record of hand-drawn work."""
         self.rois_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.rois_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"source": str(self.mesc_path), "rois": rois}, indent=2))
+        tmp.write_text(json.dumps({"source": str(self.mesc_path), "units": store}, indent=2))
         tmp.replace(self.rois_path)
 
     # -- the view: where you were looking, saved by itself -------------------
@@ -281,7 +336,7 @@ class _Handler(BaseHTTPRequestHandler):
         One pass, not one per ROI: the file is gigabytes, and reading it once per ROI would
         turn a dozen boutons into a dozen full reads of the same bytes.
         """
-        rois = self._load_rois()
+        rois = self._load_rois(unit)
         with self._file() as f:
             u = f.unit(unit)
             if not rois:
@@ -315,13 +370,15 @@ class _Handler(BaseHTTPRequestHandler):
         name = f"{self.mesc_path.stem}_{unit.replace('/', '_')}_ch{ch}_traces.csv"
         self._download(("\n".join(lines) + "\n").encode(), "text/csv", name)
 
-    def _export_imagej(self):
-        """The ROI set as an ImageJ `.zip` — the format Fiji opens and our own pipeline reads,
-        so a set drawn here can go straight into an analysis instead of being retyped."""
+    def _export_imagej(self, unit: str):
+        """One unit's ROI set as an ImageJ `.zip` — the format Fiji opens and our own pipeline
+        reads, so a set drawn here can go straight into an analysis instead of being retyped."""
         import roifile
-        rois = self._load_rois()
+        if not unit:
+            raise ValueError("say which unit: /api/export/rois.zip?unit=MSession_0/MUnit_3")
+        rois = self._load_rois(unit)
         if not rois:
-            raise ValueError("no ROIs to export")
+            raise ValueError(f"{unit} has no ROIs to export")
         out = io.BytesIO()
         made = []
         for i, r in enumerate(rois):
@@ -333,7 +390,8 @@ class _Handler(BaseHTTPRequestHandler):
         with zipfile.ZipFile(out, "w") as zf:
             for ij in made:
                 zf.writestr(f"{ij.name}.roi", ij.tobytes())
-        self._download(out.getvalue(), "application/zip", f"{self.mesc_path.stem}_rois.zip")
+        self._download(out.getvalue(), "application/zip",
+                       f"{self.mesc_path.stem}_{unit.replace('/', '_')}_rois.zip")
 
     def _describe(self):
         with self._file() as f:

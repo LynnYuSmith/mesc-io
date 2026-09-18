@@ -178,3 +178,83 @@ def test_a_non_object_view_is_refused(server):
 def test_a_corrupt_view_file_reads_as_empty(server, tmp_path):
     (tmp_path / "rec_view.json").write_text("{not json")
     assert get_json(server + "/api/view")["view"] == {}
+
+
+# --- ROIs belong to a unit ----------------------------------------------------------------
+
+def post_json(url, payload):
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        return json.loads(r.read())
+
+
+SPOT = {"name": "roi1", "points": [[3, 2], [4, 2], [4, 3], [3, 3]]}
+
+
+@pytest.fixture
+def two_unit_server(recording, tmp_path):
+    with h5py.File(recording, "a") as f:
+        src = f["MSession_0/MUnit_0"]
+        dst = f["MSession_0"].create_group("MUnit_1")
+        dst.create_dataset("Channel_0", data=src["Channel_0"][:])
+        for k, v in src.attrs.items():
+            dst.attrs[k] = v
+    _Handler.mesc_path = recording
+    _Handler.rois_path = tmp_path / "rec_rois.json"
+    _Handler._cache = {}
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    httpd = HTTPServer(("127.0.0.1", port), _Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{port}"
+    httpd.shutdown()
+
+
+def test_a_set_saved_on_one_unit_is_not_seen_from_another(two_unit_server):
+    s = two_unit_server
+    put_json(s + "/api/rois", {"unit": "MSession_0/MUnit_0", "rois": [SPOT]})
+    assert get_json(s + "/api/rois?unit=MSession_0/MUnit_0")["rois"] == [SPOT]
+    assert get_json(s + "/api/rois?unit=MSession_0/MUnit_1")["rois"] == []
+    assert get_json(s + "/api/rois?unit=MSession_0/MUnit_1")["units_with_rois"] == {"MSession_0/MUnit_0": 1}
+
+
+def test_traces_and_the_imagej_export_use_that_units_set(two_unit_server):
+    s = two_unit_server
+    put_json(s + "/api/rois", {"unit": "MSession_0/MUnit_0", "rois": [SPOT]})
+    assert get_json(s + "/api/traces/MSession_0/MUnit_0/0")["names"] == ["roi1"]
+    assert get_json(s + "/api/traces/MSession_0/MUnit_1/0")["names"] == []
+    body, ct = get(s + "/api/export/rois.zip?unit=MSession_0/MUnit_0")
+    assert ct.startswith("application/zip") and body[:2] == b"PK"
+    with pytest.raises(urllib.error.HTTPError):
+        get(s + "/api/export/rois.zip?unit=MSession_0/MUnit_1")
+
+
+def test_copy_brings_one_units_set_onto_another(two_unit_server):
+    s = two_unit_server
+    put_json(s + "/api/rois", {"unit": "MSession_0/MUnit_0", "rois": [SPOT]})
+    r = post_json(s + "/api/rois/copy", {"from": "MSession_0/MUnit_0", "to": "MSession_0/MUnit_1"})
+    assert r["copied"] == 1
+    got = get_json(s + "/api/rois?unit=MSession_0/MUnit_1")["rois"]
+    assert got == [SPOT] and got is not SPOT
+    # and they are independent afterwards
+    put_json(s + "/api/rois", {"unit": "MSession_0/MUnit_1", "rois": []})
+    assert get_json(s + "/api/rois?unit=MSession_0/MUnit_0")["rois"] == [SPOT]
+
+
+def test_a_put_without_a_unit_is_refused(two_unit_server):
+    req = urllib.request.Request(two_unit_server + "/api/rois", data=json.dumps({"rois": [SPOT]}).encode(),
+                                 method="PUT", headers={"Content-Type": "application/json"})
+    with pytest.raises(urllib.error.HTTPError) as e:
+        urllib.request.urlopen(req, timeout=5)
+    assert e.value.code == 400
+
+
+def test_the_old_file_wide_shape_is_carried_onto_the_first_unit(two_unit_server, tmp_path, capsys):
+    (tmp_path / "rec_rois.json").write_text(json.dumps({"source": "x", "rois": [SPOT]}))
+    got = get_json(two_unit_server + "/api/rois?unit=MSession_0/MUnit_0")["rois"]
+    assert got == [SPOT]
+    saved = json.loads((tmp_path / "rec_rois.json").read_text())
+    assert "units" in saved and saved["units"] == {"MSession_0/MUnit_0": [SPOT]}
+    assert "old file-wide shape" in capsys.readouterr().out

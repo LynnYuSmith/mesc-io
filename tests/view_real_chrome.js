@@ -55,7 +55,8 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (n !== 1) fail("dragging the spot added an ROI instead of moving it");
   if (Math.abs((c1[0] - c0[0]) - 20) > 1 || Math.abs(c1[1] - c0[1]) > 1) fail("the spot did not move by 20 px in x");
   // the move reached the server
-  const saved = await getJSON(URL_ + "api/rois"); if (Math.abs(saved.rois[0].points[0][0] - c1[0]) > 0) fail("the moved ROI was not saved");
+  const saved = await getJSON(URL_ + "api/rois?unit=" + encodeURIComponent(await ev("unit.path")));
+  if (Math.abs(saved.rois[0].points[0][0] - c1[0]) > 0) fail("the moved ROI was not saved");
   // a click on the moved spot selects it and does NOT add another
   await mouse("mouseMoved", tx, ty); await mouse("mousePressed", tx, ty, { clickCount: 1 }); await mouse("mouseReleased", tx, ty, { clickCount: 1 }); await sleep(150);
   if (await ev("ROIS.length") !== 1) fail("clicking on an ROI added a new one on top");
@@ -118,6 +119,23 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); await sleep(2000);
   if (await ev("TR ? TR.names.length : 0") < 1) fail("Enter did not compute the traces");
   console.log("  Enter: traces computed");
+
+  // 2c. ROIs belong to the unit: draw on unit 0, switch to unit 1 -> empty; copy from -> present; back -> intact
+  await ev("document.querySelectorAll('.u')[0].click(); 'ok'"); await sleep(600);
+  await ev("ROIS.length=0; addRoi({name:'a', points: disc(30,40)}); addRoi({name:'b', points: disc(70,60)}); 'ok'"); await sleep(400);
+  await ev("document.querySelectorAll('.u')[1].click(); 'ok'"); await sleep(700);
+  const n1 = await ev("ROIS.length"); const menu = await ev("document.getElementById('copyFrom').style.display");
+  console.log("  unit 1 rois:", n1, "copy menu shown:", menu === "");
+  if (n1 !== 0) fail("unit 1 sees unit 0's ROIs");
+  if (menu !== "") fail("the copy-from menu is hidden although unit 0 has ROIs");
+  await ev("const c=document.getElementById('copyFrom'); c.value='MSession_0/MUnit_0'; c.dispatchEvent(new Event('change')); 'ok'"); await sleep(800);
+  if (await ev("ROIS.length") !== 2) fail("copy from unit 0 did not bring 2 ROIs");
+  await ev("delRoi(0); 'ok'"); await sleep(400);
+  await ev("document.querySelectorAll('.u')[0].click(); 'ok'"); await sleep(700);
+  if (await ev("ROIS.length") !== 2) fail("deleting on unit 1 touched unit 0's set");
+  console.log("  per-unit ROIs: independent, copy works");
+  await ev("document.querySelectorAll('.u')[1].click(); 'ok'"); await sleep(700);
+  await ev("ROIS.length=0; saveRois(); addRoi({name:'roi9', points: disc(60,60)}); 'ok'"); await sleep(400);
 
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);

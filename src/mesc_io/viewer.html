@@ -165,7 +165,8 @@
       <div class="row"><span>high</span><input type="range" id="hi" min="90" max="100" step="0.1" value="99.5"><span id="hiVal">99.5 %</span></div>
     </details>
 
-    <h2>rois <span id="roiCount" class="faint"></span></h2>
+    <h2>rois <span id="roiCount" class="faint"></span> <span id="roiUnit" class="faint" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+      <select id="copyFrom" style="float:right;font-size:11px;padding:1px 4px;margin-top:-3px;display:none"></select></h2>
     <input id="roiFilter" placeholder="filter by name" type="text">
     <div id="roiList"></div>
     <div id="exports">
@@ -205,7 +206,7 @@ const V = {
   zoom: { x: 0, y: 0, w: 0, h: 0 },        // in image pixels; w=0 means the whole frame
   traceMode: "stack", grid: true, traceZoom: null,   // [t0, t1] in frames, or null
   valueZoom: null,                          // overlay only: [lo, hi] in reader units, or null
-  sel: -1, shown: {},                      // roi name -> drawn in the trace strip
+  sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
   tracesH: 260,
 };
 let FILE = null, unit = null, playing = null;
@@ -214,6 +215,9 @@ const PALETTE = ["#e74c3c","#2ecc71","#9b59b6","#e67e22","#1abc9c","#3498db",
                  "#f1c40f","#e84393","#7f8c8d","#00cec9"];
 const colour = i => PALETTE[i % PALETTE.length];
 const fs = () => (unit && unit.frame_rate_hz) || 0;
+/* which ROIs are drawn in the trace strip, for the unit on screen */
+const shown = () => { if (!unit) return {}; if (typeof V.shown[unit.path] !== "object" || !V.shown[unit.path]) V.shown[unit.path] = {}; return V.shown[unit.path]; };
+let ROI_UNITS = {};                        // unit path -> count, for the "copy from" menu
 
 /* ------------------------------------------------------------------------------------------
    the view, saved by itself. Debounced; badge goes red if the server will not take it. */
@@ -288,7 +292,10 @@ function pick(i, restoring) {
   ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
   const mine = FILE.findings.filter(f => !f.units.length || f.units.some(u => unit.path.endsWith(u) || u.endsWith(unit.name)));
   $("findings").innerHTML = mine.map(f => `<div class="finding ${f.level}">${esc(f.message)}</div>`).join("");
-  draw(); plotTraces();
+  $("roiUnit").textContent = "· " + unit.name;
+  if (!restoring) V.sel = -1;
+  draw();
+  loadRois().then(() => { renderCopyMenu(); plotTraces(); });
   if (!restoring) saveView();
 }
 const fmt = v => (v == null ? "—" : (Math.round(v * 10) / 10).toString());
@@ -504,13 +511,37 @@ window.addEventListener("keydown", e => {
 const disc = (x, y, r = 3, n = 16) => Array.from({ length: n }, (_, k) => {
   const a = 2 * Math.PI * k / n; return [Math.round(x + r * Math.cos(a)), Math.round(y + r * Math.sin(a))]; });
 const nextName = () => { let n = ROIS.length + 1; while (ROIS.some(r => r.name === "roi" + n)) n++; return "roi" + n; };
-async function loadRois() { const d = await (await fetch("/api/rois")).json(); ROIS = d.rois || []; renderRois(); paint(); }
-async function saveRois() {
-  try { const r = await fetch("/api/rois", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rois: ROIS }) });
-        badge(r.ok ? "saved" : "ROIs NOT saved", !r.ok); } catch (e) { badge("ROIs NOT saved", true); }
+/* ROIs belong to the unit on screen. The field moves between areas and between repeats, so
+   a set drawn on one unit is loaded for that unit only; "copy from" brings another unit's
+   set over when the field really is the same. */
+async function loadRois() {
+  if (!unit) return;
+  const d = await (await fetch(`/api/rois?unit=${encodeURIComponent(unit.path)}`)).json();
+  ROIS = d.rois || []; ROI_UNITS = d.units_with_rois || {}; draft = [];
+  if (V.sel >= ROIS.length) V.sel = -1;
+  renderRois(); paint();
 }
-function addRoi(r) { ROIS.push(r); V.sel = ROIS.length - 1; V.shown[r.name] = true; TR = null; renderRois(); paint(); saveRois(); saveView(); }
-function delRoi(i) { const [r] = ROIS.splice(i, 1); delete V.shown[r.name]; V.sel = -1; TR = null; renderRois(); paint(); plotTraces(); saveRois(); saveView(); }
+async function saveRois() {
+  if (!unit) return;
+  try { const r = await fetch("/api/rois", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit: unit.path, rois: ROIS }) });
+        badge(r.ok ? "saved" : "ROIs NOT saved", !r.ok);
+        ROI_UNITS[unit.path] = ROIS.length; if (!ROIS.length) delete ROI_UNITS[unit.path]; renderCopyMenu(); }
+  catch (e) { badge("ROIs NOT saved", true); }
+}
+function addRoi(r) { ROIS.push(r); V.sel = ROIS.length - 1; shown()[r.name] = true; TR = null; renderRois(); paint(); saveRois(); saveView(); }
+function delRoi(i) { const [r] = ROIS.splice(i, 1); delete shown()[r.name]; V.sel = -1; TR = null; renderRois(); paint(); plotTraces(); saveRois(); saveView(); }
+function renderCopyMenu() {
+  const sel = $("copyFrom"), others = Object.entries(ROI_UNITS).filter(([u, n]) => unit && u !== unit.path && n > 0);
+  sel.innerHTML = `<option value="">copy from…</option>` + others.map(([u, n]) => `<option value="${esc(u)}">${esc(u.split("/").pop())} · ${n}</option>`).join("");
+  sel.style.display = others.length ? "" : "none";
+}
+$("copyFrom").onchange = async () => {
+  const src = $("copyFrom").value; if (!src || !unit) return;
+  if (ROIS.length && !confirm(`Replace this unit's ${ROIS.length} ROIs with the ${ROI_UNITS[src]} from ${src.split("/").pop()}?`)) { $("copyFrom").value = ""; return; }
+  const r = await fetch("/api/rois/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: src, to: unit.path }) });
+  if (!r.ok) { badge("copy failed", true); return; }
+  $("copyFrom").value = ""; V.sel = -1; TR = null; await loadRois(); plotTraces(); saveView();
+};
 function renderRois() {
   const q = $("roiFilter").value.trim().toLowerCase();
   $("roiCount").textContent = ROIS.length ? `${ROIS.length}` : "";
@@ -518,7 +549,7 @@ function renderRois() {
   const rows = ROIS.map((r, i) => ({ r, i })).filter(({ r }) => !q || r.name.toLowerCase().includes(q));
   $("roiList").innerHTML = rows.length ? rows.map(({ r, i }) => `
     <div class="r ${i === V.sel ? "sel" : ""}" data-i="${i}">
-      <input type="checkbox" data-show="${i}" ${V.shown[r.name] !== false ? "checked" : ""} title="draw in the trace strip">
+      <input type="checkbox" data-show="${i}" ${shown()[r.name] !== false ? "checked" : ""} title="draw in the trace strip">
       <span class="sw" style="background:${colour(i)}"></span>
       <span class="nm" data-i="${i}" title="double-click to rename">${esc(r.name)}</span>
       <span class="px">${r.points.length <= 16 && r.points.length >= 12 ? "spot" : "poly"} · ${r.points.length}p</span>
@@ -536,7 +567,7 @@ function renderRois() {
       const commit = (apply) => {
         if (done) return; done = true;
         if (apply) { const r = ROIS[i], old = r.name; r.name = inp.value.trim() || old;
-          if (V.shown[old] !== undefined) { V.shown[r.name] = V.shown[old]; if (old !== r.name) delete V.shown[old]; }
+          const sh = shown(); if (sh[old] !== undefined) { sh[r.name] = sh[old]; if (old !== r.name) delete sh[old]; }
           TR = null; paint(); saveRois(); saveView(); }
         renderRois();
       };
@@ -546,7 +577,7 @@ function renderRois() {
     };
   });
   $("roiList").querySelectorAll("input[type=checkbox]").forEach(cb => {
-    cb.onclick = e => { e.stopPropagation(); V.shown[ROIS[+cb.dataset.show].name] = cb.checked; plotTraces(); saveView(); };
+    cb.onclick = e => { e.stopPropagation(); shown()[ROIS[+cb.dataset.show].name] = cb.checked; plotTraces(); saveView(); };
   });
   $("roiList").querySelectorAll("[data-del]").forEach(b => { b.onclick = e => { e.stopPropagation(); delRoi(+b.dataset.del); }; });
   $("roiList").querySelectorAll(".r[data-i]").forEach(d => { d.onclick = () => { V.sel = +d.dataset.i; renderRois(); paint(); plotTraces(); saveView(); }; });
@@ -557,11 +588,11 @@ $("delRoi").onclick = () => { if (V.sel >= 0) delRoi(V.sel); };
 $("toolSpot").onclick = () => { tool = "spot"; $("toolSpot").classList.add("on"); $("toolPoly").classList.remove("on"); draft = []; paint(); };
 $("toolPoly").onclick = () => { tool = "polygon"; $("toolPoly").classList.add("on"); $("toolSpot").classList.remove("on"); };
 $("dlCsv").onclick = e => { e.preventDefault(); if (unit) location.href = `/api/export/traces/${unit.path}/${V.ch}.csv`; };
-$("dlZip").onclick = e => { e.preventDefault(); if (!ROIS.length) { badge("no ROIs to export", true); setTimeout(() => badge("saved"), 1500); return; } location.href = "/api/export/rois.zip"; };
+$("dlZip").onclick = e => { e.preventDefault(); if (!ROIS.length) { badge("no ROIs to export", true); setTimeout(() => badge("saved"), 1500); return; } location.href = `/api/export/rois.zip?unit=${encodeURIComponent(unit.path)}`; };
 $("clearAll").onclick = () => {
   if (!ROIS.length) return;
-  if (!confirm(`Remove all ${ROIS.length} ROIs? The set on disk is replaced; export first if you want to keep it.`)) return;
-  ROIS = []; V.sel = -1; V.shown = {}; TR = null; draft = []; renderRois(); paint(); plotTraces(); saveRois(); saveView();
+  if (!confirm(`Remove all ${ROIS.length} ROIs of ${unit.name}? Export first if you want to keep them.`)) return;
+  ROIS = []; V.sel = -1; V.shown[unit.path] = {}; TR = null; draft = []; renderRois(); paint(); plotTraces(); saveRois(); saveView();
 };
 $("dlJson").onclick = e => { e.preventDefault(); location.href = "/api/export/rois.json"; };
 
@@ -578,7 +609,7 @@ $("doTraces").onclick = async () => {
 function visibleTraces() {
   if (!TR) return [];
   return TR.names.map((n, i) => ({ name: n, i, v: TR.traces[i], area: TR.areas_px[i] }))
-                 .filter(t => V.shown[t.name] !== false);
+                 .filter(t => shown()[t.name] !== false);
 }
 function plotTraces() {
   const c = $("trace"), box = $("traceScroll"), g = c.getContext("2d");
@@ -700,7 +731,7 @@ $("splitter").onmousedown = ev => { sdown = { y: ev.clientY, h: V.tracesH }; ev.
 window.addEventListener("mousemove", ev => { if (!sdown) return; V.tracesH = Math.max(120, Math.min(window.innerHeight * .7, sdown.h + (sdown.y - ev.clientY))); applyStatic(); });
 window.addEventListener("mouseup", () => { if (sdown) { sdown = null; plotTraces(); saveView(); } });
 
-boot().then(loadRois);
+boot();
 </script>
 </body>
 </html>

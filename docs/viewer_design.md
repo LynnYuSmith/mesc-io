@@ -127,8 +127,12 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   waits 230 ms; a second click or a double-click within that cancels it. One gesture, one
   meaning.
 
-## Still open
+## ROIs belong to a unit (2026-09-18)
 
-* ROIs are one set for the whole file, as before. Whether a set should be per unit (the
-  field moves between areas) is a data question, not a layout one — it stays as it is until
-  it bites.
+It bit the same afternoon: the field moves between areas and between repeats, and a set
+drawn on MUnit_3 says nothing about MUnit_7. The store is keyed by unit path
+(`{"units": {"MSession_0/MUnit_3": [...]}}`); the list, the traces, the ImageJ export and
+"clear all" are all of the unit on screen, whose name sits in the header. A **copy from…**
+menu appears when another unit has ROIs, for the case where the field really is the same.
+A file in the old flat shape is carried onto the first unit and rewritten, with a line in the
+log saying to check it.

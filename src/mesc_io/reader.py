@@ -18,6 +18,7 @@ Read-only. Nothing here modifies a file.
 """
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
@@ -72,6 +73,10 @@ class Unit:
     pixel_size_um: Optional[float]
     comment: str
     channels: List[Channel]
+    #: The microscope STAGE position (VirtX/VirtY/VirtZ, µm) — where the objective physically
+    #: was. Not the injection-relative numbers people type into comments, and not
+    #: ``GeomTransTransl``, whose x and y are zero. None when the file does not carry it.
+    stage_um: Optional[Dict[str, float]] = None
 
     @property
     def shape(self):
@@ -252,7 +257,35 @@ class MescFile:
         return Unit(name=name, session=session, n_frames=int(n), height=int(h), width=int(w),
                     dtype=str(first.dtype), frame_rate_hz=rate,
                     pixel_size_um=px if px and px > 0 else None,
-                    comment=_text(_attr(a, "Comment")), channels=channels)
+                    comment=_text(_attr(a, "Comment")), channels=channels,
+                    stage_um=_stage_position(a))
+
+
+def _stage_position(attrs) -> Optional[Dict[str, float]]:
+    """VirtX/VirtY/VirtZ from ``MeasurementParamsXML``, or None.
+
+    Decoded as latin-1: the block carries a µ sign that is not UTF-8. Anything unparseable
+    is None rather than an exception — a viewer must open a file whose XML is odd.
+    """
+    xml = _attr(attrs, "MeasurementParamsXML")
+    if xml is None:
+        return None
+    if isinstance(xml, (bytes, bytearray)):
+        xml = bytes(xml).decode("latin-1", "replace")
+    elif isinstance(xml, np.ndarray):
+        xml = bytes(int(c) for c in xml.ravel() if 0 < int(c) < 256).decode("latin-1", "replace")
+    try:
+        root = ET.fromstring(str(xml).rstrip("\x00"))
+    except ET.ParseError:
+        return None
+    out: Dict[str, float] = {}
+    for ax in root.iter("axis"):
+        if ax.get("attribute") == "AttributePosition" and ax.get("id") in ("VirtX", "VirtY", "VirtZ"):
+            try:
+                out[ax.get("id")[-1].lower()] = float(ax.get("value"))
+            except (TypeError, ValueError):
+                pass
+    return out or None
 
 
 def _unit_sort_key(name: str):

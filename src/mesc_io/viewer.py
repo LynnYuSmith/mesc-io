@@ -15,8 +15,12 @@ itself — all from `mesc-io`, all read from the file's attributes rather than a
 
 Endpoints:
     GET  /api/file                          → units, rates, pixel sizes, comments, check findings
-    GET  /api/frame/{unit}/{ch}/{i}         → PNG of one frame       (?lo=&hi= percentile window)
+    GET  /api/frame/{unit}/{ch}/{i}         → PNG of one frame       (?lo=&hi= percentile window,
+                                              ?n= average of n frames centred on i)
     GET  /api/mean/{unit}/{ch}              → PNG of the mean image  (?lo=&hi=)
+    GET  /api/thumb/{unit}/{ch}             → small PNG of the mean image, for the unit list
+    GET  /api/view                          → the saved view (unit, frame, zoom, …) or {}
+    PUT  /api/view                          → replace the saved view (written beside the ROIs)
     GET  /api/trace/{unit}/{ch}?x=&y=&r=    → JSON time course of a disc, in reader units
     GET  /api/rois                          → the ROI set
     PUT  /api/rois                          → replace the ROI set (whole list, atomically)
@@ -180,6 +184,10 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._frame("/".join(parts[2:-2]), int(parts[-2]), int(parts[-1]), q)
             if parts[:2] == ["api", "mean"] and len(parts) >= 4:
                 return self._mean("/".join(parts[2:-1]), int(parts[-1]), q)
+            if parts[:2] == ["api", "thumb"] and len(parts) >= 4:
+                return self._thumb("/".join(parts[2:-1]), int(parts[-1]), q)
+            if parts[:2] == ["api", "view"]:
+                return self._json({"view": self._load_view(), "path": str(self.view_path)})
             if parts[:2] == ["api", "trace"] and len(parts) >= 4:
                 return self._trace("/".join(parts[2:-1]), int(parts[-1]), q)
             if parts[:2] == ["api", "rois"]:
@@ -200,7 +208,15 @@ class _Handler(BaseHTTPRequestHandler):
     def do_PUT(self):                                        # noqa: N802
         url = urlparse(self.path)
         try:
-            if [p for p in url.path.split("/") if p][:2] != ["api", "rois"]:
+            parts = [p for p in url.path.split("/") if p]
+            if parts[:2] == ["api", "view"]:
+                n = int(self.headers.get("Content-Length", 0))
+                view = json.loads(self.rfile.read(n) or b"{}")
+                if not isinstance(view, dict):
+                    raise ValueError("expected a JSON object")
+                self._save_view(view)
+                return self._json({"saved": True, "path": str(self.view_path)})
+            if parts[:2] != ["api", "rois"]:
                 return self._json({"error": "no route"}, 404)
             n = int(self.headers.get("Content-Length", 0))
             payload = json.loads(self.rfile.read(n) or b"{}")
@@ -228,6 +244,28 @@ class _Handler(BaseHTTPRequestHandler):
         tmp = self.rois_path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"source": str(self.mesc_path), "rois": rois}, indent=2))
         tmp.replace(self.rois_path)
+
+    # -- the view: where you were looking, saved by itself -------------------
+    # Same idea as pupil-monitor's sidecar and the runner's session file: no button. Unit,
+    # channel, frame, averaging window, contrast, zoom, trace mode -- written on every change
+    # so reopening the file puts you back where you were.
+    @property
+    def view_path(self) -> Path:
+        return self.rois_path.with_name(self.rois_path.stem.replace("_rois", "") + "_view.json")
+
+    def _load_view(self):
+        if not self.view_path.exists():
+            return {}
+        try:
+            return json.loads(self.view_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_view(self, view):
+        self.view_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.view_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"source": str(self.mesc_path), **view}, indent=1))
+        tmp.replace(self.view_path)
 
     def _download(self, body: bytes, ctype: str, filename: str):
         self.send_response(200)
@@ -305,6 +343,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "frame_rate_hz": u.frame_rate_hz, "duration_s": u.duration_s,
                 "pixel_size_um": u.pixel_size_um, "comment": u.comment,
                 "channels": [c.name for c in u.channels],
+                "stage_um": u.stage_um,
             } for u in f.units()]
         rep = mesc_check(self.mesc_path)
         return {"file": self.mesc_path.name, "path": str(self.mesc_path), "units": units,
@@ -316,23 +355,55 @@ class _Handler(BaseHTTPRequestHandler):
         return float(q.get("lo", ["1"])[0]), float(q.get("hi", ["99.5"])[0])
 
     def _frame(self, unit, ch, i, q):
+        """One frame — or the mean of ``n`` frames centred on it.
+
+        A single raw frame of a dim bouton is mostly shot noise; averaging a short window
+        while scrubbing is what makes the structure visible without committing to the whole
+        recording's mean. The window is clipped at the ends, never padded, so the first and
+        last frames average fewer neighbours rather than borrowing invented ones.
+        """
+        n = max(1, int(float(q.get("n", ["1"])[0])))
         with self._file() as f:
-            img = f.read(unit, channel=ch, frames=slice(i, i + 1), reader_units=True,
-                         max_gb=None)[0]
+            u = f.unit(unit)
+            lo = max(0, i - n // 2)
+            hi = min(u.n_frames, lo + n)
+            lo = max(0, hi - n)
+            block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=None)
+            img = block[0] if n == 1 else block.mean(axis=0)
         self._send(_png(img, *self._window(q)), "image/png")
+
+    def _thumb(self, unit, ch, q):
+        """The mean image, shrunk for the unit list. Block-mean downsample, numpy only."""
+        key = (str(self.mesc_path), unit, ch)
+        with self._lock:
+            img = self._cache.get(key)
+        if img is None:
+            self._mean_image(unit, ch)
+            with self._lock:
+                img = self._cache[key]
+        h, w = img.shape
+        k = max(1, int(np.ceil(max(h, w) / 96)))
+        hh, ww = (h // k) * k, (w // k) * k
+        small = img[:hh, :ww].reshape(hh // k, k, ww // k, k).mean(axis=(1, 3))
+        self._send(_png(small, *self._window(q)), "image/png")
+
+    def _mean_image(self, unit, ch):
+        key = (str(self.mesc_path), unit, ch)
+        with self._file() as f:
+            u = f.unit(unit)
+            idx = np.unique(np.linspace(0, u.n_frames - 1, min(300, u.n_frames)).astype(int))
+            img = f.read(unit, channel=ch, frames=idx, reader_units=True,
+                         max_gb=None).mean(axis=0)
+        with self._lock:
+            self._cache[key] = img
+        return img
 
     def _mean(self, unit, ch, q):
         key = (str(self.mesc_path), unit, ch)
         with self._lock:
             img = self._cache.get(key)
         if img is None:
-            with self._file() as f:
-                u = f.unit(unit)
-                idx = np.unique(np.linspace(0, u.n_frames - 1, min(300, u.n_frames)).astype(int))
-                img = f.read(unit, channel=ch, frames=idx, reader_units=True,
-                             max_gb=None).mean(axis=0)
-            with self._lock:
-                self._cache[key] = img
+            img = self._mean_image(unit, ch)
         self._send(_png(img, *self._window(q)), "image/png")
 
     def _trace(self, unit, ch, q):

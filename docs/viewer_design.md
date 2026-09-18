@@ -1,0 +1,119 @@
+# The viewer, second layout
+
+Sketched by hand on 2026-09-18, then worked out. This is the shape; the page is built
+from it, not the other way round. Anything marked **?** is still open.
+
+## The picture
+
+```
+┌──────────────┬──────────────────────────────────────────┬──────────────────────┐
+│ units        │                                          │ instruments          │
+│  MUnit_0     │                                          │  [+] [−] [AVG] [mean]│
+│  MUnit_1  ◀──│──── the image ─────────────────────────  │                      │
+│  MUnit_2     │     (the thing this tool is about)       │ rois                 │
+│  …  (scrolls)│                                          │  [ filter…        ]  │
+│──────────────│                                          │  ROI 1               │
+│ metadata     │                                          │  ROI 2               │
+│  of the unit │  ▸ ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮ frame 812/3010 │  ROI 3   (scrolls)   │
+│  on screen   │  ch 0 · ch 1                             │                      │
+├──────────────┴──────────────────────────────────────────┴──────────────────────┤
+│ traces                                            [stack | overlay]  [grid] [⤢]│
+│  ROI 1 ───╮╭──╮────────╭╮──────────                                            │
+│  ROI 2 ────╯╰──╯────────╯╰──────────           (scrolls when stacked)          │
+│  ──────────────────────────────────────────── time ──────────────────────────▸ │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Three columns over one full-width strip. The image is the centre and gets the most room; the
+unit list is navigation; the instruments are the working panel; the traces get the whole
+width because time is horizontal and 3000 frames in 300 px was unreadable.
+
+## Panels
+
+**units** — one row per MUnit: name, frames, fs, the comment's first words. Scrolls. Click
+selects; the image, metadata and traces follow. The selected unit is marked, not merely
+highlighted on hover.
+
+**metadata** — *of the unit on screen*, not of the file. fs, frame size, pixel size, duration,
+comment, stage position (VirtX/VirtY/VirtZ), and the check findings that concern this unit.
+The arrow in the sketch means exactly this: the panel is context for the picture.
+
+**image** — the unit's frames. Under it, one thin strip: play/pause, the frame slider with the
+frame number, the channel choice. No other control lives here.
+
+*Averaged frames.* A window of N frames is shown instead of the single frame — the running
+mean centred on the slider position. N is set in instruments; N=1 is the raw frame. This is
+what makes a dim bouton visible while scrubbing.
+
+*Zoom by selection.* Drag a rectangle on the image → the view zooms to it, as the report does.
+Double-click or a small ⤢ returns to the whole frame. Wheel zooms around the cursor, drag pans
+when zoomed. ROIs are drawn in image coordinates so they stay put under any zoom.
+
+*Contrast* (lo/hi percentiles) lives in instruments, folded away — set once per file, not once
+a minute.
+
+**instruments**
+
+```
+[+]  add an ROI (spot or polygon — the current tool; a second click on [+] toggles which)
+[−]  remove the selected ROI
+[AVG]  the frame-averaging window N — a small stepper, 1 · 4 · 8 · 16 · 32
+[mean] show the mean image of the whole unit instead of frames (toggle)
+```
+
+AVG and mean are different things and are labelled so: AVG is *how many frames the slider
+shows at once*, mean is *the whole recording collapsed into one picture*.
+
+**rois** — a list that scrolls, with a filter box above it (matters at 200 ROIs, harmless at 8).
+Each row: name, kind, size in px. Click selects (image outline brightens, trace highlights);
+checkbox chooses whether it is drawn in the trace strip. Under the list: `traces` (compute for
+the unit/channel), and the exports — csv · imagej · json.
+
+**traces** — full width.
+
+*Two modes, a toggle:* **stack** — every chosen ROI on its own line with an offset, the strip
+scrolls vertically when there are more than fit; **overlay** — all on one axis, one colour per
+ROI, for comparing shapes. The mode persists.
+
+*Zoom in time* by dragging a span on the time axis; wheel zooms around the cursor; ⤢ resets.
+When zoomed, the frame slider's range follows the zoom so scrubbing stays inside what you are
+looking at.
+
+*A real grid*: labelled time ticks (seconds, not frames — fs is known), a faint line per
+tick, y-ticks in reader units. The cursor line in the trace strip and the frame slider are the
+same number: move one, the other moves.
+
+*The frame marker*: a vertical line at the slider's frame, in every trace.
+
+## Session, saved by itself
+
+Like pupil-monitor: no button. `<file>.mesc-io.json` beside the .mesc, written on every change
+(debounced): unit, channel, frame, AVG window, contrast, zoom rectangle, trace mode, trace
+zoom, selected ROI, which ROIs are drawn. The ROI set stays where it is (`PUT /api/rois`, the
+same file as now). Reopening the file restores the view.
+
+## Calm
+
+Dark theme as it is now. What makes it calm is not colour but how little is on screen at once:
+contrast and zoom controls are folded, exports sit under the list they belong to, and the only
+always-visible controls are the four instrument buttons, the trace mode, and the player strip.
+
+## Decided while building (2026-09-18)
+
+* The filter box filters by name. The row shows the kind (spot · poly) and the point count
+  beside it, which is what the eye was going to use anyway.
+* Stack mode: every trace gets the same vertical room (64 px) and is scaled to its own range
+  **within the visible time window** — so zooming in time re-scales each band to what is on
+  screen, and a weak bouton beside a strong one stays readable. The range is printed under
+  the name so nothing about the size is hidden.
+* The unit list carries a thumbnail of each unit's mean image (`/api/thumb`, ≤ 96 px). One
+  small PNG per unit at load; it is how you find the right area among 27 units.
+* Keys: space plays, ← → step a frame (shift: ten), Delete removes the selected ROI, Esc
+  drops a polygon draft. Clicking in the trace strip moves the frame there.
+* The strip's height is dragged from its top edge and remembered.
+
+## Still open
+
+* ROIs are one set for the whole file, as before. Whether a set should be per unit (the
+  field moves between areas) is a data question, not a layout one — it stays as it is until
+  it bites.

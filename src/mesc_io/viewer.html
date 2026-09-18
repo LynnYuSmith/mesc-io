@@ -74,6 +74,10 @@
   #player input[type=range] { flex:1 }
   #frameLbl { min-width:150px; text-align:right; font-variant-numeric:tabular-nums }
   #chans button { padding:2px 8px; font-size:11px }
+  .readout { position:absolute; left:8px; top:8px; font-size:11px; color:var(--ink); font-variant-numeric:tabular-nums;
+             background:rgba(18,20,23,.8); padding:3px 7px; border-radius:3px; pointer-events:none; display:none;
+             border:1px solid var(--line); white-space:nowrap }
+  .readout b { color:var(--accent); font-weight:600 }
   #stageHint { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted);
                background:rgba(18,20,23,.7); padding:2px 6px; border-radius:3px; pointer-events:none }
 
@@ -147,6 +151,7 @@
       <canvas id="view"></canvas>
       <div id="rubber"></div>
       <div id="stageHint">drag a box to zoom · drag an ROI to move it · wheel zooms · double-click resets</div>
+      <div id="pixelRead" class="readout"></div>
     </div>
     <div id="player">
       <button id="playBtn" title="space">▶</button>
@@ -211,7 +216,7 @@
       <button id="traceReset" title="whole recording">⤢</button>
       <span class="hint" id="traceHint">drag a box to zoom · double-click resets · ← → slide</span>
     </div>
-    <div id="traceScroll"><canvas id="trace"></canvas><div id="traceRubber"></div></div>
+    <div id="traceScroll"><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
   </section>
 
 </div>
@@ -420,6 +425,28 @@ $("stage").onmousedown = ev => {
            ocx: hit ? ROIS[hit.i].cx : 0, ocy: hit ? ROIS[hit.i].cy : 0 };
   if (hit) { V.sel = hit.i; renderRois(); paint(); $("stage").style.cursor = "grabbing"; }
 };
+/* Hover: the pixel under the cursor, in reader units, from the server (the page only has a
+   PNG). Debounced so a sweep across the field is one request at the end, not one per pixel;
+   for a frame window it reads that window, for the mean the cached mean. */
+let hoverT = 0, hoverSeq = 0;
+$("stage").addEventListener("mousemove", ev => {
+  if (!unit || down) return;
+  const [x, y] = imgPoint(ev).map(Math.floor);
+  const rd = $("pixelRead");
+  if (x < 0 || y < 0 || x >= unit.width || y >= unit.height) { rd.style.display = "none"; return; }
+  rd.style.display = "block"; rd.innerHTML = `x ${x} · y ${y}`;
+  clearTimeout(hoverT);
+  hoverT = setTimeout(async () => {
+    const seq = ++hoverSeq;
+    const qs = V.mean ? `x=${x}&y=${y}` : `x=${x}&y=${y}&i=${V.frame}&n=${V.avg}`;
+    try {
+      const d = await (await fetch(`/api/pixel/${unit.path}/${V.ch}?${qs}`)).json();
+      if (seq !== hoverSeq || d.error) return;
+      rd.innerHTML = `x ${x} · y ${y} · <b>${d.value}</b> <span class="faint">(3×3 ${d.patch_mean})</span>`;
+    } catch (_) {}
+  }, 60);
+});
+$("stage").addEventListener("mouseleave", () => { $("pixelRead").style.display = "none"; });
 $("stage").onmousemove = ev => {
   if (!down) return;
   const dx = ev.clientX - down.x, dy = ev.clientY - down.y;
@@ -801,6 +828,23 @@ const traceValue = ev => {                          // overlay only
   const all = ts.flatMap(t => t.v.slice(t0, t1 + 1)); const [lo, hi] = V.yFixed || V.valueZoom || limits(all);
   return lo + (1 - (ev.clientY - r.top - TT) / (H - TT - TB)) * (hi - lo);
 };
+$("trace").addEventListener("mousemove", ev => {
+  const rd = $("traceRead");
+  if (!TR) { rd.style.display = "none"; return; }
+  const ts = visibleTraces(); if (!ts.length) { rd.style.display = "none"; return; }
+  const n = TR.traces[0].length, f = Math.max(0, Math.min(n - 1, traceFrame(ev)));
+  let t;
+  if (V.traceMode === "stack") {                       // the band under the cursor
+    const r = $("trace").getBoundingClientRect(), row = Math.floor((ev.clientY - r.top - TT) / 64);
+    t = ts[Math.max(0, Math.min(ts.length - 1, row))];
+  } else {                                             // the trace nearest the cursor in value, the selected one on a tie
+    const v = traceValue(ev);
+    t = ts.slice().sort((a, b) => Math.abs(a.v[f] - v) - Math.abs(b.v[f] - v) || (a.i === V.sel ? -1 : 0))[0];
+  }
+  rd.style.display = "block";
+  rd.innerHTML = `<span style="color:${colour(t.i)}">${esc(t.name)}</span> · frame ${f}` + (fs() ? ` · ${(f / fs()).toFixed(2)} s` : "") + ` · <b>${t.v[f]}</b>`;
+});
+$("trace").addEventListener("mouseleave", () => { $("traceRead").style.display = "none"; });
 $("trace").onmousedown = ev => { if (TR && ev.button === 0) tdown = { x: ev.clientX, y: ev.clientY, f: traceFrame(ev), v: V.traceMode === "overlay" ? traceValue(ev) : null, moved: false }; };
 $("trace").onmousemove = ev => {
   if (!tdown) return;

@@ -258,3 +258,21 @@ def test_the_old_file_wide_shape_is_carried_onto_the_first_unit(two_unit_server,
     saved = json.loads((tmp_path / "rec_rois.json").read_text())
     assert "units" in saved and saved["units"] == {"MSession_0/MUnit_0": [SPOT]}
     assert "old file-wide shape" in capsys.readouterr().out
+
+
+# --- the hover readout ------------------------------------------------------------------------
+
+def test_pixel_reads_the_frame_window_in_reader_units(server):
+    # frame 4, column 4 is the raised column (k % w == 4): value 1000 + 4 + 500 + OFFSET
+    d = get_json(server + "/api/pixel/MSession_0/MUnit_0/0?x=4&y=2&i=4&n=1")
+    assert d["value"] == pytest.approx(1000 + 4 + 500 + OFFSET)
+    # a 3-frame window around frame 4 at column 4: only frame 4 has the raised column there
+    d3 = get_json(server + "/api/pixel/MSession_0/MUnit_0/0?x=4&y=2&i=4&n=3")
+    assert d3["value"] == pytest.approx(1000 + 4 + 500 / 3 + OFFSET, abs=0.01)   # the readout is rounded to 0.01
+
+
+def test_pixel_of_the_mean_and_out_of_field(server):
+    d = get_json(server + "/api/pixel/MSession_0/MUnit_0/0?x=0&y=0")
+    assert "value" in d and "patch_mean" in d
+    with pytest.raises(urllib.error.HTTPError):
+        get(server + "/api/pixel/MSession_0/MUnit_0/0?x=99&y=0")

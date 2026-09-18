@@ -208,6 +208,20 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   console.log("  y limits: typed, kept across zoom and mode, inverted refused, auto releases");
   await ev("document.getElementById('traceReset').click(); 'ok'");
 
+  // 2g. hover readouts: the pixel under the cursor on the image, the value under it on a trace
+  await ev("V.mean=true; applyStatic(); draw(); 'ok'"); await sleep(300);
+  const [hx, hy] = await at(30, 40);
+  await mouse("mouseMoved", hx, hy); await sleep(400);
+  const pr = await ev("document.getElementById('pixelRead').textContent");
+  console.log("  pixel readout:", pr);
+  if (!/x 30 · y 40 · \S+/.test(pr) || !/\(3×3/.test(pr)) fail("no pixel value in the image readout: " + pr);
+  const tr2 = JSON.parse(await ev("JSON.stringify(document.getElementById('trace').getBoundingClientRect())"));
+  await mouse("mouseMoved", tr2.left + 400, tr2.top + tr2.height / 2); await sleep(100);
+  const trr = await ev("document.getElementById('traceRead').textContent");
+  console.log("  trace readout:", trr);
+  if (!/frame \d+/.test(trr) || !/ s · -?[\d.]+$/.test(trr)) fail("no value in the trace readout: " + trr);
+  await mouse("mouseMoved", 5, 5);
+
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);
   const avg = await ev("V.avg"); const url = await ev("frameUrl()");

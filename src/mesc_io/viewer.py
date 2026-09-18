@@ -18,6 +18,8 @@ Endpoints:
     GET  /api/frame/{unit}/{ch}/{i}         → PNG of one frame       (?lo=&hi= percentile window,
                                               ?n= average of n frames centred on i)
     GET  /api/mean/{unit}/{ch}              → PNG of the mean image  (?lo=&hi=)
+    GET  /api/pixel/{unit}/{ch}?x=&y=&i=&n=  → one pixel's value in reader units (n frames averaged;
+                                              i omitted = the mean image), for the hover readout
     GET  /api/thumb/{unit}/{ch}             → small PNG of the mean image, for the unit list
     GET  /api/view                          → the saved view (unit, frame, zoom, …) or {}
     PUT  /api/view                          → replace the saved view (written beside the ROIs)
@@ -191,6 +193,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._frame("/".join(parts[2:-2]), int(parts[-2]), int(parts[-1]), q)
             if parts[:2] == ["api", "mean"] and len(parts) >= 4:
                 return self._mean("/".join(parts[2:-1]), int(parts[-1]), q)
+            if parts[:2] == ["api", "pixel"] and len(parts) >= 4:
+                return self._pixel("/".join(parts[2:-1]), int(parts[-1]), q)
             if parts[:2] == ["api", "thumb"] and len(parts) >= 4:
                 return self._thumb("/".join(parts[2:-1]), int(parts[-1]), q)
             if parts[:2] == ["api", "view"]:
@@ -446,6 +450,32 @@ class _Handler(BaseHTTPRequestHandler):
             block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=None)
             img = block[0] if n == 1 else block.mean(axis=0)
         self._send(_png(img, *self._window(q)), "image/png")
+
+    def _pixel(self, unit, ch, q):
+        """The value under the cursor, in reader units — of the frame window on screen, or of
+        the mean image. A 3×3 patch is read, not one pixel, so a hover across a noisy field
+        reads something a person can use; the single pixel is returned beside it."""
+        x, y = int(float(q["x"][0])), int(float(q["y"][0]))
+        n = max(1, int(float(q.get("n", ["1"])[0])))
+        key = (str(self.mesc_path), unit, ch)
+        if "i" not in q:
+            with self._lock:
+                img = self._cache.get(key)
+            if img is None:
+                img = self._mean_image(unit, ch)
+        else:
+            i = int(float(q["i"][0]))
+            with self._file() as f:
+                u = f.unit(unit)
+                lo = max(0, i - n // 2); hi = min(u.n_frames, lo + n); lo = max(0, hi - n)
+                block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=None)
+                img = block[0] if n == 1 else block.mean(axis=0)
+        h, w = img.shape
+        if not (0 <= x < w and 0 <= y < h):
+            raise ValueError(f"({x}, {y}) is outside the {w}x{h} field")
+        patch = img[max(0, y - 1):y + 2, max(0, x - 1):x + 2]
+        return self._json({"x": x, "y": y, "value": round(float(img[y, x]), 2),
+                           "patch_mean": round(float(patch.mean()), 2)})
 
     def _thumb(self, unit, ch, q):
         """A mean image shrunk for the unit list. Block-mean downsample, numpy only.

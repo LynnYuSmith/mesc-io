@@ -147,6 +147,11 @@ always-visible controls are the four instrument buttons, the trace mode, and the
 * The ROI store's read-modify-write is under a lock now — the server is threaded, and two
   quick saves used to be able to write over each other.
 
+* **Hover readouts**: on the image, `x · y · value (3×3 mean)` in reader units,
+  of the frame window on screen or of the mean — fetched from the server, debounced, since
+  the page only holds a PNG. On the traces, the ROI under the cursor (the band in stack, the
+  nearest in overlay), its frame, its second, its value.
+
 ## Three kinds of ROI, and a size you can change (2026-09-18)
 
 `spot · rect · polygon`. A spot is a centre and a radius, a rect a centre and w × h; both

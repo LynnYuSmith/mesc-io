@@ -83,8 +83,15 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   await drag(tr.left + 300, tr.top + 60, tr.left + 600, tr.top + 140);
   const vz = JSON.parse(await ev("JSON.stringify(V.valueZoom)")); console.log("  overlay valueZoom:", vz);
   if (!vz) fail("overlay box did not crop the value range");
-  await ev("document.getElementById('traceReset').click(); 'ok'");
-  if (await ev("V.valueZoom") !== null) fail("reset did not clear the value zoom");
+  // double-click on the traces: home, and the frame does not jump twice on the way
+  const fBefore = await ev("V.frame");
+  const dx = tr.left + 450, dy = tr.top + 100;
+  await mouse("mouseMoved", dx, dy);
+  await mouse("mousePressed", dx, dy, { clickCount: 1 }); await mouse("mouseReleased", dx, dy, { clickCount: 1 });
+  await mouse("mousePressed", dx, dy, { clickCount: 2 }); await mouse("mouseReleased", dx, dy, { clickCount: 2 }); await sleep(450);
+  if (await ev("V.traceZoom") !== null || await ev("V.valueZoom") !== null) fail("double-click on the traces did not go home");
+  if (await ev("V.frame") !== fBefore) fail("the double-click's clicks jumped the frame");
+  console.log("  traces double-click: home, frame untouched");
 
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);

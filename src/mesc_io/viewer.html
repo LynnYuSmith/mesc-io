@@ -182,7 +182,7 @@
       <button id="modeOverlay" title="all on one axis">overlay</button>
       <button id="gridBtn" class="on" title="time and value grid">grid</button>
       <button id="traceReset" title="whole recording">⤢</button>
-      <span class="hint" id="traceHint">drag a box to zoom · click to jump the frame</span>
+      <span class="hint" id="traceHint">drag a box to zoom · double-click resets · click jumps the frame</span>
     </div>
     <div id="traceScroll"><canvas id="trace"></canvas><div id="traceRubber"></div></div>
   </section>
@@ -631,9 +631,18 @@ window.addEventListener("mouseup", ev => {
   if (d.moved) {
     const a = Math.max(0, Math.min(d.f, f)), b = Math.min(n - 1, Math.max(d.f, f)); if (b - a >= 4) V.traceZoom = [a, b];
     if (d.v != null && Math.abs(ev.clientY - d.y) > 6) { const v2 = traceValue(ev); V.valueZoom = [Math.min(d.v, v2), Math.max(d.v, v2)]; }
-  } else { V.frame = f; $("frame").value = f; V.mean = false; $("meanBtn").classList.remove("on"); draw(); }
+  } else {
+    clearTimeout(pendingTraceClick);
+    pendingTraceClick = setTimeout(() => { pendingTraceClick = 0; V.frame = f; $("frame").value = f; V.mean = false;
+      $("meanBtn").classList.remove("on"); draw(); plotTraces(); saveView(); }, 230);
+    return;
+  }
   plotTraces(); saveView();
 });
+/* Double-click on the traces: home. Same gesture as on the image, same rule about the two
+   clicks that precede it. */
+let pendingTraceClick = 0;
+$("trace").ondblclick = () => { clearTimeout(pendingTraceClick); pendingTraceClick = 0; V.traceZoom = null; V.valueZoom = null; plotTraces(); saveView(); };
 $("trace").onwheel = ev => {
   if (!TR) return; ev.preventDefault();
   const n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1], c = traceFrame(ev), f = ev.deltaY < 0 ? 0.8 : 1.25;

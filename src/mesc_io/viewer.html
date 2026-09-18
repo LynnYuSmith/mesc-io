@@ -503,7 +503,7 @@ window.addEventListener("keydown", e => {
     if (V.traceZoom && TR) {                       // zoomed into time: the arrows slide the window
       const n = TR.traces[0].length, [a, b] = V.traceZoom, span = b - a, step = Math.max(1, Math.round(span * (e.shiftKey ? .5 : .1)));
       let a2 = Math.max(0, Math.min(n - 1 - span, a + dir * step));
-      V.traceZoom = [a2, a2 + span];
+      V.traceZoom = [a2, a2 + span]; V.valueZoom = null;         // the y limits follow the new window
       if (V.frame < a2 || V.frame > a2 + span) { V.frame = Math.max(a2, Math.min(a2 + span, V.frame)); $("frame").value = V.frame; draw(); }
       plotTraces(); saveView(); return;
     }
@@ -704,18 +704,19 @@ function plotTraces() {
   if (stack) {
     ts.forEach((t, row) => {
       const y0 = T + row * rowH, band = rowH - 8;
-      const seg = t.v.slice(t0, t1 + 1), lo = Math.min(...seg), hi = Math.max(...seg);
+      const seg = t.v.slice(t0, t1 + 1), [lo, hi] = limits(seg);
       if (V.grid) { g.strokeStyle = "#20252b"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.3; g.beginPath();
+      g.save(); g.beginPath(); g.rect(L, y0 - 2, W - L - R, band + 4); g.clip(); g.beginPath();
       for (let f = t0; f <= t1; f++) { const y = y0 + band - (t.v[f] - lo) / ((hi - lo) || 1) * band; f === t0 ? g.moveTo(X(f), y) : g.lineTo(X(f), y); }
-      g.stroke();
+      g.stroke(); g.restore();
       g.fillStyle = colour(t.i); g.font = (t.i === V.sel ? "bold " : "") + "11px sans-serif";
       g.fillText(t.name, 6, y0 + 12);
       g.fillStyle = "#6b737c"; g.font = "10px sans-serif"; g.fillText(`${lo.toFixed(0)} … ${hi.toFixed(0)}`, 6, y0 + 24);
     });
   } else {
     const all = ts.flatMap(t => t.v.slice(t0, t1 + 1));
-    const [lo, hi] = V.valueZoom || [Math.min(...all), Math.max(...all)];
+    const [lo, hi] = V.valueZoom || limits(all);
     const Y = v => T + (H - T - B) - (v - lo) / ((hi - lo) || 1) * (H - T - B);
     if (V.grid) { g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif";
       const vs = niceStep((hi - lo) / 5);
@@ -729,6 +730,16 @@ function plotTraces() {
     g.restore();
     ts.forEach((t, k) => { g.fillStyle = colour(t.i); g.font = "11px sans-serif"; g.fillText(t.name, L + 6 + k * 70, T - 5); });
   }
+}
+/* Axis limits adapt to what is on screen: the 1st and 99th percentile of the visible frames,
+   padded a little. Min/max let a single odd frame (the black head, a saturated flash) flatten
+   everything else into a line. */
+function limits(vals) {
+  if (!vals.length) return [0, 1];
+  const a = Float64Array.from(vals).sort();
+  const lo = a[Math.floor(0.01 * (a.length - 1))], hi = a[Math.ceil(0.99 * (a.length - 1))];
+  const pad = (hi - lo) * 0.06 || 1;
+  return [lo - pad, hi + pad];
 }
 function niceStep(raw) { if (raw <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(raw))); const m = raw / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; }
 
@@ -745,7 +756,7 @@ const traceFrame = ev => {
 const traceValue = ev => {                          // overlay only
   const r = $("trace").getBoundingClientRect(), H = +$("trace").style.height.replace("px", "") || $("traceScroll").clientHeight;
   const ts = visibleTraces(), n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1];
-  const all = ts.flatMap(t => t.v.slice(t0, t1 + 1)); const [lo, hi] = V.valueZoom || [Math.min(...all), Math.max(...all)];
+  const all = ts.flatMap(t => t.v.slice(t0, t1 + 1)); const [lo, hi] = V.valueZoom || limits(all);
   return lo + (1 - (ev.clientY - r.top - TT) / (H - TT - TB)) * (hi - lo);
 };
 $("trace").onmousedown = ev => { if (TR && ev.button === 0) tdown = { x: ev.clientX, y: ev.clientY, f: traceFrame(ev), v: V.traceMode === "overlay" ? traceValue(ev) : null, moved: false }; };
@@ -764,6 +775,7 @@ window.addEventListener("mouseup", ev => {
   const n = TR.traces[0].length, f = Math.max(0, Math.min(n - 1, traceFrame(ev)));
   if (d.moved) {
     const a = Math.max(0, Math.min(d.f, f)), b = Math.min(n - 1, Math.max(d.f, f)); if (b - a >= 4) V.traceZoom = [a, b];
+    V.valueZoom = null;                                            // a box in overlay sets the value range too; any other change lets it adapt
     if (d.v != null && Math.abs(ev.clientY - d.y) > 6) { const v2 = traceValue(ev); V.valueZoom = [Math.min(d.v, v2), Math.max(d.v, v2)]; }
   } else {
     clearTimeout(pendingTraceClick);
@@ -782,7 +794,7 @@ $("trace").onwheel = ev => {
   const n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1], c = traceFrame(ev), f = ev.deltaY < 0 ? 0.8 : 1.25;
   let span = Math.min(n - 1, Math.max(8, (t1 - t0) * f)), a = Math.round(c - (c - t0) * span / (t1 - t0));
   a = Math.max(0, Math.min(n - 1 - span, a));
-  V.traceZoom = span >= n - 1 ? null : [a, Math.round(a + span)]; plotTraces(); saveView();
+  V.traceZoom = span >= n - 1 ? null : [a, Math.round(a + span)]; V.valueZoom = null; plotTraces(); saveView();
 };
 $("traceReset").onclick = () => { V.traceZoom = null; V.valueZoom = null; plotTraces(); saveView(); };
 $("modeStack").onclick = () => { V.traceMode = "stack"; V.valueZoom = null; applyStatic(); plotTraces(); saveView(); };

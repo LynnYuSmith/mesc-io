@@ -50,7 +50,7 @@ import sys
 import subprocess
 import threading
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -394,6 +394,17 @@ class _Handler(BaseHTTPRequestHandler):
                        f"{self.mesc_path.stem}_{unit.replace('/', '_')}_rois.zip")
 
     def _describe(self):
+        key = (str(self.mesc_path), "describe")
+        with self._lock:
+            hit = self._cache.get(key)
+        if hit is not None:
+            return hit
+        out = self._describe_uncached()
+        with self._lock:
+            self._cache[key] = out
+        return out
+
+    def _describe_uncached(self):
         with self._file() as f:
             units = [{
                 "path": u.path, "name": u.name, "session": u.session,
@@ -431,14 +442,21 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(_png(img, *self._window(q)), "image/png")
 
     def _thumb(self, unit, ch, q):
-        """The mean image, shrunk for the unit list. Block-mean downsample, numpy only."""
-        key = (str(self.mesc_path), unit, ch)
+        """A mean image shrunk for the unit list. Block-mean downsample, numpy only.
+
+        Built from 40 frames, not the 300 the full mean uses: at 96 px nobody can tell, and on
+        a 30-unit file the list would otherwise wait on thirty 300-frame reads from the HDD.
+        """
+        key = (str(self.mesc_path), unit, ch, "thumb")
         with self._lock:
             img = self._cache.get(key)
         if img is None:
-            self._mean_image(unit, ch)
+            with self._file() as f:
+                u = f.unit(unit)
+                idx = np.unique(np.linspace(0, u.n_frames - 1, min(40, u.n_frames)).astype(int))
+                img = f.read(unit, channel=ch, frames=idx, reader_units=True, max_gb=None).mean(axis=0)
             with self._lock:
-                img = self._cache[key]
+                self._cache[key] = img
         h, w = img.shape
         k = max(1, int(np.ceil(max(h, w) / 96)))
         hh, ww = (h // k) * k, (w // k) * k
@@ -545,7 +563,13 @@ def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
     _Handler.rois_path = Path(rois_path) if rois_path else Path.cwd() / f"{Path(mesc_path).stem}_rois.json"
     with MescFile(mesc_path) as f:                       # fail here, not in the browser
         n = len(f.units())
-    httpd = HTTPServer(("127.0.0.1", port), _Handler)
+    # Threaded, and it matters: on a 30-unit recording the page asks for 30 thumbnails at once
+    # and Chrome opens six connections for them. A single-threaded server with its five-deep
+    # backlog answered the first, queued four, and REFUSED the rest -- the page sat blank and
+    # curl got "connection refused" while the process was busy at 65 % CPU. Each request opens
+    # its own MescFile, so there is no shared handle to protect.
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
+    httpd.daemon_threads = True
     url = f"http://127.0.0.1:{port}/"
     print(f"  {Path(mesc_path).name}: {n} units  →  {url}   (ctrl-c to stop)")
     if open_browser:

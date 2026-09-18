@@ -127,6 +127,18 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   waits 230 ms; a second click or a double-click within that cancels it. One gesture, one
   meaning.
 
+## On the real file (260916, 11.5 GB, 30 units — 2026-09-18)
+
+* The server is **threaded** now. Thirty thumbnails at once, six connections from Chrome,
+  and a single-threaded server with its five-deep backlog refused the rest: the page sat
+  blank while the process was busy. Each request opens its own file handle, so there was
+  nothing to protect. Thumbnails use 40 frames, not 300 — at 96 px nobody can tell.
+  Measured: 30 thumbnails in 4 s, traces over 4953 frames in 4 s.
+* **Axis limits adapt**: the 1st–99th percentile of what is on screen, padded,
+  in both modes — min/max let one odd frame flatten everything. In overlay a box sets the
+  value range too, but any change of the time window (arrows, wheel, a new box) lets the
+  y limits follow the data again.
+
 ## Three kinds of ROI, and a size you can change (2026-09-18)
 
 `spot · rect · polygon`. A spot is a centre and a radius, a rect a centre and w × h; both

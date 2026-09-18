@@ -72,7 +72,7 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   // 2. traces: compute, then drag a box in stack mode -> time zoom, with the rubber shown mid-drag
   await ev("document.getElementById('doTraces').click(); 'ok'"); await sleep(2000);
   const tr = JSON.parse(await ev("JSON.stringify(document.getElementById('trace').getBoundingClientRect())"));
-  const y = tr.top + 40, x0 = tr.left + 200, x1 = tr.left + 500;
+  const y = tr.top + tr.height / 2, x0 = tr.left + 200, x1 = tr.left + 500;
   await mouse("mouseMoved", x0, y); await mouse("mousePressed", x0, y, { clickCount: 1 });
   await mouse("mouseMoved", x0 + 100, y, { buttons: 1 }); await sleep(50);
   const shown = await ev("document.getElementById('traceRubber').style.display");
@@ -83,18 +83,26 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (!tz || tz[1] - tz[0] < 10) fail("trace drag did not zoom in time");
   // overlay: a box also crops the value range
   await ev("document.getElementById('modeOverlay').click(); 'ok'"); await sleep(200);
-  await drag(tr.left + 300, tr.top + 60, tr.left + 600, tr.top + 140);
+  await drag(tr.left + 300, tr.top + tr.height * 0.3, tr.left + 600, tr.top + tr.height * 0.7);
   const vz = JSON.parse(await ev("JSON.stringify(V.valueZoom)")); console.log("  overlay valueZoom:", vz);
   if (!vz) fail("overlay box did not crop the value range");
   // double-click on the traces: home, and the frame does not jump twice on the way
   const fBefore = await ev("V.frame");
-  const dx = tr.left + 450, dy = tr.top + 100;
+  const dx = tr.left + 450, dy = tr.top + tr.height / 2;
   await mouse("mouseMoved", dx, dy);
   await mouse("mousePressed", dx, dy, { clickCount: 1 }); await mouse("mouseReleased", dx, dy, { clickCount: 1 });
   await mouse("mousePressed", dx, dy, { clickCount: 2 }); await mouse("mouseReleased", dx, dy, { clickCount: 2 }); await sleep(450);
   if (await ev("V.traceZoom") !== null || await ev("V.valueZoom") !== null) fail("double-click on the traces did not go home");
   if (await ev("V.frame") !== fBefore) fail("the double-click's clicks jumped the frame");
   console.log("  traces double-click: home, frame untouched");
+  // the y limits adapt: a value box is dropped as soon as the time window moves
+  await drag(tr.left + 300, tr.top + tr.height * 0.3, tr.left + 600, tr.top + tr.height * 0.7);
+  if (await ev("V.valueZoom") === null) fail("expected a value box before sliding");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 }); await sleep(100);
+  if (await ev("V.valueZoom") !== null) fail("the value box survived a change of the time window");
+  console.log("  y limits adapt after the window moves");
+  await ev("document.getElementById('traceReset').click(); 'ok'");
 
   // 2b. keys: with a time zoom, → slides the window; a click on a ROW then Delete removes the ROI
   await ev("V.traceZoom=[100,200]; plotTraces(); 'ok'");

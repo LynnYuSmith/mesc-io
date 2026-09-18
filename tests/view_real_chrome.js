@@ -112,6 +112,12 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   const nAfter = await ev("ROIS.length"); console.log("  Delete after a row click:", nBefore, "->", nAfter);
   if (nAfter !== nBefore - 1) fail("Delete did not remove the selected ROI");
   await ev("addRoi({name:'roi9', points: disc(60,60)}); 'ok'"); await sleep(100);
+  // Enter with ROIs present computes the traces
+  if (await ev("TR") !== null) fail("expected TR null after adding an ROI");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 }); await sleep(2000);
+  if (await ev("TR ? TR.names.length : 0") < 1) fail("Enter did not compute the traces");
+  console.log("  Enter: traces computed");
 
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);

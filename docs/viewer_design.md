@@ -112,6 +112,18 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   drops a polygon draft. Clicking in the trace strip moves the frame there.
 * The strip's height is dragged from its top edge and remembered.
 
+## First use (2026-09-18, on the synthetic file)
+
+* The AVG window is **typed as a number**, not stepped through a ladder — `AVG [ 13 ]`.
+* An ROI can be **dragged** to correct its place; a polygon's corner can be dragged on its
+  own. Pressing on an ROI and dragging moves it; pressing on empty image and dragging is the
+  zoom box. Told apart by what is under the cursor at the press, so no mode switch.
+* The trace strip shows a **rubber band** while dragging. In stack mode the box zooms time;
+  in overlay it zooms time and value both, because there the y axis is shared.
+* A double-click used to leave two spots behind (it is preceded by two clicks). A click now
+  waits 230 ms; a second click or a double-click within that cancels it. One gesture, one
+  meaning.
+
 ## Still open
 
 * ROIs are one set for the whole file, as before. Whether a set should be per unit (the

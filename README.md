@@ -33,9 +33,28 @@ mesc-io info      recording.mesc                            # units, rates, pixe
 mesc-io check     recording.mesc                            # what the file disagrees with itself about
 mesc-io export    recording.mesc MUnit_0 u0.h5              # or u0.tif
 mesc-io writeback recording.mesc out.mesc MUnit_0 u0.h5     # processed frames back in
+mesc-io view      recording.mesc                            # the recording in a browser
 ```
 
 `info` and `check` take `--json`.
+
+### The viewer
+
+`mesc-io view` opens the recording in a private browser window: units on the left with a
+thumbnail each and the unit's own metadata (rate, pixel size, stage position); the image in
+the middle — scrub it, average a window of N frames, zoom into a place by dragging a box;
+ROIs on the right (spot, rectangle, polygon; drag to move, type a size); every ROI's time
+course along the bottom, stacked or overlaid, zoomed by dragging a box. ROIs belong to the
+unit they were drawn on and are saved as you go, beside the working directory, never beside
+the raw file; so is the view itself, so reopening the file puts you back where you were.
+Layout and decisions: [docs/viewer_design.md](docs/viewer_design.md).
+
+To try it without a recording, make one:
+
+```
+python tools/make_synthetic.py            # writes synthetic_view.mesc: 3 units, 4 spots, 3 of them blinking
+mesc-io view synthetic_view.mesc
+```
 
 ## Development
 

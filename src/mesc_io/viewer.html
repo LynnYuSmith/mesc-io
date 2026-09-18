@@ -128,6 +128,7 @@
   #trace { display:block; width:100%; }
   #traceLbl { color:var(--muted) }
   .ylim { display:inline-flex; align-items:center; gap:4px; color:var(--faint) }
+  #dffKnobs input[type=number] { width:48px }
   .ylim input[type=number] { width:64px; padding:2px 4px; font-size:11px; -moz-appearance:textfield }
   .ylim input::-webkit-inner-spin-button { display:none }
   .ylim input.fixed { border-color:var(--accent); color:var(--accent) }
@@ -206,6 +207,14 @@
     <div id="traceBar">
       <span id="traceLbl">traces</span>
       <span class="grow"></span>
+      <button id="sigRaw" class="on" title="the ROI's mean intensity, reader units">raw</button>
+      <button id="sigDff" title="dF/F by the pipeline's method: dark current, Savitzky–Golay, darkest-patch background, rolling quantile baseline">dF/F</button>
+      <label class="ylim" id="dffKnobs" title="the baseline: rolling quantile q over a window of seconds — the pipeline's 0.3 and 60 s by default">
+        <span>q</span><input type="number" id="dffQ" step="0.05" min="0.05" max="0.95" value="0.3">
+        <span>win</span><input type="number" id="dffWin" step="5" min="1" value="60"><span>s</span>
+      </label>
+      <span class="hint" id="dffNote"></span>
+      <span style="width:8px"></span>
       <button id="modeStack" class="on" title="one line per ROI, with an offset">stack</button>
       <button id="modeOverlay" title="all on one axis">overlay</button>
       <button id="gridBtn" class="on" title="time and value grid">grid</button>
@@ -234,6 +243,8 @@ const V = {
   traceMode: "stack", grid: true, traceZoom: null,   // [t0, t1] in frames, or null
   valueZoom: null,                          // overlay only: [lo, hi] in reader units, or null
   yFixed: null,                             // typed limits [lo, hi]; apply to every band and the overlay until 'auto'
+  signal: "raw",                            // raw | dff
+  dffQ: 0.3, dffWin: 60,                    // the baseline's quantile and window (s)
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
   tracesH: 260, metaH: 300,
 };
@@ -275,7 +286,7 @@ async function boot() {
     </div>`).join("");
   $("units").onclick = e => { const d = e.target.closest(".u"); if (d) pick(+d.dataset.i); };
   const saved = (await (await fetch("/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","sel","shown","tracesH","metaH"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","signal","dffQ","dffWin","sel","shown","tracesH","metaH"]));
   applyStatic();
   const idx = Math.max(0, FILE.units.findIndex(u => u.path === saved.unit));
   if (FILE.units.length) pick(idx, true);
@@ -290,6 +301,9 @@ function applyStatic() {                 // controls that reflect V without a un
   $("modeStack").classList.toggle("on", V.traceMode === "stack");
   $("modeOverlay").classList.toggle("on", V.traceMode === "overlay");
   $("gridBtn").classList.toggle("on", V.grid);
+  $("sigRaw").classList.toggle("on", V.signal === "raw"); $("sigDff").classList.toggle("on", V.signal === "dff");
+  $("dffQ").value = V.dffQ; $("dffWin").value = V.dffWin;
+  $("dffKnobs").style.display = V.signal === "dff" ? "" : "none";
   document.documentElement.style.setProperty("--traces-h", V.tracesH + "px");
   document.documentElement.style.setProperty("--meta-h", V.metaH + "px");
 }
@@ -379,6 +393,11 @@ function overlay(g, m) {
       const [X, Y] = P(r.points[0]); g.fillStyle = colour(i); g.font = "11px sans-serif"; g.fillText(r.name, X + 4, Y - 4);
     }
   });
+  if (TR && TR.patch && TR.unit === unit.path) {          // the background patch the dF/F subtracts
+    const [y0, x0, y1, x1] = TR.patch, [ax, ay] = P([x0 - .5, y0 - .5]), [bx, by] = P([x1 - .5, y1 - .5]);
+    g.strokeStyle = "rgba(224,163,58,.8)"; g.setLineDash([3, 3]); g.lineWidth = 1; g.strokeRect(ax, ay, bx - ax, by - ay); g.setLineDash([]);
+    g.fillStyle = "rgba(224,163,58,.9)"; g.font = "10px sans-serif"; g.fillText("bg", ax + 2, ay - 3);
+  }
   if (draft.length) {
     g.strokeStyle = "#fff"; g.setLineDash([4, 3]); g.beginPath();
     draft.forEach((p, k) => { const [X, Y] = P(p); k ? g.lineTo(X, Y) : g.moveTo(X, Y); });
@@ -708,13 +727,14 @@ $("doTraces").onclick = async () => {
   if (!unit) return;
   if (!ROIS.length) { $("traceLbl").textContent = "draw something first"; return; }
   $("traceLbl").textContent = "one pass over the recording…";
-  const d = await (await fetch(`/api/traces/${unit.path}/${V.ch}`)).json();
+  const d = await (await fetch(`/api/traces/${unit.path}/${V.ch}?q=${V.dffQ}&win_s=${V.dffWin}`)).json();
   if (d.error) { $("traceLbl").textContent = d.error; return; }
-  TR = d; plotTraces();
+  TR = d; plotTraces(); paint();
 };
 function visibleTraces() {
   if (!TR) return [];
-  return TR.names.map((n, i) => ({ name: n, i, v: TR.traces[i], area: TR.areas_px[i] }))
+  const src = V.signal === "dff" && TR.dff ? TR.dff : TR.traces;
+  return TR.names.map((n, i) => ({ name: n, i, v: src[i], area: TR.areas_px[i] }))
                  .filter(t => shown()[t.name] !== false);
 }
 function plotTraces() {
@@ -730,7 +750,14 @@ function plotTraces() {
   const n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1];
   const L = 54, R = 12, T = 18, B = 18;
   const X = f => L + (f - t0) / Math.max(1, t1 - t0) * (W - L - R);
-  $("traceLbl").textContent = `${ts.length} of ${TR.names.length} ROIs · ${n} frames` + (V.traceZoom ? ` · ${t0}–${t1}` : "");
+  $("traceLbl").textContent = `${ts.length} of ${TR.names.length} ROIs · ${n} frames` + (V.traceZoom ? ` · ${t0}–${t1}` : "")
+    + (V.signal === "dff" ? " · dF/F" : " · raw");
+  $("dffNote").textContent = V.signal === "dff" && TR.params
+    ? `dark ${TR.dark} · bg patch ${TR.patch[1]},${TR.patch[0]} · eps ${TR.eps}` + (TR.head ? ` · head ${TR.head} fr` : "") : "";
+  if (TR.head && TR.head > t0) {                     // the black head: frames before the shutter opened
+    const x1 = Math.min(X(TR.head), W - R);
+    g.fillStyle = "rgba(224,90,90,.10)"; g.fillRect(L, T, Math.max(0, x1 - L), H - T - B);
+  }
   // grid: seconds when the rate is known, else frames
   if (V.grid) {
     g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif"; g.lineWidth = 1;
@@ -755,7 +782,8 @@ function plotTraces() {
       g.stroke(); g.restore();
       g.fillStyle = colour(t.i); g.font = (t.i === V.sel ? "bold " : "") + "11px sans-serif";
       g.fillText(t.name, 6, y0 + 12);
-      g.fillStyle = "#6b737c"; g.font = "10px sans-serif"; g.fillText(`${lo.toFixed(0)} … ${hi.toFixed(0)}`, 6, y0 + 24);
+      const dp = V.signal === "dff" ? 2 : 0;
+      g.fillStyle = "#6b737c"; g.font = "10px sans-serif"; g.fillText(`${lo.toFixed(dp)} … ${hi.toFixed(dp)}`, 6, y0 + 24);
     });
   } else {
     const all = ts.flatMap(t => t.v.slice(t0, t1 + 1));
@@ -764,7 +792,8 @@ function plotTraces() {
     const Y = v => T + (H - T - B) - (v - lo) / ((hi - lo) || 1) * (H - T - B);
     if (V.grid) { g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif";
       const vs = niceStep((hi - lo) / 5);
-      for (let v = Math.ceil(lo / vs) * vs; v <= hi; v += vs) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(v.toFixed(0), 4, y + 3); } }
+      const dp = V.signal === "dff" ? 2 : 0;
+      for (let v = Math.ceil(lo / vs) * vs; v <= hi; v += vs) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(v.toFixed(dp), 4, y + 3); } }
     g.save(); g.beginPath(); g.rect(L, T, W - L - R, H - T - B); g.clip();
     ts.forEach(t => {
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.2; g.globalAlpha = (V.sel < 0 || t.i === V.sel) ? 1 : .55; g.beginPath();
@@ -842,7 +871,7 @@ $("trace").addEventListener("mousemove", ev => {
     t = ts.slice().sort((a, b) => Math.abs(a.v[f] - v) - Math.abs(b.v[f] - v) || (a.i === V.sel ? -1 : 0))[0];
   }
   rd.style.display = "block";
-  rd.innerHTML = `<span style="color:${colour(t.i)}">${esc(t.name)}</span> · frame ${f}` + (fs() ? ` · ${(f / fs()).toFixed(2)} s` : "") + ` · <b>${t.v[f]}</b>`;
+  rd.innerHTML = `<span style="color:${colour(t.i)}">${esc(t.name)}</span> · frame ${f}` + (fs() ? ` · ${(f / fs()).toFixed(2)} s` : "") + ` · <b>${t.v[f]}</b>` + (V.signal === "dff" ? " dF/F" : "");
 });
 $("trace").addEventListener("mouseleave", () => { $("traceRead").style.display = "none"; });
 $("trace").onmousedown = ev => { if (TR && ev.button === 0) tdown = { x: ev.clientX, y: ev.clientY, f: traceFrame(ev), v: V.traceMode === "overlay" ? traceValue(ev) : null, moved: false }; };
@@ -883,6 +912,17 @@ $("trace").onwheel = ev => {
   V.traceZoom = span >= n - 1 ? null : [a, Math.round(a + span)]; V.valueZoom = null; plotTraces(); saveView();
 };
 $("traceReset").onclick = () => { V.traceZoom = null; V.valueZoom = null; plotTraces(); saveView(); };
+/* raw | dF/F is a switch over the same payload -- both come back from one pass. Changing q
+   or the window is a recompute, so it refetches (the pass is repeated; the file is the cost). */
+$("sigRaw").onclick = () => { V.signal = "raw"; V.valueZoom = null; V.yFixed = null; applyStatic(); plotTraces(); saveView(); };
+$("sigDff").onclick = () => { V.signal = "dff"; V.valueZoom = null; V.yFixed = null; applyStatic(); plotTraces(); saveView(); };
+function applyDffKnobs() {
+  const q = Math.min(0.95, Math.max(0.05, +$("dffQ").value || 0.3)), w = Math.max(1, +$("dffWin").value || 60);
+  if (q === V.dffQ && w === V.dffWin) return;
+  V.dffQ = q; V.dffWin = w; applyStatic(); saveView();
+  if (TR) $("doTraces").click();
+}
+["dffQ", "dffWin"].forEach(id => { $(id).onchange = applyDffKnobs; $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { applyDffKnobs(); $(id).blur(); } }; });
 $("modeStack").onclick = () => { V.traceMode = "stack"; V.valueZoom = null; applyStatic(); plotTraces(); saveView(); };
 $("modeOverlay").onclick = () => { V.traceMode = "overlay"; applyStatic(); plotTraces(); saveView(); };
 $("gridBtn").onclick = () => { V.grid = !V.grid; applyStatic(); plotTraces(); saveView(); };

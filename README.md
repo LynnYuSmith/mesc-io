@@ -44,7 +44,8 @@ mesc-io view      recording.mesc                            # the recording in a
 thumbnail each and the unit's own metadata (rate, pixel size, stage position); the image in
 the middle — scrub it, average a window of N frames, zoom into a place by dragging a box;
 ROIs on the right (spot, rectangle, polygon; drag to move, type a size); every ROI's time
-course along the bottom, stacked or overlaid, zoomed by dragging a box. ROIs belong to the
+course along the bottom, raw or dF/F by our pipeline's method (`mesc_io.dff`, numpy only,
+held against the pipeline's functions in the tests), stacked or overlaid, zoomed by dragging a box. ROIs belong to the
 unit they were drawn on and are saved as you go, beside the working directory, never beside
 the raw file; so is the view itself, so reopening the file puts you back where you were.
 Layout and decisions: [docs/viewer_design.md](docs/viewer_design.md).

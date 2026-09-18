@@ -27,7 +27,10 @@ Endpoints:
     GET  /api/rois?unit=                    → that unit's ROI set (+ which units have any)
     PUT  /api/rois                          → replace ONE unit's set  <- {"unit": ..., "rois": [...]}
     POST /api/rois/copy                     → copy a unit's set onto another  <- {"from": ..., "to": ...}
-    GET  /api/traces/{unit}/{ch}            → JSON: every ROI's time course, in ONE pass
+    GET  /api/traces/{unit}/{ch}            → JSON: every ROI's time course, in ONE pass — raw, and
+                                              dF/F by the pipeline's method (?q=&win_s= override
+                                              the baseline quantile and window), plus the darkest
+                                              patch's trace, the background, and the black head
     GET  /api/export/traces/{unit}/{ch}.csv → CSV, one column per ROI
     GET  /api/export/rois.json              → every unit's ROI set, as stored
     GET  /api/export/rois.zip?unit=         → that unit's ROIs as an ImageJ set, openable in Fiji
@@ -60,6 +63,7 @@ import numpy as np
 
 from . import MescFile
 from .check import check as mesc_check
+from .dff import DffParams, compute_dff, darkest_patch
 
 PAGE = Path(__file__).resolve().parent / "viewer.html"
 
@@ -208,7 +212,7 @@ class _Handler(BaseHTTPRequestHandler):
                                    "units_with_rois": {k: len(v) for k, v in store.items() if v},
                                    "path": str(self.rois_path)})
             if parts[:2] == ["api", "traces"] and len(parts) >= 4:
-                return self._json(self._roi_traces("/".join(parts[2:-1]), int(parts[-1])))
+                return self._json(self._roi_traces("/".join(parts[2:-1]), int(parts[-1]), q))
             if parts[:3] == ["api", "export", "rois.json"]:
                 body = json.dumps({"source": str(self.mesc_path), "units": self._load_store()},
                                   indent=2).encode()
@@ -340,7 +344,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _roi_traces(self, unit: str, ch: int):
+    def _roi_traces(self, unit: str, ch: int, q=None):
         """Every ROI's time course from ONE pass over the recording.
 
         One pass, not one per ROI: the file is gigabytes, and reading it once per ROI would
@@ -354,28 +358,64 @@ class _Handler(BaseHTTPRequestHandler):
                         "names": [], "traces": []}
             masks = [_mask_of(r, u.height, u.width) for r in rois]
             areas = [int(m.sum()) for m in masks]
+            # the darkest patch of the mean image rides along in the same pass: it is the
+            # background the pipeline subtracts, and the dark current comes off its first frames
+            mean_img = self._mean_image(unit, ch)
+            params = self._dff_params(q)
+            y0, x0, y1, x1 = darkest_patch(mean_img, params.bg_patch)
+            patch = np.zeros((u.height, u.width), bool); patch[y0:y1, x0:x1] = True
+            masks.append(patch)
             acc = [[] for _ in masks]
             for block in f.iter_frames(unit, channel=ch, block=500, reader_units=True):
                 flat = block.reshape(len(block), -1)
                 for k, m in enumerate(masks):
                     acc[k].append(flat[:, m.ravel()].mean(axis=1))
             traces = [np.concatenate(a) for a in acc]
+        bg_trace = traces.pop()
+        fs = u.frame_rate_hz or 30.0
+        r = compute_dff(np.vstack(traces), bg_trace, fs, params, patch=(y0, x0, y1, x1))
         return {"unit": u.path, "channel": ch, "frame_rate_hz": u.frame_rate_hz,
-                "names": [r.get("name", f"roi{i}") for i, r in enumerate(rois)],
+                "names": [rr.get("name", f"roi{i}") for i, rr in enumerate(rois)],
                 "areas_px": areas,
-                "traces": [[round(float(v), 2) for v in t] for t in traces]}
+                "traces": [[round(float(v), 2) for v in t] for t in traces],
+                "dff": [[round(float(v), 4) for v in t] for t in r.dff],
+                "baseline": [[round(float(v), 2) for v in t] for t in r.baseline],
+                "background": [round(float(v), 2) for v in r.background],
+                "bg_trace": [round(float(v), 2) for v in bg_trace],
+                "dark": round(r.dark, 2), "head": r.head, "eps": round(r.eps, 4),
+                "patch": [y0, x0, y1, x1],
+                "params": {"quantile": params.quantile, "window_s": params.window_s,
+                           "savgol": [params.savgol_window, params.savgol_order],
+                           "bg_patch": params.bg_patch, "bg_sigma": params.bg_sigma,
+                           "bg_degree": params.bg_degree}}
+
+    @staticmethod
+    def _dff_params(q):
+        """The pipeline's defaults, with the two knobs the page exposes."""
+        p = DffParams()
+        if not q:
+            return p
+        kw = {}
+        if "q" in q:
+            kw["quantile"] = min(0.99, max(0.01, float(q["q"][0])))
+        if "win_s" in q:
+            kw["window_s"] = max(1.0, float(q["win_s"][0]))
+        return DffParams(**{**p.__dict__, **kw})
 
     def _export_csv(self, unit: str, ch: int):
         d = self._roi_traces(unit, ch)
         if not d["names"]:
             raise ValueError("no ROIs to export")
         fs = d["frame_rate_hz"] or 0.0
-        head = ["frame", "time_s"] + list(d["names"])
+        head = (["frame", "time_s"] + [f"{n}_raw" for n in d["names"]]
+                + [f"{n}_dff" for n in d["names"]] + ["background"])
         lines = [",".join(head)]
         n = len(d["traces"][0])
         for i in range(n):
             row = [str(i), f"{i / fs:.4f}" if fs else ""]
             row += [f"{t[i]:.2f}" for t in d["traces"]]
+            row += [f"{t[i]:.4f}" for t in d["dff"]]
+            row.append(f"{d['background'][i]:.2f}")
             lines.append(",".join(row))
         name = f"{self.mesc_path.stem}_{unit.replace('/', '_')}_ch{ch}_traces.csv"
         self._download(("\n".join(lines) + "\n").encode(), "text/csv", name)

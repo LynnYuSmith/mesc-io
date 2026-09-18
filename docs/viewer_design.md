@@ -152,6 +152,22 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   the page only holds a PNG. On the traces, the ROI under the cursor (the band in stack, the
   nearest in overlay), its frame, its second, its value.
 
+## raw | dF/F by the pipeline's method (2026-09-18)
+
+`raw | dF/F` in the trace bar, with the two knobs that matter beside it: the baseline's
+quantile **q** (0.3, what the sessions use) and its window (60 s). The chain is the signal
+stage's, step for step, in numpy alone — `src/mesc_io/dff.py`: dark current off the darkest
+patch's first frames, Savitzky–Golay 5/3, the darkest 10×10 patch's trace smoothed and
+polynomial-fitted (degree 5) as the background, rolling quantile + Gaussian smooth as F0,
+(F − F0)/max(F0, eps). **Each piece is held against the pipeline's own function on the same
+trace to 1e-9** (`tests/test_dff.py`; skipped, visibly, where the pipeline is not importable).
+Both signals come from one pass; the switch is instant, the knobs refetch. The darkest patch
+is drawn on the image (`bg`), the numbers used sit in the bar (dark, patch, eps, head).
+
+What it is not: the master's number. The ROI is what was drawn here (a 3-px disc, not a
+Suite2p mask) and the leading trim is not applied (the frames stay aligned with the movie;
+the black head is greyed instead). Same method, this ROI.
+
 ## Three kinds of ROI, and a size you can change (2026-09-18)
 
 `spot · rect · polygon`. A spot is a centre and a radius, a rect a centre and w × h; both

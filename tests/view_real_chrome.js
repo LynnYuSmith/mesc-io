@@ -222,6 +222,22 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (!/frame \d+/.test(trr) || !/ s · -?[\d.]+$/.test(trr)) fail("no value in the trace readout: " + trr);
   await mouse("mouseMoved", 5, 5);
 
+  // 2h. raw | dF/F: one payload, two views; the knobs refetch; the bg patch is drawn
+  await ev("document.getElementById('sigDff').click(); 'ok'"); await sleep(200);
+  const lbl = await ev("document.getElementById('traceLbl').textContent"), note = await ev("document.getElementById('dffNote').textContent");
+  console.log("  dF/F:", lbl, "|", note);
+  if (!/dF\/F/.test(lbl)) fail("the label does not say dF/F");
+  if (!/bg patch \d+,\d+ · eps/.test(note)) fail("the dF/F note lacks the patch and eps: " + note);
+  const dffMed = await ev("(()=>{const v=visibleTraces()[0].v.slice(200); const a=[...v].sort((x,y)=>x-y); return a[Math.floor(a.length/2)]})()");
+  if (!(Math.abs(dffMed) < 0.2)) fail("dF/F is not near zero at its median: " + dffMed);
+  const hasDff = await ev("TR.dff.length === TR.names.length && TR.background.length === TR.traces[0].length");
+  if (!hasDff) fail("the payload lacks dff / background");
+  await ev("(()=>{const w=document.getElementById('dffWin'); w.value='20'; w.dispatchEvent(new Event('change'));})(); 'ok'");
+  for (let i = 0; i < 40; i++) { await sleep(250); if (await ev("TR && TR.params && TR.params.window_s === 20")) break; }
+  if (await ev("TR.params.window_s") !== 20) fail("changing the window did not refetch with it");
+  console.log("  dF/F knobs refetch: window", await ev("TR.params.window_s"), "q", await ev("TR.params.quantile"));
+  await ev("document.getElementById('sigRaw').click(); 'ok'");
+
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);
   const avg = await ev("V.avg"); const url = await ev("frameUrl()");

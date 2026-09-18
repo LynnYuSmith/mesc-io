@@ -113,7 +113,8 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   drops a polygon draft. Clicking in the trace strip moves the frame there; double-click goes
   home. An ROI's name is renamed by double-clicking it — it is a label, not an input, so a
   click on the row selects and Delete deletes.
-* The strip's height is dragged from its top edge and remembered.
+* The trace strip's height is dragged from its top edge and remembered; so is the metadata
+  panel's, from its top edge (30 units want a longer list than the default).
 
 ## First use (2026-09-18, on the synthetic file)
 

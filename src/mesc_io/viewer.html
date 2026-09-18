@@ -51,7 +51,9 @@
   .u span { display:block; color:var(--muted); font-size:11px }
   .u i { display:block; color:var(--faint); font-size:11px; font-style:normal;
          white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-  #meta { flex:0 1 auto; max-height:52%; overflow-y:auto; border-top:1px solid var(--line) }
+  #meta { flex:0 0 var(--meta-h, 300px); overflow-y:auto; border-top:1px solid var(--line); min-height:0 }
+  #metaSplit { height:4px; cursor:row-resize; background:transparent; margin-bottom:-4px; position:relative; z-index:1 }
+  #metaSplit:hover { background:var(--accent) }
   #meta table { width:100%; border-collapse:collapse; font-size:11.5px }
   #meta td { padding:3px 12px; vertical-align:top }
   #meta td:first-child { color:var(--muted); width:74px; white-space:nowrap }
@@ -131,6 +133,7 @@
   <aside id="unitsCol">
     <h1>units <small id="fname">loading…</small></h1>
     <div id="units"></div>
+    <div id="metaSplit" title="drag to resize"></div>
     <div id="meta"><h2>metadata</h2><table id="metaTable"></table><div id="findings"></div></div>
   </aside>
 
@@ -217,7 +220,7 @@ const V = {
   traceMode: "stack", grid: true, traceZoom: null,   // [t0, t1] in frames, or null
   valueZoom: null,                          // overlay only: [lo, hi] in reader units, or null
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
-  tracesH: 260,
+  tracesH: 260, metaH: 300,
 };
 let FILE = null, unit = null, playing = null;
 let ROIS = [], tool = "spot", draft = [], TR = null;   // TR = last traces payload
@@ -257,7 +260,7 @@ async function boot() {
     </div>`).join("");
   $("units").onclick = e => { const d = e.target.closest(".u"); if (d) pick(+d.dataset.i); };
   const saved = (await (await fetch("/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","sel","shown","tracesH"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","sel","shown","tracesH","metaH"]));
   applyStatic();
   const idx = Math.max(0, FILE.units.findIndex(u => u.path === saved.unit));
   if (FILE.units.length) pick(idx, true);
@@ -273,6 +276,7 @@ function applyStatic() {                 // controls that reflect V without a un
   $("modeOverlay").classList.toggle("on", V.traceMode === "overlay");
   $("gridBtn").classList.toggle("on", V.grid);
   document.documentElement.style.setProperty("--traces-h", V.tracesH + "px");
+  document.documentElement.style.setProperty("--meta-h", V.metaH + "px");
 }
 
 function pick(i, restoring) {
@@ -802,9 +806,18 @@ $("modeOverlay").onclick = () => { V.traceMode = "overlay"; applyStatic(); plotT
 $("gridBtn").onclick = () => { V.grid = !V.grid; applyStatic(); plotTraces(); saveView(); };
 
 /* the strip's height, dragged */
+/* Two splitters, the same way: the trace strip from its top edge, the metadata panel from
+   its top edge. Both heights are remembered with the view. */
 let sdown = null;
-$("splitter").onmousedown = ev => { sdown = { y: ev.clientY, h: V.tracesH }; ev.preventDefault(); };
-window.addEventListener("mousemove", ev => { if (!sdown) return; V.tracesH = Math.max(120, Math.min(window.innerHeight * .7, sdown.h + (sdown.y - ev.clientY))); applyStatic(); });
+$("splitter").onmousedown = ev => { sdown = { which: "traces", y: ev.clientY, h: V.tracesH }; ev.preventDefault(); };
+$("metaSplit").onmousedown = ev => { sdown = { which: "meta", y: ev.clientY, h: V.metaH }; ev.preventDefault(); };
+window.addEventListener("mousemove", ev => {
+  if (!sdown) return;
+  const h = sdown.h + (sdown.y - ev.clientY);
+  if (sdown.which === "traces") V.tracesH = Math.max(120, Math.min(window.innerHeight * .7, h));
+  else V.metaH = Math.max(60, Math.min($("unitsCol").clientHeight - 140, h));
+  applyStatic();
+});
 window.addEventListener("mouseup", () => { if (sdown) { sdown = null; plotTraces(); saveView(); } });
 
 boot();

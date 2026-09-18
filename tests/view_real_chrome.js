@@ -173,6 +173,16 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (await ev("document.getElementById('sizeWho').textContent") !== "size of roi1") fail("size row does not follow the selection");
   await ev("setTool('spot'); ROIS.length=0; saveRois(); addRoi(makeSpot(60,60,3)); 'ok'"); await sleep(300);
 
+  // 2e. the metadata panel resizes from its top edge, like the trace strip, and the height is saved
+  const ms = JSON.parse(await ev("JSON.stringify(document.getElementById('metaSplit').getBoundingClientRect())"));
+  const h0 = await ev("V.metaH");
+  await drag(ms.left + 100, ms.top + 2, ms.left + 100, ms.top - 80);
+  const h1 = await ev("V.metaH"), css = await ev("getComputedStyle(document.getElementById('meta')).height");
+  console.log("  metadata panel:", h0, "->", h1, "px, css", css);
+  if (Math.abs((h1 - h0) - 80) > 3) fail("dragging the metadata splitter did not grow the panel by the drag");
+  await sleep(500);
+  const savedH = (await getJSON(URL_ + "api/view")).view.metaH; if (savedH !== h1) fail("the metadata height was not saved: " + savedH);
+
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);
   const avg = await ev("V.avg"); const url = await ev("frameUrl()");

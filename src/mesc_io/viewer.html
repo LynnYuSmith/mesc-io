@@ -104,7 +104,8 @@
   .r .px { color:var(--faint); font-size:11px; white-space:nowrap }
   .r .x { color:var(--faint); text-align:center } .r .x:hover { color:var(--bad) }
   #exports { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--line);
-             align-items:center; font-size:11px }
+             align-items:center; font-size:11px; flex-wrap:wrap }
+  #exports button { font-size:11px; padding:3px 8px }
   #exports a { color:var(--accent); text-decoration:none }
   #saveState { margin-left:auto; color:var(--faint) } #saveState.bad { color:var(--bad) }
 
@@ -156,6 +157,7 @@
     <div class="instr" style="margin-top:6px">
       <button id="toolSpot" class="on" title="a small disc where you click">spot</button>
       <button id="toolPoly" title="click the corners, double-click to close">polygon</button>
+      <button id="clearAll" title="remove every ROI (asks first)" style="margin-left:auto">clear all</button>
     </div>
     <details>
       <summary>contrast</summary>
@@ -168,7 +170,9 @@
     <div id="roiList"></div>
     <div id="exports">
       <button id="doTraces" title="one pass over the recording">traces</button>
-      <a id="dlCsv" href="#">csv</a> <a id="dlZip" href="#">imagej</a> <a id="dlJson" href="#">json</a>
+      <a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a>
+      <button id="dlZip" title="the ROI set as an ImageJ zip — Fiji opens it, the pipeline reads it">export ROIs</button>
+      <a id="dlJson" href="#" title="the ROI set as stored">json</a>
       <span id="saveState" title="the view and the ROIs save themselves">saved</span>
     </div>
   </aside>
@@ -409,6 +413,7 @@ window.addEventListener("mouseup", ev => {
     d.consumed = true; lastPress = d; return;
   }
   if (!d.moved) return;
+  d.consumed = true; lastPress = d;                // a zoom drag is not a click: no spot at the release point
   const [x0, y0] = imgPoint({ clientX: d.x, clientY: d.y }), [x1, y1] = imgPoint(ev);
   const x = Math.max(0, Math.min(x0, x1)), y = Math.max(0, Math.min(y0, y1));
   const w = Math.min(unit.width, Math.max(x0, x1)) - x, h = Math.min(unit.height, Math.max(y0, y1)) - y;
@@ -523,7 +528,12 @@ $("delRoi").onclick = () => { if (V.sel >= 0) delRoi(V.sel); };
 $("toolSpot").onclick = () => { tool = "spot"; $("toolSpot").classList.add("on"); $("toolPoly").classList.remove("on"); draft = []; paint(); };
 $("toolPoly").onclick = () => { tool = "polygon"; $("toolPoly").classList.add("on"); $("toolSpot").classList.remove("on"); };
 $("dlCsv").onclick = e => { e.preventDefault(); if (unit) location.href = `/api/export/traces/${unit.path}/${V.ch}.csv`; };
-$("dlZip").onclick = e => { e.preventDefault(); location.href = "/api/export/rois.zip"; };
+$("dlZip").onclick = e => { e.preventDefault(); if (!ROIS.length) { badge("no ROIs to export", true); setTimeout(() => badge("saved"), 1500); return; } location.href = "/api/export/rois.zip"; };
+$("clearAll").onclick = () => {
+  if (!ROIS.length) return;
+  if (!confirm(`Remove all ${ROIS.length} ROIs? The set on disk is replaced; export first if you want to keep it.`)) return;
+  ROIS = []; V.sel = -1; V.shown = {}; TR = null; draft = []; renderRois(); paint(); plotTraces(); saveRois(); saveView();
+};
 $("dlJson").onclick = e => { e.preventDefault(); location.href = "/api/export/rois.json"; };
 
 /* ------------------------------------------------------------------------------------------

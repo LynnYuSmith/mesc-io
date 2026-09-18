@@ -65,6 +65,8 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   await drag(ex, ey, fx, fy);
   const z = JSON.parse(await ev("JSON.stringify(V.zoom)")); console.log("  box zoom:", z);
   if (!z.w) fail("a box on empty image did not zoom");
+  await sleep(400);
+  if (await ev("ROIS.length") !== 1) fail("the zoom drag's release added a spot: " + await ev("ROIS.length"));
 
   // 2. traces: compute, then drag a box in stack mode -> time zoom, with the rubber shown mid-drag
   await ev("document.getElementById('doTraces').click(); 'ok'"); await sleep(2000);

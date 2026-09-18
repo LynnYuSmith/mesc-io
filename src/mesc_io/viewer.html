@@ -87,6 +87,10 @@
   .stepper input[type=number] { width:54px; border:none; border-left:1px solid var(--line); border-radius:0;
                                 text-align:center; font-variant-numeric:tabular-nums; -moz-appearance:textfield }
   .stepper input::-webkit-inner-spin-button { opacity:1 }
+  .sizes { align-items:center; font-size:11px; color:var(--muted) }
+  .sizes label { display:inline-flex; align-items:center; gap:4px }
+  .sizes input[type=number] { width:52px; padding:2px 4px; font-size:11px }
+  .sizes span { color:var(--faint) }
   details { margin:8px 12px 0; font-size:12px }
   summary { cursor:pointer; color:var(--muted); user-select:none }
   details .row { display:grid; grid-template-columns:52px 1fr 48px; gap:8px; align-items:center;
@@ -155,9 +159,15 @@
       <button id="meanBtn" title="the whole recording collapsed into one picture">mean</button>
     </div>
     <div class="instr" style="margin-top:6px">
-      <button id="toolSpot" class="on" title="a small disc where you click">spot</button>
+      <button id="toolSpot" class="on" title="a disc where you click">spot</button>
+      <button id="toolRect" title="a rectangle centred where you click">rect</button>
       <button id="toolPoly" title="click the corners, double-click to close">polygon</button>
       <button id="clearAll" title="remove every ROI (asks first)" style="margin-left:auto">clear all</button>
+    </div>
+    <div class="instr sizes" style="margin-top:6px" id="sizeRow">
+      <label id="sizeSpot"><span>r</span><input type="number" id="spotR" min="1" max="200" step="0.5" value="3"> px</label>
+      <label id="sizeRect" style="display:none"><span>w</span><input type="number" id="rectW" min="1" max="1000" step="1" value="8"> × <input type="number" id="rectH" min="1" max="1000" step="1" value="8"> px</label>
+      <span class="hint" id="sizeWho">for new ROIs</span>
     </div>
     <details>
       <summary>contrast</summary>
@@ -371,8 +381,8 @@ let down = null;
 function hitRoi(x, y) {
   const tol = 2.5 / mapping().k + 1;               // a few screen px, in image px
   for (let i = ROIS.length - 1; i >= 0; i--) {
-    const r = ROIS[i], spot = r.points.length === 16 && isDisc(r.points);
-    if (!spot) { const v = r.points.findIndex(([px, py]) => Math.hypot(px - x, py - y) <= tol); if (v >= 0) return { i, vertex: v }; }
+    const r = ROIS[i];
+    if (kindOf(r) === "poly") { const v = r.points.findIndex(([px, py]) => Math.hypot(px - x, py - y) <= tol); if (v >= 0) return { i, vertex: v }; }
     if (inside(r.points, x, y)) return { i, vertex: -1 };
   }
   return null;
@@ -390,9 +400,10 @@ function inside(pts, x, y) {                       // even-odd, the same rule th
 $("stage").onmousedown = ev => {
   if (ev.button !== 0 || !unit) return;
   const [x, y] = imgPoint(ev);
-  const hit = tool === "spot" || !draft.length ? hitRoi(x, y) : null;
+  const hit = tool !== "polygon" || !draft.length ? hitRoi(x, y) : null;
   down = { x: ev.clientX, y: ev.clientY, moved: false, hit, ix: x, iy: y,
-           orig: hit ? ROIS[hit.i].points.map(p => p.slice()) : null };
+           orig: hit ? ROIS[hit.i].points.map(p => p.slice()) : null,
+           ocx: hit ? ROIS[hit.i].cx : 0, ocy: hit ? ROIS[hit.i].cy : 0 };
   if (hit) { V.sel = hit.i; renderRois(); paint(); $("stage").style.cursor = "grabbing"; }
 };
 $("stage").onmousemove = ev => {
@@ -404,6 +415,7 @@ $("stage").onmousemove = ev => {
     const [x, y] = imgPoint(ev), ddx = x - down.ix, ddy = y - down.iy, r = ROIS[down.hit.i];
     const clamp = ([px, py]) => [Math.max(0, Math.min(unit.width - 1, px)), Math.max(0, Math.min(unit.height - 1, py))];
     if (down.hit.vertex >= 0) { const [ox, oy] = down.orig[down.hit.vertex]; r.points[down.hit.vertex] = clamp([Math.round(ox + ddx), Math.round(oy + ddy)]); }
+    else if (kindOf(r) !== "poly") { r.cx = +Math.max(0, Math.min(unit.width - 1, down.ocx + ddx)).toFixed(2); r.cy = +Math.max(0, Math.min(unit.height - 1, down.ocy + ddy)).toFixed(2); regen(r); }
     else r.points = down.orig.map(([ox, oy]) => clamp([Math.round(ox + ddx), Math.round(oy + ddy)]));
     paint(); return;
   }
@@ -438,7 +450,8 @@ $("stage").onclick = ev => {
   clearTimeout(pendingClick);
   pendingClick = setTimeout(() => {
     pendingClick = 0;
-    if (tool === "spot") addRoi({ name: nextName(), points: disc(x, y) });
+    if (tool === "spot") addRoi(makeSpot(x, y, +$("spotR").value || 3));
+    else if (tool === "rect") addRoi(makeRect(x, y, +$("rectW").value || 8, +$("rectH").value || 8));
     else { draft.push([x, y]); paint(); }
   }, 230);
 };
@@ -508,8 +521,33 @@ window.addEventListener("keydown", e => {
 
 /* ------------------------------------------------------------------------------------------
    ROIs: a list that scrolls and filters; + and − in the instruments; drawn on the image */
-const disc = (x, y, r = 3, n = 16) => Array.from({ length: n }, (_, k) => {
-  const a = 2 * Math.PI * k / n; return [Math.round(x + r * Math.cos(a)), Math.round(y + r * Math.sin(a))]; });
+/* Three kinds. A spot and a rect carry their parameters (centre + radius; centre + w×h) and
+   regenerate their points from them, so a size change is a change of a number, not of a
+   shape by hand. A polygon is its points. The server and the ImageJ export only ever see
+   points, so nothing downstream has to know. */
+const disc = (x, y, r = 3, n = 24) => Array.from({ length: n }, (_, k) => {
+  const a = 2 * Math.PI * k / n; return [+(x + r * Math.cos(a)).toFixed(2), +(y + r * Math.sin(a)).toFixed(2)]; });
+const rectPts = (x, y, w, h) => { const hw = w / 2, hh = h / 2; return [[x - hw, y - hh], [x + hw, y - hh], [x + hw, y + hh], [x - hw, y + hh]].map(([a, b]) => [+a.toFixed(2), +b.toFixed(2)]); };
+function makeSpot(x, y, r) { return { name: nextName(), kind: "spot", cx: x, cy: y, r, points: disc(x, y, r) }; }
+function makeRect(x, y, w, h) { return { name: nextName(), kind: "rect", cx: x, cy: y, w, h, points: rectPts(x, y, w, h) }; }
+function regen(r) {
+  if (r.kind === "spot") r.points = disc(r.cx, r.cy, r.r);
+  else if (r.kind === "rect") r.points = rectPts(r.cx, r.cy, r.w, r.h);
+}
+/* An ROI from an older file has only points: recognise a disc or an axis-aligned rectangle. */
+function kindOf(r) {
+  if (r.kind) return r.kind;
+  const p = r.points;
+  if (p.length === 4 && p[0][1] === p[1][1] && p[1][0] === p[2][0] && p[2][1] === p[3][1] && p[3][0] === p[0][0]) {
+    r.kind = "rect"; r.cx = (p[0][0] + p[2][0]) / 2; r.cy = (p[0][1] + p[2][1]) / 2; r.w = Math.abs(p[2][0] - p[0][0]); r.h = Math.abs(p[2][1] - p[0][1]); return "rect";
+  }
+  if (p.length >= 12 && isDisc(p)) {
+    r.cx = p.reduce((a, q) => a + q[0], 0) / p.length; r.cy = p.reduce((a, q) => a + q[1], 0) / p.length;
+    r.r = p.reduce((a, q) => a + Math.hypot(q[0] - r.cx, q[1] - r.cy), 0) / p.length; r.kind = "spot"; return "spot";
+  }
+  r.kind = "poly"; return "poly";
+}
+const sizeOf = r => kindOf(r) === "spot" ? `r ${(+r.r).toFixed(1)}` : kindOf(r) === "rect" ? `${r.w}×${r.h}` : `${r.points.length}p`;
 const nextName = () => { let n = ROIS.length + 1; while (ROIS.some(r => r.name === "roi" + n)) n++; return "roi" + n; };
 /* ROIs belong to the unit on screen. The field moves between areas and between repeats, so
    a set drawn on one unit is loaded for that unit only; "copy from" brings another unit's
@@ -543,6 +581,7 @@ $("copyFrom").onchange = async () => {
   $("copyFrom").value = ""; V.sel = -1; TR = null; await loadRois(); plotTraces(); saveView();
 };
 function renderRois() {
+  syncSizeRow();
   const q = $("roiFilter").value.trim().toLowerCase();
   $("roiCount").textContent = ROIS.length ? `${ROIS.length}` : "";
   $("delRoi").disabled = V.sel < 0;
@@ -552,7 +591,7 @@ function renderRois() {
       <input type="checkbox" data-show="${i}" ${shown()[r.name] !== false ? "checked" : ""} title="draw in the trace strip">
       <span class="sw" style="background:${colour(i)}"></span>
       <span class="nm" data-i="${i}" title="double-click to rename">${esc(r.name)}</span>
-      <span class="px">${r.points.length <= 16 && r.points.length >= 12 ? "spot" : "poly"} · ${r.points.length}p</span>
+      <span class="px">${kindOf(r)} · ${sizeOf(r)}</span>
       <span class="x" data-del="${i}" title="remove">×</span>
     </div>`).join("") : `<div class="r"><span></span><span></span><span class="px">${ROIS.length ? "nothing matches" : "click the image to add one"}</span></div>`;
   /* The name used to be a text input filling the row, so a click on the row focused it and
@@ -583,10 +622,35 @@ function renderRois() {
   $("roiList").querySelectorAll(".r[data-i]").forEach(d => { d.onclick = () => { V.sel = +d.dataset.i; renderRois(); paint(); plotTraces(); saveView(); }; });
 }
 $("roiFilter").oninput = renderRois;
-$("addRoi").onclick = () => { $("stage").style.outline = "1px solid var(--accent)"; setTimeout(() => $("stage").style.outline = "", 600); $("stageHint").textContent = tool === "spot" ? "click a bouton" : "click the corners, double-click to close"; };
+$("addRoi").onclick = () => { $("stage").style.outline = "1px solid var(--accent)"; setTimeout(() => $("stage").style.outline = "", 600); $("stageHint").textContent = tool === "polygon" ? "click the corners, double-click to close" : "click where it goes"; };
 $("delRoi").onclick = () => { if (V.sel >= 0) delRoi(V.sel); };
-$("toolSpot").onclick = () => { tool = "spot"; $("toolSpot").classList.add("on"); $("toolPoly").classList.remove("on"); draft = []; paint(); };
-$("toolPoly").onclick = () => { tool = "polygon"; $("toolPoly").classList.add("on"); $("toolSpot").classList.remove("on"); };
+function setTool(t) {
+  tool = t; draft = [];
+  $("toolSpot").classList.toggle("on", t === "spot"); $("toolRect").classList.toggle("on", t === "rect"); $("toolPoly").classList.toggle("on", t === "polygon");
+  syncSizeRow(); paint();
+}
+$("toolSpot").onclick = () => setTool("spot"); $("toolRect").onclick = () => setTool("rect"); $("toolPoly").onclick = () => setTool("polygon");
+/* The size row edits the SELECTED spot or rect when there is one, and otherwise sets the size
+   the next click will place. The hint under it says which. */
+function syncSizeRow() {
+  const r = V.sel >= 0 ? ROIS[V.sel] : null, k = r ? kindOf(r) : null;
+  const show = k && k !== "poly" ? k : tool === "rect" ? "rect" : tool === "spot" ? "spot" : null;
+  $("sizeSpot").style.display = show === "spot" ? "" : "none";
+  $("sizeRect").style.display = show === "rect" ? "" : "none";
+  $("sizeRow").style.visibility = show ? "" : "hidden";
+  if (r && k === "spot") $("spotR").value = r.r;
+  if (r && k === "rect") { $("rectW").value = r.w; $("rectH").value = r.h; }
+  $("sizeWho").textContent = r && k !== "poly" ? `size of ${r.name}` : "for new ROIs";
+}
+function applySize() {
+  const r = V.sel >= 0 ? ROIS[V.sel] : null; if (!r) return;
+  const k = kindOf(r);
+  if (k === "spot") r.r = Math.max(0.5, +$("spotR").value || r.r);
+  else if (k === "rect") { r.w = Math.max(1, +$("rectW").value || r.w); r.h = Math.max(1, +$("rectH").value || r.h); }
+  else return;
+  regen(r); TR = null; renderRois(); paint(); saveRois();
+}
+["spotR", "rectW", "rectH"].forEach(id => { $(id).onchange = applySize; $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { applySize(); $(id).blur(); } }; });
 $("dlCsv").onclick = e => { e.preventDefault(); if (unit) location.href = `/api/export/traces/${unit.path}/${V.ch}.csv`; };
 $("dlZip").onclick = e => { e.preventDefault(); if (!ROIS.length) { badge("no ROIs to export", true); setTimeout(() => badge("saved"), 1500); return; } location.href = `/api/export/rois.zip?unit=${encodeURIComponent(unit.path)}`; };
 $("clearAll").onclick = () => {

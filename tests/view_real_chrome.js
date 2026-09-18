@@ -121,6 +121,8 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   console.log("  Enter: traces computed");
 
   // 2c. ROIs belong to the unit: draw on unit 0, switch to unit 1 -> empty; copy from -> present; back -> intact
+  await ev("document.querySelectorAll('.u')[1].click(); 'ok'"); await sleep(600);
+  await ev("ROIS.length=0; saveRois(); 'ok'"); await sleep(300);         // a previous run may have left a set here
   await ev("document.querySelectorAll('.u')[0].click(); 'ok'"); await sleep(600);
   await ev("ROIS.length=0; addRoi({name:'a', points: disc(30,40)}); addRoi({name:'b', points: disc(70,60)}); 'ok'"); await sleep(400);
   await ev("document.querySelectorAll('.u')[1].click(); 'ok'"); await sleep(700);
@@ -136,6 +138,32 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   console.log("  per-unit ROIs: independent, copy works");
   await ev("document.querySelectorAll('.u')[1].click(); 'ok'"); await sleep(700);
   await ev("ROIS.length=0; saveRois(); addRoi({name:'roi9', points: disc(60,60)}); 'ok'"); await sleep(400);
+
+  // 2d. spot radius and rect size: typed for new ones, and changed on the selected one
+  await ev("ROIS.length=0; saveRois(); document.getElementById('spotR').value='5'; setTool('spot'); 'ok'");
+  const [px, py] = await at(40, 90);
+  await mouse("mouseMoved", px, py); await mouse("mousePressed", px, py, { clickCount: 1 }); await mouse("mouseReleased", px, py, { clickCount: 1 }); await sleep(400);
+  const r0 = await ev("ROIS[0].r"); if (r0 !== 5) fail("a new spot did not take the typed radius: " + r0);
+  await ev("document.getElementById('spotR').value='9'; applySize(); 'ok'"); await sleep(300);
+  const r1 = await ev("ROIS[0].r"), span = await ev("(()=>{const xs=ROIS[0].points.map(p=>p[0]);return Math.max(...xs)-Math.min(...xs)})()");
+  console.log("  spot r:", r0, "->", r1, "point span:", span);
+  if (r1 !== 9 || Math.abs(span - 18) > 0.5) fail("resizing the selected spot did not regenerate its points");
+  await ev("setTool('rect'); document.getElementById('rectW').value='12'; document.getElementById('rectH').value='6'; 'ok'");
+  const [qx2, qy2] = await at(90, 30);
+  await mouse("mouseMoved", qx2, qy2); await mouse("mousePressed", qx2, qy2, { clickCount: 1 }); await mouse("mouseReleased", qx2, qy2, { clickCount: 1 }); await sleep(400);
+  const rk = await ev("ROIS[1] && ROIS[1].kind"), rw = await ev("ROIS[1] && ROIS[1].w");
+  console.log("  rect placed:", rk, rw + "x" + await ev("ROIS[1].h"));
+  if (rk !== "rect" || rw !== 12) fail("the rect tool did not place a 12x6 rect");
+  // dragging the rect moves its centre and its points together
+  const [dx0, dy0] = await at(90, 30), [dx1, dy1] = await at(100, 30);
+  await drag(dx0, dy0, dx1, dy1);
+  const cx = await ev("ROIS[1].cx"), p0 = await ev("ROIS[1].points[0][0]");
+  if (Math.abs(cx - 100) > 1 || Math.abs(p0 - 94) > 1) fail("dragging the rect did not move centre and points together: " + cx + " " + p0);
+  console.log("  rect dragged: cx", cx, "first corner x", p0);
+  // the size row follows the selection
+  await ev("V.sel=0; renderRois(); 'ok'");
+  if (await ev("document.getElementById('sizeWho').textContent") !== "size of roi1") fail("size row does not follow the selection");
+  await ev("setTool('spot'); ROIS.length=0; saveRois(); addRoi(makeSpot(60,60,3)); 'ok'"); await sleep(300);
 
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);

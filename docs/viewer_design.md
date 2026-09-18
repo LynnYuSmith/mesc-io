@@ -127,6 +127,16 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   waits 230 ms; a second click or a double-click within that cancels it. One gesture, one
   meaning.
 
+## Three kinds of ROI, and a size you can change (2026-09-18)
+
+`spot · rect · polygon`. A spot is a centre and a radius, a rect a centre and w × h; both
+regenerate their points from those numbers, so a size is a number you type, not a shape you
+redraw. The size row under the tools edits the **selected** spot or rect when there is one
+(«size of roi3»), and otherwise sets what the next click will place («for new ROIs»).
+Dragging moves the centre; the points follow. The server and the ImageJ export only ever see
+points. An ROI from an older file is recognised as a disc or an axis-aligned rectangle by its
+shape, and as a polygon otherwise.
+
 ## ROIs belong to a unit (2026-09-18)
 
 It bit the same afternoon: the field moves between areas and between repeats, and a set

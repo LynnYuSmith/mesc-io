@@ -140,6 +140,13 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   value range too, but any change of the time window (arrows, wheel, a new box) lets the
   y limits follow the data again.
 
+* **Typed vertical limits**: `y [lo] – [hi] [auto]` in the trace bar. Typed limits
+  apply to every band in stack and to the overlay, survive time zooms and mode switches, and
+  are released by `auto`. When on auto the boxes show, greyed, the limits in force (in stack:
+  of the selected band). An inverted range is refused with a word in the badge.
+* The ROI store's read-modify-write is under a lock now — the server is threaded, and two
+  quick saves used to be able to write over each other.
+
 ## Three kinds of ROI, and a size you can change (2026-09-18)
 
 `spot · rect · polygon`. A spot is a centre and a radius, a rect a centre and w × h; both

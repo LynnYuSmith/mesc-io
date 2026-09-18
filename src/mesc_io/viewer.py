@@ -145,6 +145,7 @@ class _Handler(BaseHTTPRequestHandler):
     mesc_path: Path = None          # set by serve()
     rois_path: Path = None          # ""
     _lock = threading.Lock()
+    _store_lock = threading.Lock()      # the ROI store's read-modify-write
     _cache = {}
 
     # -- plumbing ---------------------------------------------------------
@@ -225,7 +226,8 @@ class _Handler(BaseHTTPRequestHandler):
                 view = json.loads(self.rfile.read(n) or b"{}")
                 if not isinstance(view, dict):
                     raise ValueError("expected a JSON object")
-                self._save_view(view)
+                with self._store_lock:
+                    self._save_view(view)
                 return self._json({"saved": True, "path": str(self.view_path)})
             if parts[:2] != ["api", "rois"]:
                 return self._json({"error": "no route"}, 404)
@@ -236,12 +238,15 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError("expected {'unit': 'MSession_0/MUnit_3', 'rois': [...]}")
             if not isinstance(rois, list):
                 raise ValueError("expected {'rois': [...]}")
-            store = self._load_store()
-            if rois:
-                store[unit] = rois
-            else:
-                store.pop(unit, None)
-            self._save_store(store)
+            # Threaded server: two saves in flight (a spot added twice quickly) must not each
+            # read the store, change it and write it back over the other. One step, under the lock.
+            with self._store_lock:
+                store = self._load_store()
+                if rois:
+                    store[unit] = rois
+                else:
+                    store.pop(unit, None)
+                self._save_store(store)
             self._json({"unit": unit, "saved": len(rois), "path": str(self.rois_path)})
         except Exception as exc:                             # noqa: BLE001
             self._fail(exc)
@@ -256,11 +261,12 @@ class _Handler(BaseHTTPRequestHandler):
             src, dst = payload.get("from"), payload.get("to")
             if not (src and dst) or src == dst:
                 raise ValueError("expected {'from': <unit>, 'to': <another unit>}")
-            store = self._load_store()
-            if not store.get(src):
-                raise ValueError(f"{src} has no ROIs to copy")
-            store[dst] = [dict(r) for r in store[src]]
-            self._save_store(store)
+            with self._store_lock:
+                store = self._load_store()
+                if not store.get(src):
+                    raise ValueError(f"{src} has no ROIs to copy")
+                store[dst] = [dict(r) for r in store[src]]
+                self._save_store(store)
             self._json({"unit": dst, "copied": len(store[dst]), "from": src})
         except Exception as exc:                             # noqa: BLE001
             self._fail(exc)

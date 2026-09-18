@@ -123,6 +123,11 @@
   #traceScroll { flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; position:relative }
   #trace { display:block; width:100%; }
   #traceLbl { color:var(--muted) }
+  .ylim { display:inline-flex; align-items:center; gap:4px; color:var(--faint) }
+  .ylim input[type=number] { width:64px; padding:2px 4px; font-size:11px; -moz-appearance:textfield }
+  .ylim input::-webkit-inner-spin-button { display:none }
+  .ylim input.fixed { border-color:var(--accent); color:var(--accent) }
+  .ylim button { font-size:11px; padding:2px 6px }
   #splitter { height:4px; cursor:row-resize; background:transparent; margin-top:-4px }
   #splitter:hover { background:var(--accent) }
 </style>
@@ -199,6 +204,10 @@
       <button id="modeStack" class="on" title="one line per ROI, with an offset">stack</button>
       <button id="modeOverlay" title="all on one axis">overlay</button>
       <button id="gridBtn" class="on" title="time and value grid">grid</button>
+      <label class="ylim" title="vertical limits in reader units — type them, or leave on auto">
+        <span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto">
+        <button id="yAuto" title="back to limits that follow the data">auto</button>
+      </label>
       <button id="traceReset" title="whole recording">⤢</button>
       <span class="hint" id="traceHint">drag a box to zoom · double-click resets · ← → slide</span>
     </div>
@@ -219,6 +228,7 @@ const V = {
   zoom: { x: 0, y: 0, w: 0, h: 0 },        // in image pixels; w=0 means the whole frame
   traceMode: "stack", grid: true, traceZoom: null,   // [t0, t1] in frames, or null
   valueZoom: null,                          // overlay only: [lo, hi] in reader units, or null
+  yFixed: null,                             // typed limits [lo, hi]; apply to every band and the overlay until 'auto'
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
   tracesH: 260, metaH: 300,
 };
@@ -260,7 +270,7 @@ async function boot() {
     </div>`).join("");
   $("units").onclick = e => { const d = e.target.closest(".u"); if (d) pick(+d.dataset.i); };
   const saved = (await (await fetch("/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","sel","shown","tracesH","metaH"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","sel","shown","tracesH","metaH"]));
   applyStatic();
   const idx = Math.max(0, FILE.units.findIndex(u => u.path === saved.unit));
   if (FILE.units.length) pick(idx, true);
@@ -562,6 +572,7 @@ async function loadRois() {
   ROIS = d.rois || []; ROI_UNITS = d.units_with_rois || {}; draft = [];
   if (V.sel >= ROIS.length) V.sel = -1;
   renderRois(); paint();
+  document.body.dataset.roisFor = unit.path;      // a driver can wait for this instead of guessing a delay
 }
 async function saveRois() {
   if (!unit) return;
@@ -687,7 +698,7 @@ function plotTraces() {
   const rowH = 64, H = stack ? Math.max(box.clientHeight, ts.length * rowH + 22) : box.clientHeight;
   c.width = W * dpr; c.height = H * dpr; c.style.height = H + "px"; g.scale(dpr, dpr);
   g.clearRect(0, 0, W, H);
-  if (!TR) { $("traceLbl").textContent = ROIS.length ? "traces — press to compute" : "traces"; g.fillStyle = "#5d656e"; g.font = "12px sans-serif";
+  if (!TR) { lastAuto = null; syncYBoxes(); $("traceLbl").textContent = ROIS.length ? "traces — press to compute" : "traces"; g.fillStyle = "#5d656e"; g.font = "12px sans-serif";
              g.fillText(ROIS.length ? "press ‹traces› to read every ROI's time course in one pass" : "draw an ROI on the image, then ‹traces›", 12, 24); return; }
   const n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1];
   const L = 54, R = 12, T = 18, B = 18;
@@ -706,9 +717,10 @@ function plotTraces() {
   // the frame cursor: the slider and the trace strip are the same number
   if (!V.mean) { const x = Math.round(X(V.frame)) + .5; g.strokeStyle = "#4ea3dd"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); }
   if (stack) {
+    lastAuto = ts.length ? limits((ts.find(t => t.i === V.sel) || ts[0]).v.slice(t0, t1 + 1)) : null;
     ts.forEach((t, row) => {
       const y0 = T + row * rowH, band = rowH - 8;
-      const seg = t.v.slice(t0, t1 + 1), [lo, hi] = limits(seg);
+      const seg = t.v.slice(t0, t1 + 1), [lo, hi] = V.yFixed || limits(seg);
       if (V.grid) { g.strokeStyle = "#20252b"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.3; g.beginPath();
       g.save(); g.beginPath(); g.rect(L, y0 - 2, W - L - R, band + 4); g.clip(); g.beginPath();
@@ -720,7 +732,8 @@ function plotTraces() {
     });
   } else {
     const all = ts.flatMap(t => t.v.slice(t0, t1 + 1));
-    const [lo, hi] = V.valueZoom || limits(all);
+    const [lo, hi] = V.yFixed || V.valueZoom || limits(all);
+    lastAuto = limits(all);
     const Y = v => T + (H - T - B) - (v - lo) / ((hi - lo) || 1) * (H - T - B);
     if (V.grid) { g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif";
       const vs = niceStep((hi - lo) / 5);
@@ -734,6 +747,7 @@ function plotTraces() {
     g.restore();
     ts.forEach((t, k) => { g.fillStyle = colour(t.i); g.font = "11px sans-serif"; g.fillText(t.name, L + 6 + k * 70, T - 5); });
   }
+  syncYBoxes();
 }
 /* Axis limits adapt to what is on screen: the 1st and 99th percentile of the visible frames,
    padded a little. Min/max let a single odd frame (the black head, a saturated flash) flatten
@@ -745,6 +759,30 @@ function limits(vals) {
   const pad = (hi - lo) * 0.06 || 1;
   return [lo - pad, hi + pad];
 }
+let lastAuto = null;
+/* The boxes show the limits in force: typed ones in accent, auto ones greyed as placeholders
+   (in stack mode, those of the selected band). Typing fixes them for every band and the
+   overlay, across time zooms, until 'auto'. */
+function syncYBoxes() {
+  const lo = $("yLo"), hi = $("yHi"), fixed = !!V.yFixed;
+  lo.classList.toggle("fixed", fixed); hi.classList.toggle("fixed", fixed);
+  if (fixed) { if (document.activeElement !== lo) lo.value = V.yFixed[0]; if (document.activeElement !== hi) hi.value = V.yFixed[1]; }
+  else { lo.value = ""; hi.value = ""; lo.placeholder = lastAuto ? lastAuto[0].toFixed(0) : "auto"; hi.placeholder = lastAuto ? lastAuto[1].toFixed(0) : "auto"; }
+  $("yAuto").disabled = !fixed;
+}
+function applyY() {
+  const lo = parseFloat($("yLo").value), hi = parseFloat($("yHi").value);
+  if (!isFinite(lo) && !isFinite(hi)) { V.yFixed = null; }
+  else {
+    const base = V.yFixed || lastAuto || [0, 1];
+    const a = isFinite(lo) ? lo : base[0], b = isFinite(hi) ? hi : base[1];
+    if (b <= a) { badge("y: high must be above low", true); setTimeout(() => badge("saved"), 1500); syncYBoxes(); return; }
+    V.yFixed = [a, b];
+  }
+  plotTraces(); saveView();
+}
+["yLo", "yHi"].forEach(id => { $(id).onchange = applyY; $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { applyY(); $(id).blur(); } }; });
+$("yAuto").onclick = () => { V.yFixed = null; plotTraces(); saveView(); };
 function niceStep(raw) { if (raw <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(raw))); const m = raw / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; }
 
 /* zoom in time by dragging a span; wheel around the cursor; ⤢ resets; click moves the frame */
@@ -760,7 +798,7 @@ const traceFrame = ev => {
 const traceValue = ev => {                          // overlay only
   const r = $("trace").getBoundingClientRect(), H = +$("trace").style.height.replace("px", "") || $("traceScroll").clientHeight;
   const ts = visibleTraces(), n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1];
-  const all = ts.flatMap(t => t.v.slice(t0, t1 + 1)); const [lo, hi] = V.valueZoom || limits(all);
+  const all = ts.flatMap(t => t.v.slice(t0, t1 + 1)); const [lo, hi] = V.yFixed || V.valueZoom || limits(all);
   return lo + (1 - (ev.clientY - r.top - TT) / (H - TT - TB)) * (hi - lo);
 };
 $("trace").onmousedown = ev => { if (TR && ev.button === 0) tdown = { x: ev.clientX, y: ev.clientY, f: traceFrame(ev), v: V.traceMode === "overlay" ? traceValue(ev) : null, moved: false }; };

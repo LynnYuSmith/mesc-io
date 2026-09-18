@@ -128,12 +128,15 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (await ev("TR ? TR.names.length : 0") < 1) fail("Enter did not compute the traces");
   console.log("  Enter: traces computed");
 
+  const pickUnit = async (i) => { await ev(`document.body.dataset.roisFor=''; document.querySelectorAll('.u')[${i}].click(); 'ok'`);
+    for (let k = 0; k < 40; k++) { await sleep(100); if (await ev("document.body.dataset.roisFor === unit.path")) return; } fail("unit " + i + " never finished loading its ROIs"); };
   // 2c. ROIs belong to the unit: draw on unit 0, switch to unit 1 -> empty; copy from -> present; back -> intact
-  await ev("document.querySelectorAll('.u')[1].click(); 'ok'"); await sleep(600);
+  await pickUnit(1);
   await ev("ROIS.length=0; saveRois(); 'ok'"); await sleep(300);         // a previous run may have left a set here
-  await ev("document.querySelectorAll('.u')[0].click(); 'ok'"); await sleep(600);
-  await ev("ROIS.length=0; addRoi({name:'a', points: disc(30,40)}); addRoi({name:'b', points: disc(70,60)}); 'ok'"); await sleep(400);
-  await ev("document.querySelectorAll('.u')[1].click(); 'ok'"); await sleep(700);
+  await pickUnit(0);
+  await ev("ROIS.length=0; addRoi({name:'a', points: disc(30,40)}); addRoi({name:'b', points: disc(70,60)}); 'ok'");
+  for (let k = 0; k < 40; k++) { await sleep(100); if (await ev("ROI_UNITS[unit.path] === 2")) break; }   // both saves acknowledged
+  await pickUnit(1);
   const n1 = await ev("ROIS.length"); const menu = await ev("document.getElementById('copyFrom').style.display");
   console.log("  unit 1 rois:", n1, "copy menu shown:", menu === "");
   if (n1 !== 0) fail("unit 1 sees unit 0's ROIs");
@@ -141,10 +144,10 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   await ev("const c=document.getElementById('copyFrom'); c.value='MSession_0/MUnit_0'; c.dispatchEvent(new Event('change')); 'ok'"); await sleep(800);
   if (await ev("ROIS.length") !== 2) fail("copy from unit 0 did not bring 2 ROIs");
   await ev("delRoi(0); 'ok'"); await sleep(400);
-  await ev("document.querySelectorAll('.u')[0].click(); 'ok'"); await sleep(700);
+  await pickUnit(0);
   if (await ev("ROIS.length") !== 2) fail("deleting on unit 1 touched unit 0's set");
   console.log("  per-unit ROIs: independent, copy works");
-  await ev("document.querySelectorAll('.u')[1].click(); 'ok'"); await sleep(700);
+  await pickUnit(1);
   await ev("ROIS.length=0; saveRois(); addRoi({name:'roi9', points: disc(60,60)}); 'ok'"); await sleep(400);
 
   // 2d. spot radius and rect size: typed for new ones, and changed on the selected one
@@ -175,13 +178,35 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
 
   // 2e. the metadata panel resizes from its top edge, like the trace strip, and the height is saved
   const ms = JSON.parse(await ev("JSON.stringify(document.getElementById('metaSplit').getBoundingClientRect())"));
+  await ev("V.metaH=300; applyStatic(); 'ok'"); await sleep(100);               // a previous run may have left it near the clamp
+  const ms2 = JSON.parse(await ev("JSON.stringify(document.getElementById('metaSplit').getBoundingClientRect())"));
   const h0 = await ev("V.metaH");
-  await drag(ms.left + 100, ms.top + 2, ms.left + 100, ms.top - 80);
+  await drag(ms2.left + 100, ms2.top + 2, ms2.left + 100, ms2.top - 80);
   const h1 = await ev("V.metaH"), css = await ev("getComputedStyle(document.getElementById('meta')).height");
   console.log("  metadata panel:", h0, "->", h1, "px, css", css);
   if (Math.abs((h1 - h0) - 80) > 3) fail("dragging the metadata splitter did not grow the panel by the drag");
   await sleep(500);
   const savedH = (await getJSON(URL_ + "api/view")).view.metaH; if (savedH !== h1) fail("the metadata height was not saved: " + savedH);
+
+  // 2f. typed vertical limits: apply in both modes, survive a time zoom, 'auto' releases them
+  await ev("document.getElementById('doTraces').click(); 'ok'"); for (let i = 0; i < 40; i++) { await sleep(250); if (await ev("TR !== null")) break; }
+  await ev("V.traceZoom=null; V.valueZoom=null; V.yFixed=null; document.getElementById('modeOverlay').click(); 'ok'"); await sleep(200);
+  const autoPh = await ev("document.getElementById('yLo').placeholder");
+  await ev("(()=>{const a=document.getElementById('yLo'), b=document.getElementById('yHi'); a.value='-400'; b.value='-100'; b.dispatchEvent(new Event('change'));})(); 'ok'"); await sleep(200);
+  let yf = JSON.parse(await ev("JSON.stringify(V.yFixed)")); console.log("  y typed:", yf, "(auto was", autoPh + ")");
+  if (!yf || yf[0] !== -400 || yf[1] !== -100) fail("typed y limits were not applied");
+  if (autoPh === "auto") fail("the auto placeholder did not show the limits in force");
+  await ev("V.traceZoom=[100,300]; plotTraces(); 'ok'"); await sleep(100);
+  if (!(await ev("V.yFixed"))) fail("a time zoom dropped the typed limits");
+  await ev("document.getElementById('modeStack').click(); 'ok'"); await sleep(100);
+  if (!(await ev("V.yFixed"))) fail("switching to stack dropped the typed limits");
+  await ev("(()=>{const a=document.getElementById('yLo'), b=document.getElementById('yHi'); a.value='0'; b.value='-5'; b.dispatchEvent(new Event('change'));})(); 'ok'"); await sleep(100);
+  yf = JSON.parse(await ev("JSON.stringify(V.yFixed)")); if (yf[0] !== -400) fail("an inverted range was accepted");
+  await ev("document.getElementById('yAuto').click(); 'ok'"); await sleep(100);
+  if (await ev("V.yFixed") !== null) fail("'auto' did not release the limits");
+  if (await ev("document.getElementById('yLo').value") !== "") fail("the boxes did not clear on auto");
+  console.log("  y limits: typed, kept across zoom and mode, inverted refused, auto releases");
+  await ev("document.getElementById('traceReset').click(); 'ok'");
 
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);

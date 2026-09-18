@@ -95,6 +95,24 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (await ev("V.frame") !== fBefore) fail("the double-click's clicks jumped the frame");
   console.log("  traces double-click: home, frame untouched");
 
+  // 2b. keys: with a time zoom, → slides the window; a click on a ROW then Delete removes the ROI
+  await ev("V.traceZoom=[100,200]; plotTraces(); 'ok'");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 }); await sleep(100);
+  const slid = JSON.parse(await ev("JSON.stringify(V.traceZoom)")); console.log("  → slid window:", slid);
+  if (slid[0] !== 110 || slid[1] !== 210) fail("ArrowRight did not slide the zoom window by 10%");
+  const row = JSON.parse(await ev("JSON.stringify(document.querySelector('#roiList .r[data-i]').getBoundingClientRect())"));
+  await mouse("mouseMoved", row.left + row.width / 2, row.top + row.height / 2);
+  await mouse("mousePressed", row.left + row.width / 2, row.top + row.height / 2, { clickCount: 1 });
+  await mouse("mouseReleased", row.left + row.width / 2, row.top + row.height / 2, { clickCount: 1 }); await sleep(100);
+  if (await ev("V.sel") < 0) fail("clicking the row did not select the ROI");
+  const nBefore = await ev("ROIS.length");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 }); await sleep(200);
+  const nAfter = await ev("ROIS.length"); console.log("  Delete after a row click:", nBefore, "->", nAfter);
+  if (nAfter !== nBefore - 1) fail("Delete did not remove the selected ROI");
+  await ev("addRoi({name:'roi9', points: disc(60,60)}); 'ok'"); await sleep(100);
+
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);
   const avg = await ev("V.avg"); const url = await ev("frameUrl()");

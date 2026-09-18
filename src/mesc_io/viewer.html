@@ -99,8 +99,8 @@
   .r:hover { background:var(--panel-2) }
   .r.sel { background:var(--sel); box-shadow:inset 3px 0 0 var(--accent) }
   .r .sw { width:10px; height:10px; border-radius:50% }
-  .r input[type=text] { width:100%; padding:1px 4px; background:none; border-color:transparent }
-  .r input[type=text]:focus { border-color:var(--line); background:var(--panel-2) }
+  .r .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; user-select:none }
+  .r input[type=text] { width:100%; padding:1px 4px }
   .r .px { color:var(--faint); font-size:11px; white-space:nowrap }
   .r .x { color:var(--faint); text-align:center } .r .x:hover { color:var(--bad) }
   #exports { display:flex; gap:8px; padding:8px 12px; border-top:1px solid var(--line);
@@ -186,7 +186,7 @@
       <button id="modeOverlay" title="all on one axis">overlay</button>
       <button id="gridBtn" class="on" title="time and value grid">grid</button>
       <button id="traceReset" title="whole recording">⤢</button>
-      <span class="hint" id="traceHint">drag a box to zoom · double-click resets · click jumps the frame</span>
+      <span class="hint" id="traceHint">drag a box to zoom · double-click resets · ← → slide</span>
     </div>
     <div id="traceScroll"><canvas id="trace"></canvas><div id="traceRubber"></div></div>
   </section>
@@ -479,9 +479,22 @@ window.addEventListener("keydown", e => {
   if (e.key === " ") { e.preventDefault(); if (unit) togglePlay(); }
   else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
     e.preventDefault(); if (!unit) return;
-    V.frame = Math.max(0, Math.min(unit.frames - 1, V.frame + (e.key === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 10 : 1)));
+    const dir = e.key === "ArrowRight" ? 1 : -1;
+    if (V.traceZoom && TR) {                       // zoomed into time: the arrows slide the window
+      const n = TR.traces[0].length, [a, b] = V.traceZoom, span = b - a, step = Math.max(1, Math.round(span * (e.shiftKey ? .5 : .1)));
+      let a2 = Math.max(0, Math.min(n - 1 - span, a + dir * step));
+      V.traceZoom = [a2, a2 + span];
+      if (V.frame < a2 || V.frame > a2 + span) { V.frame = Math.max(a2, Math.min(a2 + span, V.frame)); $("frame").value = V.frame; draw(); }
+      plotTraces(); saveView(); return;
+    }
+    V.frame = Math.max(0, Math.min(unit.frames - 1, V.frame + dir * (e.shiftKey ? 10 : 1)));
     $("frame").value = V.frame; V.mean = false; $("meanBtn").classList.remove("on"); draw(); plotTraces(); saveView();
-  } else if (e.key === "Delete" || e.key === "Backspace") { if (V.sel >= 0) delRoi(V.sel); }
+  } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+    if (!ROIS.length) return; e.preventDefault();
+    V.sel = V.sel < 0 ? 0 : (V.sel + (e.key === "ArrowDown" ? 1 : -1) + ROIS.length) % ROIS.length;
+    renderRois(); paint(); plotTraces(); saveView();
+    const row = $("roiList").querySelector(".r.sel"); if (row) row.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); if (V.sel >= 0) delRoi(V.sel); }
   else if (e.key === "Escape") { draft = []; paint(); }
 });
 
@@ -506,15 +519,30 @@ function renderRois() {
     <div class="r ${i === V.sel ? "sel" : ""}" data-i="${i}">
       <input type="checkbox" data-show="${i}" ${V.shown[r.name] !== false ? "checked" : ""} title="draw in the trace strip">
       <span class="sw" style="background:${colour(i)}"></span>
-      <input type="text" value="${esc(r.name)}" data-i="${i}">
+      <span class="nm" data-i="${i}" title="double-click to rename">${esc(r.name)}</span>
       <span class="px">${r.points.length <= 16 && r.points.length >= 12 ? "spot" : "poly"} · ${r.points.length}p</span>
       <span class="x" data-del="${i}" title="remove">×</span>
     </div>`).join("") : `<div class="r"><span></span><span></span><span class="px">${ROIS.length ? "nothing matches" : "click the image to add one"}</span></div>`;
-  $("roiList").querySelectorAll("input[type=text]").forEach(inp => {
-    inp.onclick = e => e.stopPropagation();
-    inp.onchange = () => { const r = ROIS[+inp.dataset.i], old = r.name; r.name = inp.value.trim() || old;
-      if (V.shown[old] !== undefined) { V.shown[r.name] = V.shown[old]; if (old !== r.name) delete V.shown[old]; }
-      TR = null; renderRois(); paint(); saveRois(); saveView(); };
+  /* The name used to be a text input filling the row, so a click on the row focused it and
+     the Delete key edited the name instead of removing the ROI. Now it is a label; a
+     double-click turns it into an input for as long as the rename takes. */
+  $("roiList").querySelectorAll(".nm").forEach(nm => {
+    nm.ondblclick = e => {
+      e.stopPropagation();
+      const i = +nm.dataset.i, inp = document.createElement("input"); inp.type = "text"; inp.value = ROIS[i].name;
+      nm.replaceWith(inp); inp.focus(); inp.select();
+      let done = false;
+      const commit = (apply) => {
+        if (done) return; done = true;
+        if (apply) { const r = ROIS[i], old = r.name; r.name = inp.value.trim() || old;
+          if (V.shown[old] !== undefined) { V.shown[r.name] = V.shown[old]; if (old !== r.name) delete V.shown[old]; }
+          TR = null; paint(); saveRois(); saveView(); }
+        renderRois();
+      };
+      inp.onblur = () => commit(true);
+      inp.onkeydown = ev => { ev.stopPropagation(); if (ev.key === "Enter") commit(true); else if (ev.key === "Escape") commit(false); };
+      inp.onclick = ev => ev.stopPropagation();
+    };
   });
   $("roiList").querySelectorAll("input[type=checkbox]").forEach(cb => {
     cb.onclick = e => { e.stopPropagation(); V.shown[ROIS[+cb.dataset.show].name] = cb.checked; plotTraces(); saveView(); };

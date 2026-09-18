@@ -108,8 +108,11 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   the name so nothing about the size is hidden.
 * The unit list carries a thumbnail of each unit's mean image (`/api/thumb`, ≤ 96 px). One
   small PNG per unit at load; it is how you find the right area among 27 units.
-* Keys: space plays, ← → step a frame (shift: ten), Delete removes the selected ROI, Esc
-  drops a polygon draft. Clicking in the trace strip moves the frame there.
+* Keys: space plays; ← → slide the time window when zoomed in (shift: half a window) and step
+  a frame otherwise (shift: ten); ↑ ↓ walk the ROI list; Delete removes the selected ROI; Esc
+  drops a polygon draft. Clicking in the trace strip moves the frame there; double-click goes
+  home. An ROI's name is renamed by double-clicking it — it is a label, not an input, so a
+  click on the row selects and Delete deletes.
 * The strip's height is dragged from its top edge and remembered.
 
 ## First use (2026-09-18, on the synthetic file)

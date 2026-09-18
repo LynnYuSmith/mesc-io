@@ -247,6 +247,13 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   yb = JSON.parse(await ev("JSON.stringify(V.yFixed)")); if (!yb || yb[0] !== -400) fail("raw's limits did not come back: " + JSON.stringify(yb));
   console.log("  typed limits kept per signal across the switch:", "raw", yb, "dff", JSON.parse(await ev("JSON.stringify(V.yFixedBy.dff)")));
   await ev("document.getElementById('yAuto').click(); 'ok'");
+  // the bar does not jump between raw and dF/F
+  const posRaw = JSON.parse(await ev("JSON.stringify(['modeStack','gridBtn','yLo','traceReset'].map(i=>Math.round(document.getElementById(i).getBoundingClientRect().left)))"));
+  await ev("document.getElementById('sigDff').click(); 'ok'"); await sleep(100);
+  const posDff = JSON.parse(await ev("JSON.stringify(['modeStack','gridBtn','yLo','traceReset'].map(i=>Math.round(document.getElementById(i).getBoundingClientRect().left)))"));
+  console.log("  bar x (raw):", posRaw, "(dff):", posDff);
+  if (JSON.stringify(posRaw) !== JSON.stringify(posDff)) fail("the trace bar's buttons moved between raw and dF/F");
+  await ev("document.getElementById('sigRaw').click(); 'ok'");
 
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);

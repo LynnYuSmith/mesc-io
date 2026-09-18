@@ -129,6 +129,7 @@
   #traceLbl { color:var(--muted) }
   .ylim { display:inline-flex; align-items:center; gap:4px; color:var(--faint) }
   #dffKnobs input[type=number] { width:48px }
+  #dffNote { display:inline-block; width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
   .ylim input[type=number] { width:64px; padding:2px 4px; font-size:11px; -moz-appearance:textfield }
   .ylim input::-webkit-inner-spin-button { display:none }
   .ylim input.fixed { border-color:var(--accent); color:var(--accent) }
@@ -305,7 +306,7 @@ function applyStatic() {                 // controls that reflect V without a un
   $("gridBtn").classList.toggle("on", V.grid);
   $("sigRaw").classList.toggle("on", V.signal === "raw"); $("sigDff").classList.toggle("on", V.signal === "dff");
   $("dffQ").value = V.dffQ; $("dffWin").value = V.dffWin;
-  $("dffKnobs").style.display = V.signal === "dff" ? "" : "none";
+  $("dffKnobs").style.visibility = V.signal === "dff" ? "" : "hidden";   // keeps its room: the bar must not jump
   document.documentElement.style.setProperty("--traces-h", V.tracesH + "px");
   document.documentElement.style.setProperty("--meta-h", V.metaH + "px");
 }
@@ -340,7 +341,7 @@ function pick(i, restoring) {
   $("roiUnit").textContent = "· " + unit.name;
   if (!restoring) V.sel = -1;
   draw();
-  loadRois().then(() => { renderCopyMenu(); plotTraces(); });
+  loadRois().then(() => plotTraces());
   if (!restoring) saveView();
 }
 const fmt = v => (v == null ? "—" : (Math.round(v * 10) / 10).toString());
@@ -619,8 +620,8 @@ async function loadRois() {
   const d = await (await fetch(`/api/rois?unit=${encodeURIComponent(unit.path)}`)).json();
   ROIS = d.rois || []; ROI_UNITS = d.units_with_rois || {}; draft = [];
   if (V.sel >= ROIS.length) V.sel = -1;
-  renderRois(); paint();
-  document.body.dataset.roisFor = unit.path;      // a driver can wait for this instead of guessing a delay
+  renderRois(); renderCopyMenu(); paint();
+  document.body.dataset.roisFor = unit.path;      // set LAST: a driver waiting on it sees the menu too
 }
 async function saveRois() {
   if (!unit) return;

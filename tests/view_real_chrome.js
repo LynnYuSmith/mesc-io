@@ -16,6 +16,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; r.on("data", d => b += d); r.on("end", () => res(JSON.parse(b))); }).on("error", rej));
 (async () => {
   const chrome = spawn(CHROME, ["--headless=new", "--remote-debugging-port=" + PORT, "--no-first-run", "--user-data-dir=/tmp/view_drag_profile", "--window-size=1440,900", "about:blank"], { stdio: "ignore" });
+  // Whatever way this process ends -- success, fail(), an evaluate that threw, ctrl-c -- the
+  // Chrome it started ends with it. Twelve orphaned headless Chromes were found on the
+  // machine on 2026-09-19, one per script run that had exited through fail().
+  process.on("exit", () => { try { chrome.kill(); } catch (_) {} });
+  process.on("SIGINT", () => process.exit(130));
   let targets; for (let i = 0; i < 30; i++) { try { targets = await getJSON(`http://127.0.0.1:${PORT}/json`); break; } catch { await sleep(300); } }
   const ws = new WebSocket(targets.find(t => t.type === "page").webSocketDebuggerUrl); await new Promise(r => ws.onopen = r);
   let id = 0; const pending = new Map(); const errors = [];

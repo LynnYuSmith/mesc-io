@@ -227,7 +227,7 @@
         <button id="yAuto" title="back to limits that follow the data">auto</button>
       </label>
       <button id="traceReset" title="whole recording">⤢</button>
-      <span class="hint" id="traceHint">drag a box to zoom · double-click resets · ← → slide</span>
+      <span class="hint">drag a box to zoom · double-click resets · ← → slide</span>
     </div>
     <div id="traceScroll"><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
   </section>
@@ -263,6 +263,9 @@ const fs = () => (unit && unit.frame_rate_hz) || 0;
 const shown = () => { if (!unit) return {}; if (typeof V.shown[unit.path] !== "object" || !V.shown[unit.path]) V.shown[unit.path] = {}; return V.shown[unit.path]; };
 let ROI_UNITS = {};                        // unit path -> count, for the "copy from" menu
 let tracesSeq = 0;                         // the traces request in flight; an older reply is dropped
+/* The trace strip's geometry, in one place: the plot and the hover readout used to each carry
+   their own copy and could disagree without anyone noticing. */
+const TL = 54, TR_ = 12, TT = 18, TB = 18, ROW_H = 64;
 
 /* ------------------------------------------------------------------------------------------
    the view, saved by itself. Debounced; badge goes red if the server will not take it. */
@@ -361,7 +364,7 @@ const fmt = v => (v == null ? "—" : (Math.round(v * 10) / 10).toString());
 
 /* ------------------------------------------------------------------------------------------
    the image: frames (single or averaged) or the mean, zoomed by a rectangle */
-let imgEl = null, imgUrl = "";
+let imgEl = null, imgUrl = "", frameInFlight = false;
 function frameUrl() {
   const w = `lo=${V.lo}&hi=${V.hi}`;
   return V.mean ? `/api/mean/${unit.path}/${V.ch}?${w}`
@@ -373,8 +376,9 @@ function draw() {
   if (url !== imgUrl) {
     imgUrl = url;
     const im = new Image();
-    im.onload = () => { if (imgUrl === url) { imgEl = im; paint(); badge("saved"); } };
-    im.onerror = () => { if (imgUrl === url) { imgEl = null; paint(); badge("frame failed to load", true); } };
+    frameInFlight = true;
+    im.onload = () => { frameInFlight = false; if (imgUrl === url) { imgEl = im; paint(); badge("saved"); } };
+    im.onerror = () => { frameInFlight = false; if (imgUrl === url) { imgEl = null; paint(); badge("frame failed to load", true); } };
     im.src = url;
   } else paint();
   $("frameLbl").textContent = V.mean ? "mean of the recording"
@@ -552,21 +556,23 @@ $("stage").onwheel = ev => {
 };
 
 /* ---- player ---- */
-$("frame").oninput = () => { V.frame = +$("frame").value; V.mean = false; $("meanBtn").classList.remove("on"); draw(); plotTraces(); saveView(); };
+$("frame").oninput = () => { V.frame = +$("frame").value; showFrames(); draw(); plotTraces(); saveView(); };
 function togglePlay() {
   if (playing) { clearInterval(playing); playing = null; $("playBtn").textContent = "▶"; return; }
-  V.mean = false; $("meanBtn").classList.remove("on"); $("playBtn").textContent = "❚❚";
+  showFrames(); $("playBtn").textContent = "❚❚";
   const [a, b] = V.traceZoom || [0, unit.frames - 1];
   playing = setInterval(() => {
+    if (frameInFlight) return;                    // the disk sets the pace, not the timer
     V.frame = V.frame + 1 > b ? a : V.frame + 1;
     $("frame").value = V.frame; draw(); plotTraces();
   }, 40);
 }
 $("playBtn").onclick = togglePlay;
+function showFrames() { V.mean = false; $("meanBtn").classList.remove("on"); }
 $("meanBtn").onclick = () => { V.mean = !V.mean; $("meanBtn").classList.toggle("on", V.mean); draw(); saveView(); };
 function setAvg(n) {
   V.avg = Math.max(1, Math.min(999, Math.round(+n) || 1)); $("avgN").value = V.avg;
-  V.mean = false; $("meanBtn").classList.remove("on"); draw(); saveView();
+  showFrames(); draw(); saveView();
 }
 $("avgN").onchange = () => setAvg($("avgN").value);
 $("avgN").onkeydown = e => { if (e.key === "Enter") { setAvg($("avgN").value); $("avgN").blur(); } e.stopPropagation(); };
@@ -589,7 +595,7 @@ window.addEventListener("keydown", e => {
       plotTraces(); saveView(); return;
     }
     V.frame = Math.max(0, Math.min(unit.frames - 1, V.frame + dir * (e.shiftKey ? 10 : 1)));
-    $("frame").value = V.frame; V.mean = false; $("meanBtn").classList.remove("on"); draw(); plotTraces(); saveView();
+    $("frame").value = V.frame; showFrames(); draw(); plotTraces(); saveView();
   } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
     if (!ROIS.length) return; e.preventDefault();
     V.sel = V.sel < 0 ? 0 : (V.sel + (e.key === "ArrowDown" ? 1 : -1) + ROIS.length) % ROIS.length;
@@ -771,13 +777,13 @@ function plotTraces() {
   const dpr = window.devicePixelRatio || 1, W = box.clientWidth;
   const ts = visibleTraces();
   const stack = V.traceMode === "stack";
-  const rowH = 64, H = stack ? Math.max(box.clientHeight, ts.length * rowH + 22) : box.clientHeight;
+  const H = stack ? Math.max(box.clientHeight, ts.length * ROW_H + 22) : box.clientHeight;
   c.width = W * dpr; c.height = H * dpr; c.style.height = H + "px"; g.scale(dpr, dpr);
   g.clearRect(0, 0, W, H);
   if (!TR) { lastAuto = null; syncYBoxes(); $("traceLbl").textContent = ROIS.length ? "traces — press to compute" : "traces"; g.fillStyle = "#5d656e"; g.font = "12px sans-serif";
              g.fillText(ROIS.length ? "press ‹traces› to read every ROI's time course in one pass" : "draw an ROI on the image, then ‹traces›", 12, 24); return; }
   const n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1];
-  const L = 54, R = 12, T = 18, B = 18;
+  const L = TL, R = TR_, T = TT, B = TB;
   const X = f => L + (f - t0) / Math.max(1, t1 - t0) * (W - L - R);
   $("traceLbl").textContent = `${ts.length} of ${TR.names.length} ROIs · ${n} frames` + (V.traceZoom ? ` · ${t0}–${t1}` : "")
     + (V.signal === "dff" ? " · dF/F" : " · raw");
@@ -802,7 +808,7 @@ function plotTraces() {
   if (stack) {
     lastAuto = ts.length ? limits((ts.find(t => t.i === V.sel) || ts[0]).v.slice(t0, t1 + 1)) : null;
     ts.forEach((t, row) => {
-      const y0 = T + row * rowH, band = rowH - 8;
+      const y0 = T + row * ROW_H, band = ROW_H - 8;
       const seg = t.v.slice(t0, t1 + 1), [lo, hi] = V.yFixed || limits(seg);
       if (V.grid) { g.strokeStyle = "#20252b"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.3; g.beginPath();
@@ -815,9 +821,8 @@ function plotTraces() {
       g.fillStyle = "#6b737c"; g.font = "10px sans-serif"; g.fillText(`${lo.toFixed(dp)} … ${hi.toFixed(dp)}`, 6, y0 + 24);
     });
   } else {
-    const all = ts.flatMap(t => t.v.slice(t0, t1 + 1));
-    const [lo, hi] = V.yFixed || V.valueZoom || limits(all);
-    lastAuto = limits(all);
+    lastAuto = overlayLimits(ts, t0, t1);
+    const [lo, hi] = V.yFixed || V.valueZoom || lastAuto;
     const Y = v => T + (H - T - B) - (v - lo) / ((hi - lo) || 1) * (H - T - B);
     if (V.grid) { g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif";
       const vs = niceStep((hi - lo) / 5);
@@ -837,6 +842,14 @@ function plotTraces() {
 /* Axis limits adapt to what is on screen: the 1st and 99th percentile of the visible frames,
    padded a little. Min/max let a single odd frame (the black head, a saturated flash) flatten
    everything else into a line. */
+/* The overlay's auto limits, cached for the window on screen: the hover readout asked for
+   them on every mouse move, which meant a copy and a sort of every visible sample per move. */
+let limCache = { key: "", val: null };
+function overlayLimits(ts, t0, t1) {
+  const key = [TR && TR.unit, TR && TR.channel, TR && TR.params && TR.params.window_s, V.signal, t0, t1, ts.map(t => t.i).join(",")].join("|");
+  if (limCache.key !== key) limCache = { key, val: limits(ts.flatMap(t => t.v.slice(t0, t1 + 1))) };
+  return limCache.val;
+}
 function limits(vals) {
   if (!vals.length) return [0, 1];
   const a = Float64Array.from(vals).sort();
@@ -876,7 +889,6 @@ function niceStep(raw) { if (raw <= 0) return 1; const p = Math.pow(10, Math.flo
 /* A visible box, like the image's. In stack mode it zooms time; in overlay it zooms time AND
    value, because there the y axis is shared and means something. */
 let tdown = null;
-const TL = 54, TR_ = 12, TT = 18, TB = 18;
 const traceFrame = ev => {
   const r = $("trace").getBoundingClientRect(), W = $("traceScroll").clientWidth;
   const n = TR ? TR.traces[0].length : 1, [t0, t1] = V.traceZoom || [0, n - 1];
@@ -885,7 +897,7 @@ const traceFrame = ev => {
 const traceValue = ev => {                          // overlay only
   const r = $("trace").getBoundingClientRect(), H = +$("trace").style.height.replace("px", "") || $("traceScroll").clientHeight;
   const ts = visibleTraces(), n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1];
-  const all = ts.flatMap(t => t.v.slice(t0, t1 + 1)); const [lo, hi] = V.yFixed || V.valueZoom || limits(all);
+  const [lo, hi] = V.yFixed || V.valueZoom || overlayLimits(ts, t0, t1);
   return lo + (1 - (ev.clientY - r.top - TT) / (H - TT - TB)) * (hi - lo);
 };
 $("trace").addEventListener("mousemove", ev => {
@@ -895,7 +907,7 @@ $("trace").addEventListener("mousemove", ev => {
   const n = TR.traces[0].length, f = Math.max(0, Math.min(n - 1, traceFrame(ev)));
   let t;
   if (V.traceMode === "stack") {                       // the band under the cursor
-    const r = $("trace").getBoundingClientRect(), row = Math.floor((ev.clientY - r.top - TT) / 64);
+    const r = $("trace").getBoundingClientRect(), row = Math.floor((ev.clientY - r.top - TT) / ROW_H);
     t = ts[Math.max(0, Math.min(ts.length - 1, row))];
   } else {                                             // the trace nearest the cursor in value, the selected one on a tie
     const v = traceValue(ev);

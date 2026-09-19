@@ -67,12 +67,14 @@ const fetch = (url, opts) => {
   if (url.startsWith("/api/rois")) return json({ unit: "MSession_0/MUnit_0", rois: [], units_with_rois: {} });
   return json({});
 };
+const winListeners = {};
 const sandbox = {
   document, fetch, console, window: null, Image: class { set src(v) { this._s = v; if (this.onload) setTimeout(() => this.onload(), 0); } },
-  ResizeObserver: class { observe() {} }, requestAnimationFrame: (f) => 0, setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {},
+  ResizeObserver: class { observe() {} }, requestAnimationFrame: (f) => 0, setTimeout, clearTimeout,
+  setInterval: (f) => { f(); f(); return 1; }, clearInterval() {},        // play's tick runs twice, synchronously
   location: { href: "http://127.0.0.1/" }, confirm: () => true, alert() {}, Math, JSON, Date, Object, Array, Number, String, Boolean,
   Float64Array, Map, Set, Promise, Error, TypeError, isFinite, isNaN, parseFloat, parseInt, encodeURIComponent, decodeURIComponent,
-  devicePixelRatio: 1, innerWidth: 1400, innerHeight: 900, addEventListener() {}, Event: class { constructor(t) { this.type = t; } },
+  devicePixelRatio: 1, innerWidth: 1400, innerHeight: 900, addEventListener(t, f) { (winListeners[t] = winListeners[t] || []).push(f); }, Event: class { constructor(t) { this.type = t; } },
 };
 sandbox.window = sandbox; sandbox.globalThis = sandbox;
 process.on("unhandledRejection", (e) => { console.error("unhandled: " + (e && e.stack || e)); process.exit(4); });
@@ -82,8 +84,17 @@ try {
 // let boot()'s fetches and the deferred image load resolve, then exercise the wiring a click would
 setTimeout(() => {
   try {
-    for (const id of ["meanBtn", "modeOverlay", "modeStack", "gridBtn", "sigDff", "sigRaw", "toolRect", "toolSpot", "traceReset", "yAuto", "doTraces"]) {
+    for (const id of ["meanBtn", "modeOverlay", "modeStack", "gridBtn", "sigDff", "sigRaw", "toolRect", "toolSpot", "traceReset", "yAuto", "doTraces", "playBtn", "playBtn", "avgN"]) {
       const b = byId.get(id); if (b && b.onclick) b.onclick({ preventDefault() {}, stopPropagation() {} });
+    }
+    // the inputs' handlers too: the slider, the AVG field, the y-limits, the dF/F knobs
+    for (const id of ["frame", "avgN", "lo", "hi", "yLo", "yHi", "dffQ", "dffWin", "roiFilter", "spotR", "rectW", "rectH"]) {
+      const b = byId.get(id); if (!b) continue; b.value = "3";
+      if (b.oninput) b.oninput({ target: b }); if (b.onchange) b.onchange({ target: b });
+    }
+    // and the keys the page listens for on the window
+    for (const key of [" ", "ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Enter", "Escape", "Delete"]) {
+      for (const f of (winListeners.keydown || [])) f({ key, target: { tagName: "BODY" }, preventDefault() {}, shiftKey: false });
     }
     // boot() set the file name; pick() wrote the unit into the metadata: both must have run
     const fname = byId.get("fname").textContent, meta = byId.get("metaTable").innerHTML;

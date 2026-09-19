@@ -67,6 +67,14 @@ from .dff import DffParams, compute_dff, darkest_patch
 
 PAGE = Path(__file__).resolve().parent / "viewer.html"
 
+#: The most frames one hover or one frame step may average. 256 frames of a 512×512 field
+#: is 0.5 GB as float64 -- already a lot for a hover; unbounded, a URL could ask for the whole
+#: recording and take the machine down (2026-09-18 review).
+MAX_AVG_FRAMES = 256
+#: The reader's memory guard, kept on for every read this server does. A slice that would
+#: exceed it answers 400 with the reader's own message instead of being attempted.
+MAX_READ_GB = 2.0
+
 
 def _in_polygon(pts: np.ndarray, h: int, w: int) -> np.ndarray:
     """Even-odd ray casting, vectorised over the whole frame. NumPy only.
@@ -209,13 +217,14 @@ class _Handler(BaseHTTPRequestHandler):
                 unit = (q.get("unit") or [""])[0]
                 store = self._load_store()
                 return self._json({"unit": unit, "rois": store.get(unit, []) if unit else [],
-                                   "units_with_rois": {k: len(v) for k, v in store.items() if v},
+                                   "units_with_rois": {k: len(v) for k, v in store.items() if v and k != "_legacy"},
+                                   "legacy": bool(store.get("_legacy")),
                                    "path": str(self.rois_path)})
             if parts[:2] == ["api", "traces"] and len(parts) >= 4:
                 return self._json(self._roi_traces("/".join(parts[2:-1]), int(parts[-1]), q))
             if parts[:3] == ["api", "export", "rois.json"]:
-                body = json.dumps({"source": str(self.mesc_path), "units": self._load_store()},
-                                  indent=2).encode()
+                st = self._load_store(); st.pop("_legacy", None)
+                body = json.dumps({"source": str(self.mesc_path), "units": st}, indent=2).encode()
                 return self._download(body, "application/json", "rois.json")
             if parts[:3] == ["api", "export", "rois.zip"]:
                 return self._export_imagej((q.get("unit") or [""])[0])
@@ -246,10 +255,20 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError("expected {'unit': 'MSession_0/MUnit_3', 'rois': [...]}")
             if not isinstance(rois, list):
                 raise ValueError("expected {'rois': [...]}")
+            for k, r in enumerate(rois):
+                # one malformed item used to make _mask_of raise later, taking every ROI's
+                # traces and the CSV for the unit down with it
+                pts = r.get("points") if isinstance(r, dict) else None
+                if (not isinstance(pts, list) or len(pts) < 3
+                        or not all(isinstance(q_, (list, tuple)) and len(q_) == 2
+                                   and all(isinstance(v, (int, float)) and np.isfinite(v) for v in q_)
+                                   for q_ in pts)):
+                    raise ValueError(f"roi #{k} needs at least 3 finite [x, y] points")
             # Threaded server: two saves in flight (a spot added twice quickly) must not each
             # read the store, change it and write it back over the other. One step, under the lock.
             with self._store_lock:
                 store = self._load_store()
+                store.pop("_legacy", None)         # the first save writes the new shape
                 if rois:
                     store[unit] = rois
                 else:
@@ -271,6 +290,7 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError("expected {'from': <unit>, 'to': <another unit>}")
             with self._store_lock:
                 store = self._load_store()
+                store.pop("_legacy", None)
                 if not store.get(src):
                     raise ValueError(f"{src} has no ROIs to copy")
                 store[dst] = [dict(r) for r in store[src]]
@@ -281,26 +301,35 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- the ROI store: {unit path: [roi, ...]} ---------------------------------
     def _load_store(self) -> dict:
+        """The store as it is on disk. Read-only: a load never writes (the legacy migration
+        used to, on a GET, outside the lock -- a concurrent PUT could be written over and
+        hand-drawn ROIs lost; 2026-09-18 review)."""
         if not self.rois_path.exists():
             return {}
         try:
             data = json.loads(self.rois_path.read_text())
         except (json.JSONDecodeError, OSError):
             return {}
+        src = data.get("source")
+        if src and Path(src).name != self.mesc_path.name:
+            # The sidecar is named after the recording's stem, so this can only happen when a
+            # different recording shares the stem, or the file was copied. Foreign ROIs on the
+            # wrong field are worse than none: refuse them, loudly.
+            print(f"  {self.rois_path.name} was drawn on {Path(src).name}, not "
+                  f"{self.mesc_path.name}: ignoring it. Move or rename it to reuse.", flush=True)
+            return {}
         units = data.get("units")
         if isinstance(units, dict):
             return {k: v for k, v in units.items() if isinstance(v, list)}
-        # the old shape: one flat list for the whole file. Carry it onto the first unit rather
-        # than lose it, and say so -- it may or may not be the unit it was drawn on.
         legacy = data.get("rois")
         if isinstance(legacy, list) and legacy:
             with self._file() as f:
                 first = f.units()[0].path
-            print(f"  {self.rois_path.name}: {len(legacy)} ROIs in the old file-wide shape, "
-                  f"carried onto {first}; check they belong there", flush=True)
-            store = {first: legacy}
-            self._save_store(store)
-            return store
+            if not getattr(self.__class__, "_legacy_said", False):
+                self.__class__._legacy_said = True
+                print(f"  {self.rois_path.name}: {len(legacy)} ROIs in the old file-wide shape, "
+                      f"shown on {first} until saved there; check they belong", flush=True)
+            return {first: legacy, "_legacy": True}
         return {}
 
     def _load_rois(self, unit: str) -> list:
@@ -360,34 +389,45 @@ class _Handler(BaseHTTPRequestHandler):
             areas = [int(m.sum()) for m in masks]
             # the darkest patch of the mean image rides along in the same pass: it is the
             # background the pipeline subtracts, and the dark current comes off its first frames
-            mean_img = self._mean_image(unit, ch)
+            with self._lock:
+                mean_img = self._cache.get((str(self.mesc_path), unit, ch))
+            if mean_img is None:
+                mean_img = self._mean_image(unit, ch)
             params = self._dff_params(q)
             y0, x0, y1, x1 = darkest_patch(mean_img, params.bg_patch)
             patch = np.zeros((u.height, u.width), bool); patch[y0:y1, x0:x1] = True
             masks.append(patch)
             acc = [[] for _ in masks]
-            for block in f.iter_frames(unit, channel=ch, block=500, reader_units=True):
+            # block 100, not 500: 500 × 512² × 8 B was a gigabyte of float64 per block on
+            # the request thread
+            for block in f.iter_frames(unit, channel=ch, block=100, reader_units=True):
                 flat = block.reshape(len(block), -1)
                 for k, m in enumerate(masks):
                     acc[k].append(flat[:, m.ravel()].mean(axis=1))
             traces = [np.concatenate(a) for a in acc]
         bg_trace = traces.pop()
-        fs = u.frame_rate_hz or 30.0
-        r = compute_dff(np.vstack(traces), bg_trace, fs, params, patch=(y0, x0, y1, x1))
+        fs = u.frame_rate_hz
+        # No rate, no dF/F: the baseline window is in seconds, and a guessed 30 Hz would turn
+        # 60 s into 29 s at our 62 Hz and flatten every event, silently. Raw traces still come.
+        r = (compute_dff(np.vstack(traces), bg_trace, fs, params, patch=(y0, x0, y1, x1))
+             if fs else None)
+        nan = lambda v: None if not np.isfinite(v) else round(float(v), 4)   # the head is NaN → null
         return {"unit": u.path, "channel": ch, "frame_rate_hz": u.frame_rate_hz,
                 "names": [rr.get("name", f"roi{i}") for i, rr in enumerate(rois)],
                 "areas_px": areas,
                 "traces": [[round(float(v), 2) for v in t] for t in traces],
-                "dff": [[round(float(v), 4) for v in t] for t in r.dff],
-                "baseline": [[round(float(v), 2) for v in t] for t in r.baseline],
-                "background": [round(float(v), 2) for v in r.background],
                 "bg_trace": [round(float(v), 2) for v in bg_trace],
-                "dark": round(r.dark, 2), "head": r.head, "eps": round(r.eps, 4),
                 "patch": [y0, x0, y1, x1],
+                "dff": [[nan(v) for v in t] for t in r.dff] if r else None,
+                "baseline": [[nan(v) for v in t] for t in r.baseline] if r else None,
+                "background": [nan(v) for v in r.background] if r else None,
+                "dark": round(r.dark, 2) if r else None, "head": r.head if r else None,
+                "eps": round(r.eps, 4) if r else None,
+                "dff_unavailable": None if r else "the file states no frame rate",
                 "params": {"quantile": params.quantile, "window_s": params.window_s,
                            "savgol": [params.savgol_window, params.savgol_order],
                            "bg_patch": params.bg_patch, "bg_sigma": params.bg_sigma,
-                           "bg_degree": params.bg_degree}}
+                           "bg_degree": params.bg_degree, "bg_coef": params.bg_coef}}
 
     @staticmethod
     def _dff_params(q):
@@ -407,15 +447,18 @@ class _Handler(BaseHTTPRequestHandler):
         if not d["names"]:
             raise ValueError("no ROIs to export")
         fs = d["frame_rate_hz"] or 0.0
+        has_dff = d["dff"] is not None
         head = (["frame", "time_s"] + [f"{n}_raw" for n in d["names"]]
-                + [f"{n}_dff" for n in d["names"]] + ["background"])
+                + ([f"{n}_dff" for n in d["names"]] + ["background"] if has_dff else []))
         lines = [",".join(head)]
         n = len(d["traces"][0])
+        cell = lambda v, f: "" if v is None else f % v
         for i in range(n):
             row = [str(i), f"{i / fs:.4f}" if fs else ""]
             row += [f"{t[i]:.2f}" for t in d["traces"]]
-            row += [f"{t[i]:.4f}" for t in d["dff"]]
-            row.append(f"{d['background'][i]:.2f}")
+            if has_dff:
+                row += [cell(t[i], "%.4f") for t in d["dff"]]
+                row.append(cell(d["background"][i], "%.2f"))
             lines.append(",".join(row))
         name = f"{self.mesc_path.stem}_{unit.replace('/', '_')}_ch{ch}_traces.csv"
         self._download(("\n".join(lines) + "\n").encode(), "text/csv", name)
@@ -481,13 +524,15 @@ class _Handler(BaseHTTPRequestHandler):
         recording's mean. The window is clipped at the ends, never padded, so the first and
         last frames average fewer neighbours rather than borrowing invented ones.
         """
-        n = max(1, int(float(q.get("n", ["1"])[0])))
+        n = max(1, min(MAX_AVG_FRAMES, int(float(q.get("n", ["1"])[0]))))
         with self._file() as f:
             u = f.unit(unit)
+            if not (0 <= i < u.n_frames):
+                raise ValueError(f"frame {i} is outside 0..{u.n_frames - 1}")
             lo = max(0, i - n // 2)
             hi = min(u.n_frames, lo + n)
             lo = max(0, hi - n)
-            block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=None)
+            block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)
             img = block[0] if n == 1 else block.mean(axis=0)
         self._send(_png(img, *self._window(q)), "image/png")
 
@@ -496,7 +541,7 @@ class _Handler(BaseHTTPRequestHandler):
         the mean image. A 3×3 patch is read, not one pixel, so a hover across a noisy field
         reads something a person can use; the single pixel is returned beside it."""
         x, y = int(float(q["x"][0])), int(float(q["y"][0]))
-        n = max(1, int(float(q.get("n", ["1"])[0])))
+        n = max(1, min(MAX_AVG_FRAMES, int(float(q.get("n", ["1"])[0]))))
         key = (str(self.mesc_path), unit, ch)
         if "i" not in q:
             with self._lock:
@@ -507,8 +552,10 @@ class _Handler(BaseHTTPRequestHandler):
             i = int(float(q["i"][0]))
             with self._file() as f:
                 u = f.unit(unit)
+                if not (0 <= i < u.n_frames):
+                    raise ValueError(f"frame {i} is outside 0..{u.n_frames - 1}")
                 lo = max(0, i - n // 2); hi = min(u.n_frames, lo + n); lo = max(0, hi - n)
-                block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=None)
+                block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)
                 img = block[0] if n == 1 else block.mean(axis=0)
         h, w = img.shape
         if not (0 <= x < w and 0 <= y < h):

@@ -18,18 +18,30 @@ from mesc_io import dff as D
 PIPE = Path.home() / "PycharmProjects/CalciumImagingPipeline/CalciumPipelineLib"
 if PIPE.exists() and str(PIPE) not in sys.path:
     sys.path.insert(0, str(PIPE))
+HAVE_PIPE = False
+IMPORT_ERROR = None
 try:
     from scipy.signal import savgol_filter
     from scipy.ndimage import gaussian_filter1d
     import peakutils
     import pandas as pd
-    from lib.signals.signal_processing import rolling_baseline as pipe_rolling_baseline
+    from lib.signals.signal_processing import (rolling_baseline as pipe_rolling_baseline,
+                                                bg_correct_per_unit, compute_dark_current_per_unit,
+                                                subtract_dark_current_per_unit,
+                                                rolling_baselines_by_unit, compute_dff_for_groups)
+    from lib.signals.filters import savgol_filter_per_unit
     from lib.io._helpers import _find_darkest_patch
     HAVE_PIPE = True
-except Exception:                                  # noqa: BLE001
-    HAVE_PIPE = False
+except Exception as e:                             # noqa: BLE001
+    IMPORT_ERROR = e
 
-needs_pipe = pytest.mark.skipif(not HAVE_PIPE, reason="the pipeline (and scipy/peakutils) is not importable here")
+# A skip is honest only when the pipeline is genuinely absent. If it is on disk and will not
+# import (the Python 3.12 circular import, a broken env), that is a FAILURE here: otherwise every
+# "matches the pipeline" test passes by skipping on the one machine that could have run it.
+if PIPE.exists() and not HAVE_PIPE:
+    pytest.fail(f"the pipeline is at {PIPE} but does not import: {IMPORT_ERROR!r}", pytrace=False)
+
+needs_pipe = pytest.mark.skipif(not HAVE_PIPE, reason="CalciumPipelineLib is not on this machine")
 
 rng = np.random.default_rng(1)
 FS = 61.88
@@ -97,7 +109,69 @@ def test_the_chain_gives_zero_centred_dff_with_events_up():
     assert r.eps > 0 and np.isfinite(r.dff).all()
 
 
-def test_the_dark_current_comes_off_the_background_first_frames():
-    bg = BG.copy(); bg[:10] = 7.0
+def test_the_dark_current_comes_off_the_first_live_frames_and_the_head_is_nan():
+    bg = BG.copy(); bg[:10] = 7.0                      # ten dark frames: a black head
+    # detected: the head is cut, dark comes from the first LIVE frames (the pipeline's frames
+    # reach the signal stage trimmed, so its "first 10" are live too), the head is NaN
     r = D.compute_dff(TRACE, bg, FS)
-    assert r.dark == pytest.approx(7.0)
+    assert r.head == 10
+    assert np.isnan(r.dff[0, :10]).all() and np.isfinite(r.dff[0, 10:]).all()
+    assert r.dark == pytest.approx(float(BG[10:20].mean()), abs=1e-9)
+    assert r.dff.shape[1] == N, "the frame axis must stay the movie's"
+    # told there is no head: the ten dark frames ARE the dark current
+    r0 = D.compute_dff(TRACE, bg, FS, head=0)
+    assert r0.head == 0 and r0.dark == pytest.approx(7.0)
+
+
+def test_dff_refuses_to_guess_a_frame_rate():
+    with pytest.raises(ValueError):
+        D.compute_dff(TRACE, BG, 0.0)
+    with pytest.raises(ValueError):
+        D.compute_dff(TRACE, BG, None)
+
+
+# --- the CHAIN, not the pieces --------------------------------------------------------------
+# Every piece can match and the chain still differ (it did: bg_coef, the unfiltered Mean1, the
+# head in the fit -- found by the 2026-09-18 evaluation with a green suite). So this runs the
+# pipeline's own stage functions on one DataFrame and compares compute_dff to them.
+
+@needs_pipe
+def test_the_chain_matches_stage_signal_on_the_same_traces():
+    fs = FS
+    # what extraction hands the signal stage: Mean1 = darkest patch, Mean2.. = ROIs, HEAD ALREADY TRIMMED
+    mean1 = BG.copy()
+    m2 = TRACE.copy(); m3 = TRACE * 0.6 + 40 + rng.normal(0, 4, N)
+    df = pd.DataFrame({"Mean1": mean1, "Mean2": m2, "Mean3": m3})
+    # --- the pipeline, in stage_signal's order (stages.py ~5123-5230, config defaults) ---
+    dc = compute_dark_current_per_unit({"u": df}, n_frames=10, col="Mean1")
+    d = subtract_dark_current_per_unit({"u": df}, dc)
+    d = savgol_filter_per_unit(d, window=5, polyorder=3, mean_prefix="Mean", in_place=True)
+    d, _bg = bg_correct_per_unit(d, sigma_baseline=5.0, baseline_degree=5, coef=0.8)
+    b = rolling_baselines_by_unit(d, fps=fs, win_s=60.0, q=0.3, fps_by_unit={"u": fs})
+    dff = compute_dff_for_groups(d, b, eps_pct=1.0, min_baseline_pct=5.0, nan_bad_rois=False)["u"]
+    # --- the port, on the same raw traces ---
+    r = D.compute_dff(np.vstack([m2, m3]), mean1, fs, D.DffParams(bg_coef=0.8), head=0)
+    # the pipeline computes eps over Mean1 too; the port over the ROIs only. Feed it the same
+    # column set so the comparison isolates the chain, not the eps scope.
+    r_all = D.compute_dff(np.vstack([mean1, m2, m3]), mean1, fs, D.DffParams(bg_coef=0.8), head=0)
+    for k, col in ((1, "Mean2"), (2, "Mean3")):
+        ours, ref = r_all.dff[k], dff[col].to_numpy(dtype=float)
+        # the pipeline stores the baseline as float32 (signal_processing.py:488): 1e-5, not 1e-9
+        assert np.allclose(ours, ref, atol=2e-5, rtol=1e-5), f"{col}: max |Δ| = {np.abs(ours - ref).max():.2e}"
+    assert r.eps > 0
+
+
+@needs_pipe
+def test_the_old_chain_would_have_failed_that():
+    """The positive control: the three divergences the evaluation found, re-created on purpose,
+    must NOT match. If this passes by accident the parity test above proves nothing."""
+    fs = FS
+    df = pd.DataFrame({"Mean1": BG.copy(), "Mean2": TRACE.copy()})
+    dc = compute_dark_current_per_unit({"u": df}, n_frames=10, col="Mean1")
+    d = subtract_dark_current_per_unit({"u": df}, dc)
+    d = savgol_filter_per_unit(d, window=5, polyorder=3, mean_prefix="Mean", in_place=True)
+    d, _ = bg_correct_per_unit(d, sigma_baseline=5.0, baseline_degree=5, coef=0.8)
+    b = rolling_baselines_by_unit(d, fps=fs, win_s=60.0, q=0.3, fps_by_unit={"u": fs})
+    ref = compute_dff_for_groups(d, b, eps_pct=1.0, min_baseline_pct=5.0, nan_bad_rois=False)["u"]["Mean2"].to_numpy()
+    wrong = D.compute_dff(np.vstack([BG, TRACE]), BG, fs, D.DffParams(bg_coef=1.0), head=0).dff[1]
+    assert not np.allclose(wrong, ref, atol=2e-5, rtol=1e-5), "coef 1.0 matched coef 0.8 -- the test cannot see the chain"

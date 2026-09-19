@@ -251,13 +251,66 @@ def test_a_put_without_a_unit_is_refused(two_unit_server):
     assert e.value.code == 400
 
 
-def test_the_old_file_wide_shape_is_carried_onto_the_first_unit(two_unit_server, tmp_path, capsys):
-    (tmp_path / "rec_rois.json").write_text(json.dumps({"source": "x", "rois": [SPOT]}))
-    got = get_json(two_unit_server + "/api/rois?unit=MSession_0/MUnit_0")["rois"]
-    assert got == [SPOT]
-    saved = json.loads((tmp_path / "rec_rois.json").read_text())
-    assert "units" in saved and saved["units"] == {"MSession_0/MUnit_0": [SPOT]}
+def test_the_old_file_wide_shape_is_shown_on_the_first_unit_but_not_written_on_read(two_unit_server, tmp_path, capsys, recording):
+    side = tmp_path / "rec_rois.json"
+    side.write_text(json.dumps({"source": str(recording), "rois": [SPOT]}))
+    before = side.read_text()
+    d = get_json(two_unit_server + "/api/rois?unit=MSession_0/MUnit_0")
+    assert d["rois"] == [SPOT] and d["legacy"] is True
+    assert side.read_text() == before, "a GET must never write the store"
     assert "old file-wide shape" in capsys.readouterr().out
+    # the first save writes the new shape, without the marker
+    put_json(two_unit_server + "/api/rois", {"unit": "MSession_0/MUnit_1", "rois": [SPOT]})
+    saved = json.loads(side.read_text())
+    assert saved["units"] == {"MSession_0/MUnit_0": [SPOT], "MSession_0/MUnit_1": [SPOT]}
+    assert "_legacy" not in saved["units"]
+
+
+def test_a_sidecar_drawn_on_another_recording_is_refused_loudly(two_unit_server, tmp_path, capsys):
+    (tmp_path / "rec_rois.json").write_text(json.dumps({"source": "/elsewhere/other.mesc",
+                                                         "units": {"MSession_0/MUnit_0": [SPOT]}}))
+    assert get_json(two_unit_server + "/api/rois?unit=MSession_0/MUnit_0")["rois"] == []
+    assert "was drawn on other.mesc" in capsys.readouterr().out
+
+
+def test_a_malformed_roi_is_refused_on_put_not_at_trace_time(two_unit_server):
+    for bad in ([{"name": "x", "points": [[1, 1], [2, 2]]}],          # 2 points
+                [{"name": "x", "points": [[1, 1], [2, 2], [3]]}],      # a 1-tuple
+                [{"name": "x", "points": [[1, 1], [2, 2], ["a", 3]]}], # not a number
+                ["not a dict"]):
+        req = urllib.request.Request(two_unit_server + "/api/rois",
+                                     data=json.dumps({"unit": "MSession_0/MUnit_0", "rois": bad}).encode(),
+                                     method="PUT", headers={"Content-Type": "application/json"})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req, timeout=5)
+        assert e.value.code == 400
+
+
+def test_the_averaging_window_is_capped_and_a_frame_out_of_range_is_refused(server):
+    from mesc_io.viewer import MAX_AVG_FRAMES
+    a, _ = get(server + f"/api/frame/MSession_0/MUnit_0/0/5?n={MAX_AVG_FRAMES}")
+    b, _ = get(server + "/api/frame/MSession_0/MUnit_0/0/5?n=100000")
+    assert a == b, "n above the cap must behave as the cap, not read the whole recording"
+    for i in (-1, 10, 999):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            get(server + f"/api/frame/MSession_0/MUnit_0/0/{i}")
+        assert e.value.code == 400
+    with pytest.raises(urllib.error.HTTPError):
+        get(server + "/api/pixel/MSession_0/MUnit_0/0?x=1&y=1&i=10")
+
+
+def test_traces_carry_dff_only_when_the_file_states_a_rate(two_unit_server, tmp_path, recording):
+    put_json(two_unit_server + "/api/rois", {"unit": "MSession_0/MUnit_0", "rois": [SPOT]})
+    d = get_json(two_unit_server + "/api/traces/MSession_0/MUnit_0/0")
+    assert d["dff"] is not None and d["params"]["bg_coef"] == 0.8 and d["dff_unavailable"] is None
+    # strip the rate: raw traces still come, dF/F does not, and the reason is stated
+    with h5py.File(recording, "a") as f:
+        del f["MSession_0/MUnit_0"].attrs["ZAxisConversionConversionLinearScale"]
+    _Handler._cache = {}
+    d = get_json(two_unit_server + "/api/traces/MSession_0/MUnit_0/0")
+    assert d["traces"] and d["dff"] is None and "no frame rate" in d["dff_unavailable"]
+    body, _ = get(two_unit_server + "/api/export/traces/MSession_0/MUnit_0/0.csv")
+    assert b"_dff" not in body.split(b"\n")[0]
 
 
 # --- the hover readout ------------------------------------------------------------------------

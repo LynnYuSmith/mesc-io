@@ -18,7 +18,7 @@
   body { font:13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; color:var(--ink);
          background:var(--bg); overflow:hidden }
   #wrap { display:grid; height:100vh;
-          grid-template-columns:230px 1fr 260px;
+          grid-template-columns:230px 1fr var(--tools-w, 260px);
           grid-template-rows:1fr var(--traces-h, 260px);
           grid-template-areas:"units image tools" "traces traces traces" }
   h1 { font-size:13px; font-weight:600; margin:0; padding:10px 12px 6px; color:var(--muted);
@@ -82,8 +82,10 @@
                background:rgba(18,20,23,.7); padding:2px 6px; border-radius:3px; pointer-events:none }
 
   /* ---- instruments (right) ---- */
-  #toolsCol { grid-area:tools; display:flex; flex-direction:column; min-height:0;
+  #toolsCol { grid-area:tools; display:flex; flex-direction:column; min-height:0; position:relative;
               background:var(--panel); border-left:1px solid var(--line) }
+  #toolsSplit { position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:2 }
+  #toolsSplit:hover { background:var(--accent) }
   .instr { display:flex; gap:6px; padding:0 12px; flex-wrap:wrap }
   .instr button { flex:0 0 auto; min-width:40px }
   .stepper { display:inline-flex; align-items:center; border:1px solid var(--line);
@@ -164,6 +166,7 @@
   </section>
 
   <aside id="toolsCol">
+    <div id="toolsSplit" title="drag to resize"></div>
     <h2>instruments</h2>
     <div class="instr">
       <button id="addRoi" title="add an ROI (click on the image)">+</button>
@@ -248,7 +251,7 @@ const V = {
   signal: "raw",                            // raw | dff
   dffQ: 0.3, dffWin: 60,                    // the baseline's quantile and window (s)
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
-  tracesH: 260, metaH: 300,
+  tracesH: 260, metaH: 300, toolsW: 260,
 };
 let FILE = null, unit = null, playing = null;
 let ROIS = [], tool = "spot", draft = [], TR = null;   // TR = last traces payload
@@ -259,6 +262,7 @@ const fs = () => (unit && unit.frame_rate_hz) || 0;
 /* which ROIs are drawn in the trace strip, for the unit on screen */
 const shown = () => { if (!unit) return {}; if (typeof V.shown[unit.path] !== "object" || !V.shown[unit.path]) V.shown[unit.path] = {}; return V.shown[unit.path]; };
 let ROI_UNITS = {};                        // unit path -> count, for the "copy from" menu
+let tracesSeq = 0;                         // the traces request in flight; an older reply is dropped
 
 /* ------------------------------------------------------------------------------------------
    the view, saved by itself. Debounced; badge goes red if the server will not take it. */
@@ -288,7 +292,7 @@ async function boot() {
     </div>`).join("");
   $("units").onclick = e => { const d = e.target.closest(".u"); if (d) pick(+d.dataset.i); };
   const saved = (await (await fetch("/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW"]));
   if (!V.yFixedBy || typeof V.yFixedBy !== "object") V.yFixedBy = { raw: null, dff: null };
   applyStatic();
   const idx = Math.max(0, FILE.units.findIndex(u => u.path === saved.unit));
@@ -309,6 +313,7 @@ function applyStatic() {                 // controls that reflect V without a un
   $("dffKnobs").style.visibility = V.signal === "dff" ? "" : "hidden";   // keeps its room: the bar must not jump
   document.documentElement.style.setProperty("--traces-h", V.tracesH + "px");
   document.documentElement.style.setProperty("--meta-h", V.metaH + "px");
+  document.documentElement.style.setProperty("--tools-w", V.toolsW + "px");
 }
 
 function pick(i, restoring) {
@@ -323,7 +328,15 @@ function pick(i, restoring) {
     V.ch = +b.dataset.c; document.querySelectorAll(".chan").forEach(x => x.classList.toggle("on", x === b));
     TR = null; draw(); saveView();
   });
-  $("frame").max = unit.frames - 1; $("frame").value = Math.min(V.frame, unit.frames - 1);
+  // a saved view may be from a longer unit or an older page: every restored number is clamped
+  // to what this unit has, so nothing indexes past the end or draws from a null
+  V.frame = Math.max(0, Math.min(+V.frame || 0, unit.frames - 1));
+  if (!V.zoom || typeof V.zoom !== "object" || !(V.zoom.w > 0 && V.zoom.h > 0)) V.zoom = { x: 0, y: 0, w: 0, h: 0 };
+  else V.zoom = { x: Math.max(0, Math.min(unit.width - 1, +V.zoom.x || 0)), y: Math.max(0, Math.min(unit.height - 1, +V.zoom.y || 0)),
+                  w: Math.min(unit.width, +V.zoom.w), h: Math.min(unit.height, +V.zoom.h) };
+  if (V.traceZoom && !(Array.isArray(V.traceZoom) && V.traceZoom.length === 2 && V.traceZoom[0] >= 0 && V.traceZoom[1] < unit.frames && V.traceZoom[1] - V.traceZoom[0] >= 4)) V.traceZoom = null;
+  if (V.valueZoom && !(Array.isArray(V.valueZoom) && V.valueZoom.length === 2 && V.valueZoom[1] > V.valueZoom[0])) V.valueZoom = null;
+  $("frame").max = unit.frames - 1; $("frame").value = V.frame;
   const st = unit.stage_um;
   $("metaTable").innerHTML = [
     ["unit", unit.path],
@@ -360,7 +373,8 @@ function draw() {
   if (url !== imgUrl) {
     imgUrl = url;
     const im = new Image();
-    im.onload = () => { if (imgUrl === url) { imgEl = im; paint(); } };
+    im.onload = () => { if (imgUrl === url) { imgEl = im; paint(); badge("saved"); } };
+    im.onerror = () => { if (imgUrl === url) { imgEl = null; paint(); badge("frame failed to load", true); } };
     im.src = url;
   } else paint();
   $("frameLbl").textContent = V.mean ? "mean of the recording"
@@ -496,6 +510,7 @@ window.addEventListener("mouseup", ev => {
   }
   if (!d.moved) return;
   d.consumed = true; lastPress = d;                // a zoom drag is not a click: no spot at the release point
+  setTimeout(() => { if (lastPress === d) lastPress = null; }, 0);   // the click, if any, comes in this task; not the next one
   const [x0, y0] = imgPoint({ clientX: d.x, clientY: d.y }), [x1, y1] = imgPoint(ev);
   const x = Math.max(0, Math.min(x0, x1)), y = Math.max(0, Math.min(y0, y1));
   const w = Math.min(unit.width, Math.max(x0, x1)) - x, h = Math.min(unit.height, Math.max(y0, y1)) - y;
@@ -558,7 +573,10 @@ $("avgN").onkeydown = e => { if (e.key === "Enter") { setAvg($("avgN").value); $
 $("lo").oninput = () => { V.lo = +$("lo").value; $("loVal").textContent = V.lo + " %"; draw(); saveView(); };
 $("hi").oninput = () => { V.hi = +$("hi").value; $("hiVal").textContent = V.hi + " %"; draw(); saveView(); };
 window.addEventListener("keydown", e => {
-  if (e.target.tagName === "INPUT" && (e.target.type === "text" || e.target.type === "number")) return;
+  // anything that takes keys itself keeps them: text and number fields, selects, buttons,
+  // checkboxes -- the page's shortcuts are for the canvas, not for a focused control
+  const tg = e.target;
+  if (tg && (tg.tagName === "INPUT" || tg.tagName === "SELECT" || tg.tagName === "TEXTAREA" || (tg.tagName === "BUTTON" && e.key !== "Escape"))) return;
   if (e.key === " ") { e.preventDefault(); if (unit) togglePlay(); }
   else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
     e.preventDefault(); if (!unit) return;
@@ -664,12 +682,16 @@ function renderRois() {
   $("roiList").querySelectorAll(".nm").forEach(nm => {
     nm.ondblclick = e => {
       e.stopPropagation();
-      const i = +nm.dataset.i, inp = document.createElement("input"); inp.type = "text"; inp.value = ROIS[i].name;
+      // the ROI itself is captured, not its index: the list can change under an open rename
+      // (a delete, a filter), and the commit must land on the ROI it opened on or nowhere
+      const target = ROIS[+nm.dataset.i], inp = document.createElement("input"); inp.type = "text"; inp.value = target.name;
       nm.replaceWith(inp); inp.focus(); inp.select();
       let done = false;
       const commit = (apply) => {
         if (done) return; done = true;
-        if (apply) { const r = ROIS[i], old = r.name; r.name = inp.value.trim() || old;
+        if (apply && ROIS.includes(target)) { const r = target, old = r.name; const want = inp.value.trim() || old;
+          if (want !== old && ROIS.some(o => o !== r && o.name === want)) { badge(`"${want}" is taken`, true); setTimeout(() => badge("saved"), 1500); renderRois(); return; }
+          r.name = want;
           const sh = shown(); if (sh[old] !== undefined) { sh[r.name] = sh[old]; if (old !== r.name) delete sh[old]; }
           TR = null; paint(); saveRois(); saveView(); }
         renderRois();
@@ -730,7 +752,11 @@ $("doTraces").onclick = async () => {
   if (!unit) return;
   if (!ROIS.length) { $("traceLbl").textContent = "draw something first"; return; }
   $("traceLbl").textContent = "one pass over the recording…";
-  const d = await (await fetch(`/api/traces/${unit.path}/${V.ch}?q=${V.dffQ}&win_s=${V.dffWin}`)).json();
+  const forUnit = unit.path, forCh = V.ch, seq = ++tracesSeq;
+  const d = await (await fetch(`/api/traces/${forUnit}/${forCh}?q=${V.dffQ}&win_s=${V.dffWin}`)).json();
+  // the reply may arrive after the unit or channel changed under it, or after a newer request:
+  // then it describes something that is no longer on screen and must not be shown as if it were
+  if (seq !== tracesSeq || !unit || unit.path !== forUnit || V.ch !== forCh) return;
   if (d.error) { $("traceLbl").textContent = d.error; return; }
   TR = d; plotTraces(); paint();
 };
@@ -826,7 +852,8 @@ function syncYBoxes() {
   const lo = $("yLo"), hi = $("yHi"), fixed = !!V.yFixed;
   lo.classList.toggle("fixed", fixed); hi.classList.toggle("fixed", fixed);
   if (fixed) { if (document.activeElement !== lo) lo.value = V.yFixed[0]; if (document.activeElement !== hi) hi.value = V.yFixed[1]; }
-  else { lo.value = ""; hi.value = ""; lo.placeholder = lastAuto ? lastAuto[0].toFixed(0) : "auto"; hi.placeholder = lastAuto ? lastAuto[1].toFixed(0) : "auto"; }
+  else { if (document.activeElement !== lo) lo.value = ""; if (document.activeElement !== hi) hi.value = "";
+         lo.placeholder = lastAuto ? lastAuto[0].toFixed(0) : "auto"; hi.placeholder = lastAuto ? lastAuto[1].toFixed(0) : "auto"; }
   $("yAuto").disabled = !fixed;
 }
 function applyY() {
@@ -944,8 +971,10 @@ $("gridBtn").onclick = () => { V.grid = !V.grid; applyStatic(); plotTraces(); sa
 let sdown = null;
 $("splitter").onmousedown = ev => { sdown = { which: "traces", y: ev.clientY, h: V.tracesH }; ev.preventDefault(); };
 $("metaSplit").onmousedown = ev => { sdown = { which: "meta", y: ev.clientY, h: V.metaH }; ev.preventDefault(); };
+$("toolsSplit").onmousedown = ev => { sdown = { which: "tools", x: ev.clientX, w: V.toolsW }; ev.preventDefault(); };
 window.addEventListener("mousemove", ev => {
   if (!sdown) return;
+  if (sdown.which === "tools") { V.toolsW = Math.max(200, Math.min(window.innerWidth * .5, sdown.w + (sdown.x - ev.clientX))); applyStatic(); paint(); return; }
   const h = sdown.h + (sdown.y - ev.clientY);
   if (sdown.which === "traces") V.tracesH = Math.max(120, Math.min(window.innerHeight * .7, h));
   else V.metaH = Math.max(60, Math.min($("unitsCol").clientHeight - 140, h));

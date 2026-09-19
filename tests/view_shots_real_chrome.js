@@ -1,7 +1,8 @@
 "use strict";
 /* Screenshots of the viewer's states in a real Chrome over CDP, plus a console-error check.
-   NOT collected by pytest.  node tests/view_shots_real_chrome.js <url> <outdir> */
-   state, and report any console error. node view_shot.js <url> <outdir> */
+   NOT collected by pytest.  node tests/view_shots_real_chrome.js <url> <outdir>
+   Exits 1 on any console error or thrown exception -- a screenshot run that prints errors and
+   exits 0 was worth nothing (2026-09-18 review). */
 const { spawn } = require("node:child_process");
 const http = require("node:http"); const fs = require("node:fs"); const path = require("node:path");
 const URL_ = process.argv[2], OUT = process.argv[3];
@@ -22,7 +23,9 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
     else if (d.method === "Runtime.exceptionThrown") errors.push(d.params.exceptionDetails.exception?.description || d.params.exceptionDetails.text);
     else if (d.method === "Runtime.consoleAPICalled" && d.params.type === "error") errors.push(d.params.args.map(a => a.value || a.description).join(" ")); };
   const send = (method, params = {}) => new Promise(r => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
-  const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true }); return r.result && r.result.result ? r.result.result.value : r; };
+  const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
+    if (r.result && r.result.exceptionDetails) throw new Error("evaluate threw: " + (r.result.exceptionDetails.exception || {}).description);
+    return r.result && r.result.result ? r.result.result.value : r; };
   const shot = async (name) => { const r = await send("Page.captureScreenshot", { format: "png" }); fs.writeFileSync(path.join(OUT, name + ".png"), Buffer.from(r.result.data, "base64")); console.log("  shot", name); };
   await send("Page.enable"); await send("Runtime.enable");
   await send("Page.navigate", { url: URL_ }); await sleep(1800);
@@ -38,7 +41,7 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   await shot("3_overlay");
   await ev("document.getElementById('modeStack').click(); V.zoom={x:20,y:30,w:60,h:50}; paint(); V.traceZoom=[200,500]; plotTraces(); V.frame=350; document.getElementById('frame').value=350; V.mean=false; draw(); plotTraces(); 'ok'"); await sleep(400);
   await shot("4_zoomed_image_and_time");
-  await ev("stepAvg(3); 'ok'"); await sleep(400);
+  await ev("setAvg(8); 'ok'"); await sleep(400);
   await shot("5_avg8");
   await ev("document.querySelectorAll('.u')[2].click(); 'ok'"); await sleep(900);
   await shot("6_unit3");
@@ -46,4 +49,5 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   console.log("  saved view:", saved.slice(0, 200));
   console.log(errors.length ? "\n  CONSOLE ERRORS:\n  " + errors.join("\n  ") : "\n  no console errors");
   ws.close(); chrome.kill();
+  if (errors.length) process.exit(1);
 })().catch(e => { console.error("ERR", e); process.exit(1); });

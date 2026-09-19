@@ -255,6 +255,26 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (JSON.stringify(posRaw) !== JSON.stringify(posDff)) fail("the trace bar's buttons moved between raw and dF/F");
   await ev("document.getElementById('sigRaw').click(); 'ok'");
 
+  // 2i. the tools column's width is dragged and remembered
+  await ev("V.toolsW=260; applyStatic(); 'ok'"); await sleep(100);
+  const tsp = JSON.parse(await ev("JSON.stringify(document.getElementById('toolsSplit').getBoundingClientRect())"));
+  await drag(tsp.left + 3, tsp.top + 200, tsp.left - 97, tsp.top + 200);
+  const tw = await ev("V.toolsW"), twCss = await ev("getComputedStyle(document.getElementById('toolsCol')).width");
+  console.log("  tools width: 260 ->", tw, "css", twCss);
+  if (Math.abs(tw - 360) > 3 || twCss !== tw + "px") fail("dragging the tools splitter did not widen the column by the drag");
+  await sleep(500);
+  if ((await getJSON(URL_ + "api/view")).view.toolsW !== tw) fail("the tools width was not saved");
+
+  // 2j. traces requested on one unit, unit switched before the reply: the reply is dropped
+  await pickUnit(0);
+  await ev("ROIS.length=0; addRoi(makeSpot(30,40,3)); 'ok'"); await sleep(400);
+  await ev("document.getElementById('doTraces').click(); 'ok'");          // in flight for MUnit_0…
+  await pickUnit(1);                                                        // …switch before it lands
+  await sleep(3000);
+  const trUnit = await ev("TR ? TR.unit : null");
+  console.log("  traces after a switch mid-fetch: TR.unit =", trUnit, "screen unit =", await ev("unit.path"));
+  if (trUnit === "MSession_0/MUnit_0") fail("MUnit_0's traces were shown on MUnit_1");
+
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);
   const avg = await ev("V.avg"); const url = await ev("frameUrl()");
@@ -262,4 +282,5 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (avg !== 13 || !/n=13/.test(url)) fail("typed AVG did not reach the request");
   console.log(errors.length ? "\n  ERRORS: " + errors.join(" | ") : "\n  drag / box / typed-AVG OK in real Chrome");
   ws.close(); chrome.kill();
+  if (errors.length) process.exit(1);          // a thrown exception anywhere in the run is a failure, not a note
 })().catch(e => { console.error("ERR", e); process.exit(1); });

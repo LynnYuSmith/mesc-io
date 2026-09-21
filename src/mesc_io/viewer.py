@@ -506,6 +506,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "pixel_size_um": u.pixel_size_um, "comment": u.comment,
                 "channels": [c.name for c in u.channels],
                 "stage_um": u.stage_um,
+                "stage_rel_um": u.stage_rel_um,
             } for u in f.units()]
         rep = mesc_check(self.mesc_path)
         return {"file": self.mesc_path.name, "path": str(self.mesc_path), "units": units,

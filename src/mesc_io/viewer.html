@@ -340,10 +340,11 @@ function pick(i, restoring) {
   if (V.traceZoom && !(Array.isArray(V.traceZoom) && V.traceZoom.length === 2 && V.traceZoom[0] >= 0 && V.traceZoom[1] < unit.frames && V.traceZoom[1] - V.traceZoom[0] >= 4)) V.traceZoom = null;
   if (V.valueZoom && !(Array.isArray(V.valueZoom) && V.valueZoom.length === 2 && V.valueZoom[1] > V.valueZoom[0])) V.valueZoom = null;
   $("frame").max = unit.frames - 1; $("frame").value = V.frame;
-  const st = unit.stage_um;
+  const st = unit.stage_um, rel = unit.stage_rel_um;
   $("metaTable").innerHTML = [
     ["unit", unit.path],
     ["stage", st ? `x ${fmt(st.x)} · y ${fmt(st.y)} · z ${fmt(st.z)} µm` : "not in file"],
+    ["from zero", rel ? `x ${fmt(rel.x)} · y ${fmt(rel.y)} · z ${fmt(rel.z)} µm` : "not in file"],
     ["frames", `${unit.frames}`],
     ["size", `${unit.width} × ${unit.height} px`],
     ["rate", unit.frame_rate_hz ? unit.frame_rate_hz.toFixed(3) + " Hz" : "not stated"],

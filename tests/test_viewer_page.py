@@ -59,7 +59,7 @@ const document = {
 document.body.dataset = {};
 const FILE = { file: "synthetic.mesc", path: "/x/synthetic.mesc", findings: [], units: [
   { path: "MSession_0/MUnit_0", name: "MUnit_0", session: "MSession_0", frames: 100, height: 8, width: 8,
-    frame_rate_hz: 60.0, duration_s: 1.6, pixel_size_um: 0.5, comment: "c", channels: ["Channel_0"], stage_um: null }]};
+    frame_rate_hz: 60.0, duration_s: 1.6, pixel_size_um: 0.5, comment: "c", channels: ["Channel_0"], stage_um: null, stage_rel_um: null }]};
 const json = (o) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(o) });
 const fetch = (url, opts) => {
   if (url.startsWith("/api/file")) return json(FILE);

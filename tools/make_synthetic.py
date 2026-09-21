@@ -23,6 +23,9 @@ XML = ('<?xml version="1.0"?><Params><AxisControl><snapshot>'
        '<axis attribute="AttributePosition" id="VirtX" value="915.0"/>'
        '<axis attribute="AttributePosition" id="VirtY" value="3671.0"/>'
        '<axis attribute="AttributePosition" id="VirtZ" value="-9.0"/>'
+       '<axis attribute="AttributeRelativePosition" id="SlowX" value="80.0"/>'
+       '<axis attribute="AttributeRelativePosition" id="SlowY" value="-1210.0"/>'
+       '<axis attribute="AttributeRelativePosition" id="SlowZ" value="-9.0"/>'
        '</snapshot></AxisControl><param name="PixelSizeX" value="0.5"/></Params>').encode("latin-1")
 UNITS = [(1500, "area1 4c4s 135deg"), (400, "area1 spont"), (900, "area2 8s 5rep 045deg")]
 SPOTS = [(30, 40), (70, 60), (95, 90), (50, 100)]        # the fourth one never blinks

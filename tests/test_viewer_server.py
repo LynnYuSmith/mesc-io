@@ -26,6 +26,8 @@ STAGE_XML = ('<?xml version="1.0"?><Params><AxisControl><snapshot>'
              '<axis attribute="AttributePosition" id="VirtY" value="3671.0"/>'
              '<axis attribute="AttributePosition" id="VirtZ" value="-9.0"/>'
              '<axis attribute="AttributeRelativePosition" id="SlowX" value="80.0"/>'
+             '<axis attribute="AttributeRelativePosition" id="SlowY" value="-1210.0"/>'
+             '<axis attribute="AttributeRelativePosition" id="SlowZ" value="-9.0"/>'
              '</snapshot></AxisControl><param name="µm" value="1"/></Params>')
 
 
@@ -92,18 +94,29 @@ def test_the_stage_position_is_read_off_the_file_as_latin1(recording):
     assert u.stage_um == {"x": 915.0, "y": 3671.0, "z": -9.0}
 
 
+def test_the_position_from_zero_is_read_next_to_the_absolute_one(recording):
+    """The Slow* relative axes are the "from zero" numbers the rig shows and the comments quote
+    (x80 y-1210 z-9); the Virt* absolute axes are the stage. Both, separately, never mixed."""
+    with MescFile(recording) as f:
+        u = f.unit("MSession_0/MUnit_0")
+    assert u.stage_rel_um == {"x": 80.0, "y": -1210.0, "z": -9.0}
+    assert u.stage_um != u.stage_rel_um
+
+
 def test_a_file_without_the_xml_says_none_not_zero(tmp_path):
     path = tmp_path / "bare.mesc"
     with h5py.File(path, "w") as f:
         u = f.create_group("MSession_0").create_group("MUnit_0")
         u.create_dataset("Channel_0", data=np.zeros((2, 4, 4), dtype=np.uint16))
     with MescFile(path) as f:
-        assert f.unit("MSession_0/MUnit_0").stage_um is None
+        u = f.unit("MSession_0/MUnit_0")
+        assert u.stage_um is None and u.stage_rel_um is None
 
 
 def test_describe_carries_the_stage_position(server):
     d = get_json(server + "/api/file")
     assert d["units"][0]["stage_um"] == {"x": 915.0, "y": 3671.0, "z": -9.0}
+    assert d["units"][0]["stage_rel_um"] == {"x": 80.0, "y": -1210.0, "z": -9.0}
 
 
 # --- averaged frames ------------------------------------------------------------------------

@@ -77,6 +77,12 @@ class Unit:
     #: was. Not the injection-relative numbers people type into comments, and not
     #: ``GeomTransTransl``, whose x and y are zero. None when the file does not carry it.
     stage_um: Optional[Dict[str, float]] = None
+    #: The same position "from the zero level" — ``AttributeRelativePosition`` SlowX/SlowY/SlowZ
+    #: (Femtonics names the x stage axis ``TableY`` and vice versa; the Slow* ids are the ones
+    #: that match what is typed). This is the number the software shows after "set zero", and
+    #: the one the comments' ``x-180 y120 z-20 from a1`` refer to. The zero is set by hand on the
+    #: rig, per axis, at any time — so it is only comparable within one zero-setting.
+    stage_rel_um: Optional[Dict[str, float]] = None
 
     @property
     def shape(self):
@@ -258,14 +264,17 @@ class MescFile:
                     dtype=str(first.dtype), frame_rate_hz=rate,
                     pixel_size_um=px if px and px > 0 else None,
                     comment=_text(_attr(a, "Comment")), channels=channels,
-                    stage_um=_stage_position(a))
+                    stage_um=_stage_position(a),
+                    stage_rel_um=_stage_position(a, "AttributeRelativePosition", "Slow"))
 
 
-def _stage_position(attrs) -> Optional[Dict[str, float]]:
-    """VirtX/VirtY/VirtZ from ``MeasurementParamsXML``, or None.
+def _stage_position(attrs, attribute: str = "AttributePosition", prefix: str = "Virt") -> Optional[Dict[str, float]]:
+    """``{prefix}X/Y/Z`` axes carrying ``attribute`` from ``MeasurementParamsXML``, or None.
 
-    Decoded as latin-1: the block carries a µ sign that is not UTF-8. Anything unparseable
-    is None rather than an exception — a viewer must open a file whose XML is odd.
+    ``AttributePosition`` + ``Virt`` is the absolute stage; ``AttributeRelativePosition`` +
+    ``Slow`` is the position from the zero set on the rig. Decoded as latin-1: the block carries
+    a µ sign that is not UTF-8. Anything unparseable is None rather than an exception — a viewer
+    must open a file whose XML is odd.
     """
     xml = _attr(attrs, "MeasurementParamsXML")
     if xml is None:
@@ -278,9 +287,10 @@ def _stage_position(attrs) -> Optional[Dict[str, float]]:
         root = ET.fromstring(str(xml).rstrip("\x00"))
     except ET.ParseError:
         return None
+    ids = {prefix + "X", prefix + "Y", prefix + "Z"}
     out: Dict[str, float] = {}
     for ax in root.iter("axis"):
-        if ax.get("attribute") == "AttributePosition" and ax.get("id") in ("VirtX", "VirtY", "VirtZ"):
+        if ax.get("attribute") == attribute and ax.get("id") in ids:
             try:
                 out[ax.get("id")[-1].lower()] = float(ax.get("value"))
             except (TypeError, ValueError):

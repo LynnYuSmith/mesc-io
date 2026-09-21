@@ -54,3 +54,7 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # a tag pushed again (a history rewrite, a re-run) must not go red on a version
+          # PyPI already holds; a NEW version is still refused if its files differ
+          skip-existing: true

@@ -20,8 +20,9 @@ dependencies = ["h5py>=3.6", "numpy>=1.21"]
 
 [project.optional-dependencies]
 tiff = ["tifffile>=2021.11"]
+imagej = ["roifile>=2022.9"]
 register = ["suite2p>=0.14"]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "roifile>=2022.9"]
 
 [project.scripts]
 mesc-io = "mesc_io.__main__:main"

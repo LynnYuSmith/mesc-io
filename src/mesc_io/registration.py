@@ -53,6 +53,10 @@ def _suite2p():
     except ImportError as exc:  # noqa: BLE001
         raise ImportError(
             "motion correction needs Suite2p — pip install mesc-io[register]") from exc
+    # newer Suite2p exposes `suite2p.default_ops` as the MODULE and the function lives inside it;
+    # older ones re-export the function. Calling the module was the CI failure of 2026-09-21.
+    if not callable(default_ops):
+        default_ops = default_ops.default_ops
     return _reg, default_ops
 
 

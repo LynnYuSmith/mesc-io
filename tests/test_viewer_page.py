@@ -110,7 +110,7 @@ setTimeout(() => {
 @pytest.mark.skipif(not NODE, reason="node is not on this machine; the page-load gate needs it")
 def test_the_page_loads_and_its_handlers_run_without_throwing(tmp_path):
     stub = tmp_path / "load.js"
-    stub.write_text(STUB)
+    stub.write_text(STUB, encoding="utf-8")
     r = subprocess.run([NODE, str(stub), str(PAGE)], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, f"exit {r.returncode}\n{r.stdout}\n{r.stderr}"
     assert "page loaded" in r.stdout
@@ -121,16 +121,16 @@ def test_the_gate_catches_a_page_that_throws_at_load(tmp_path):
     """The positive control: a page whose script references a name that does not exist must
     turn the gate red, or the gate proves nothing."""
     broken = tmp_path / "broken.html"
-    broken.write_text(PAGE.read_text().replace("<script>", "<script>\nthisNameDoesNotExist();\n", 1))
+    broken.write_text(PAGE.read_text(encoding="utf-8").replace("<script>", "<script>\nthisNameDoesNotExist();\n", 1))
     stub = tmp_path / "load.js"
-    stub.write_text(STUB)
+    stub.write_text(STUB, encoding="utf-8")
     r = subprocess.run([NODE, str(stub), str(broken)], capture_output=True, text=True, timeout=60)
     assert r.returncode != 0 and "threw at load" in r.stderr
 
 
 def test_every_id_the_script_asks_for_exists_in_the_markup():
     """Cheaper than node and needs nothing: every `$("id")` in the script has an `id="…"`."""
-    src = PAGE.read_text()
+    src = PAGE.read_text(encoding="utf-8")
     script = re.search(r"<script>([\s\S]*?)</script>", src).group(1)
     markup = src[:src.index("<script>")]
     ids = set(re.findall(r'id="([^"]+)"', markup))

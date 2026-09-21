@@ -307,7 +307,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not self.rois_path.exists():
             return {}
         try:
-            data = json.loads(self.rois_path.read_text())
+            data = json.loads(self.rois_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {}
         src = data.get("source")
@@ -340,7 +340,7 @@ class _Handler(BaseHTTPRequestHandler):
         leave a truncated set, and the set is the only record of hand-drawn work."""
         self.rois_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.rois_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"source": str(self.mesc_path), "units": store}, indent=2))
+        tmp.write_text(json.dumps({"source": str(self.mesc_path), "units": store}, indent=2), encoding="utf-8")
         tmp.replace(self.rois_path)
 
     # -- the view: where you were looking, saved by itself -------------------
@@ -355,14 +355,14 @@ class _Handler(BaseHTTPRequestHandler):
         if not self.view_path.exists():
             return {}
         try:
-            return json.loads(self.view_path.read_text())
+            return json.loads(self.view_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {}
 
     def _save_view(self, view):
         self.view_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.view_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"source": str(self.mesc_path), **view}, indent=1))
+        tmp.write_text(json.dumps({"source": str(self.mesc_path), **view}, indent=1), encoding="utf-8")
         tmp.replace(self.view_path)
 
     def _download(self, body: bytes, ctype: str, filename: str):
@@ -466,7 +466,10 @@ class _Handler(BaseHTTPRequestHandler):
     def _export_imagej(self, unit: str):
         """One unit's ROI set as an ImageJ `.zip` — the format Fiji opens and our own pipeline
         reads, so a set drawn here can go straight into an analysis instead of being retyped."""
-        import roifile
+        try:
+            import roifile
+        except ImportError as exc:
+            raise ValueError("the ImageJ export needs roifile — pip install mesc-io[imagej]") from exc
         if not unit:
             raise ValueError("say which unit: /api/export/rois.zip?unit=MSession_0/MUnit_3")
         rois = self._load_rois(unit)

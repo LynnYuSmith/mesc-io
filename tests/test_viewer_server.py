@@ -189,7 +189,7 @@ def test_a_non_object_view_is_refused(server):
 
 
 def test_a_corrupt_view_file_reads_as_empty(server, tmp_path):
-    (tmp_path / "rec_view.json").write_text("{not json")
+    (tmp_path / "rec_view.json").write_text("{not json", encoding="utf-8")
     assert get_json(server + "/api/view")["view"] == {}
 
 
@@ -266,22 +266,22 @@ def test_a_put_without_a_unit_is_refused(two_unit_server):
 
 def test_the_old_file_wide_shape_is_shown_on_the_first_unit_but_not_written_on_read(two_unit_server, tmp_path, capsys, recording):
     side = tmp_path / "rec_rois.json"
-    side.write_text(json.dumps({"source": str(recording), "rois": [SPOT]}))
-    before = side.read_text()
+    side.write_text(json.dumps({"source": str(recording), "rois": [SPOT]}), encoding="utf-8")
+    before = side.read_text(encoding="utf-8")
     d = get_json(two_unit_server + "/api/rois?unit=MSession_0/MUnit_0")
     assert d["rois"] == [SPOT] and d["legacy"] is True
-    assert side.read_text() == before, "a GET must never write the store"
+    assert side.read_text(encoding="utf-8") == before, "a GET must never write the store"
     assert "old file-wide shape" in capsys.readouterr().out
     # the first save writes the new shape, without the marker
     put_json(two_unit_server + "/api/rois", {"unit": "MSession_0/MUnit_1", "rois": [SPOT]})
-    saved = json.loads(side.read_text())
+    saved = json.loads(side.read_text(encoding="utf-8"))
     assert saved["units"] == {"MSession_0/MUnit_0": [SPOT], "MSession_0/MUnit_1": [SPOT]}
     assert "_legacy" not in saved["units"]
 
 
 def test_a_sidecar_drawn_on_another_recording_is_refused_loudly(two_unit_server, tmp_path, capsys):
     (tmp_path / "rec_rois.json").write_text(json.dumps({"source": "/elsewhere/other.mesc",
-                                                         "units": {"MSession_0/MUnit_0": [SPOT]}}))
+                                                         "units": {"MSession_0/MUnit_0": [SPOT]}}), encoding="utf-8")
     assert get_json(two_unit_server + "/api/rois?unit=MSession_0/MUnit_0")["rois"] == []
     assert "was drawn on other.mesc" in capsys.readouterr().out
 

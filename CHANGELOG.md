@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 — 2026-09-21
+
+- The package description on PyPI said the package was not on PyPI: it was the README as
+  built before the first upload. Now it says `pip install mesc-io`, with the PyPI badge and
+  the acknowledgements. No code change.
+
 ## 0.1.0 — 2026-09-21
 
 - The `register` extra pins Suite2p to the 0.14 line: 1.x renamed the arguments of

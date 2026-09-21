@@ -6,7 +6,7 @@ Read Femtonics `.mesc` two-photon recordings in Python — the frames in the uni
 reader shows, every unit's metadata, an export, a write-back, and a viewer that draws ROIs and
 computes their dF/F.
 
-![the viewer on a synthetic recording: four spots, three of them blinking, their dF/F below](docs/viewer.png)
+![the viewer on a synthetic recording: four spots, three of them blinking, their dF/F below](https://raw.githubusercontent.com/LynnYuSmith/mesc-io/main/docs/viewer.png)
 
 ## Install
 

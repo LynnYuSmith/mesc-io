@@ -10,13 +10,28 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [{ name = "Lynn Smith" }]
+keywords = ["mesc", "femtonics", "two-photon", "calcium-imaging", "microscopy", "hdf5"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = ["h5py>=3.6", "numpy>=1.21"]
+
+[project.urls]
+Homepage = "https://github.com/LynnYuSmith/mesc-io"
+Repository = "https://github.com/LynnYuSmith/mesc-io"
+Changelog = "https://github.com/LynnYuSmith/mesc-io/blob/main/CHANGELOG.md"
+Issues = "https://github.com/LynnYuSmith/mesc-io/issues"
 
 [project.optional-dependencies]
 tiff = ["tifffile>=2021.11"]

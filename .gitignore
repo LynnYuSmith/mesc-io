@@ -7,3 +7,6 @@ dist/
 .pytest_cache/
 *.mesc
 *.h5
+*_rois.json
+*_view.json
+*.log

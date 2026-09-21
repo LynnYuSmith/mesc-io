@@ -14,7 +14,7 @@ from it, not the other way round. Anything marked **?** is still open.
 │  …  (scrolls)│                                          │  [ filter…        ]  │
 │──────────────│                                          │  ROI 1               │
 │ metadata     │                                          │  ROI 2               │
-│  of the unit │  ▸ ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮ frame 812/3010 │  ROI 3   (scrolls)   │
+│  of the unit │  ▸ ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮ frame 812/3010 │  ROI 3   (scrolls)  │
 │  on screen   │  ch 0 · ch 1                             │                      │
 ├──────────────┴──────────────────────────────────────────┴──────────────────────┤
 │ traces                                            [stack | overlay]  [grid] [⤢]│

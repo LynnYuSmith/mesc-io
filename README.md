@@ -80,6 +80,10 @@ Python 3.9, 3.12 and 3.13 on Linux, macOS and Windows, plus one job with Suite2p
 registration tests; the browser checks (`tests/*_real_chrome.js`) run in a real Chrome and are
 not part of pytest.
 
+## Acknowledgements
+
+F. Kamari, for the idea. Claude Code, for the debugging.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).

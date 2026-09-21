@@ -3,6 +3,7 @@ name: tests
 on:
   push:
   pull_request:
+  workflow_dispatch:      # a button, for when a green run is wanted without a change
 
 jobs:
   test:

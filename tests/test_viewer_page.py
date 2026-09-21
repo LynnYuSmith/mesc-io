@@ -121,7 +121,7 @@ def test_the_gate_catches_a_page_that_throws_at_load(tmp_path):
     """The positive control: a page whose script references a name that does not exist must
     turn the gate red, or the gate proves nothing."""
     broken = tmp_path / "broken.html"
-    broken.write_text(PAGE.read_text(encoding="utf-8").replace("<script>", "<script>\nthisNameDoesNotExist();\n", 1))
+    broken.write_text(PAGE.read_text(encoding="utf-8").replace("<script>", "<script>\nthisNameDoesNotExist();\n", 1), encoding="utf-8")
     stub = tmp_path / "load.js"
     stub.write_text(STUB, encoding="utf-8")
     r = subprocess.run([NODE, str(stub), str(broken)], capture_output=True, text=True, timeout=60)

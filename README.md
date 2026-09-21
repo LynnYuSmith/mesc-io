@@ -1,6 +1,6 @@
 # mesc-io
 
-[![tests](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml/badge.svg)](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml)
+[![tests](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml/badge.svg)](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml) [![PyPI](https://img.shields.io/pypi/v/mesc-io)](https://pypi.org/project/mesc-io/)
 
 Read Femtonics `.mesc` two-photon recordings in Python — the frames in the units the native
 reader shows, every unit's metadata, an export, a write-back, and a viewer that draws ROIs and
@@ -10,11 +10,9 @@ computes their dF/F.
 
 ## Install
 
-Not on PyPI yet. From the repository:
-
 ```
-pip install "mesc-io @ git+https://github.com/LynnYuSmith/mesc-io"
-pip install "mesc-io[tiff,imagej] @ git+https://github.com/LynnYuSmith/mesc-io"   # + TIFF export, ImageJ ROI export
+pip install mesc-io
+pip install "mesc-io[tiff,imagej]"     # + TIFF export, ImageJ ROI export
 ```
 
 Needs Python 3.9 or newer, numpy and h5py; nothing else for reading and viewing. Motion

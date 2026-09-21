@@ -1,12 +1,24 @@
 # mesc-io
 
-Read Femtonics `.mesc` two-photon recordings in Python.
+[![tests](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml/badge.svg)](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml)
+
+Read Femtonics `.mesc` two-photon recordings in Python — the frames in the units the native
+reader shows, every unit's metadata, an export, a write-back, and a viewer that draws ROIs and
+computes their dF/F.
+
+![the viewer on a synthetic recording: four spots, three of them blinking, their dF/F below](docs/viewer.png)
 
 ## Install
 
+Not on PyPI yet. From the repository:
+
 ```
-pip install mesc-io            # + [tiff] for TIFF export
+pip install "mesc-io @ git+https://github.com/LynnYuSmith/mesc-io"
+pip install "mesc-io[tiff,imagej] @ git+https://github.com/LynnYuSmith/mesc-io"   # + TIFF export, ImageJ ROI export
 ```
+
+Needs Python 3.9 or newer, numpy and h5py; nothing else for reading and viewing. Motion
+correction (`mesc-io register`) is an extra, `[register]`, and pulls in Suite2p 0.14.
 
 ## Python
 
@@ -41,7 +53,8 @@ mesc-io view      recording.mesc                            # the recording in a
 ### The viewer
 
 `mesc-io view` opens the recording in a private browser window: units on the left with a
-thumbnail each and the unit's own metadata (rate, pixel size, stage position); the image in
+thumbnail each and the unit's own metadata (rate, pixel size, the stage position and the
+position from the zero set on the rig); the image in
 the middle — scrub it, average a window of N frames, zoom into a place by dragging a box;
 ROIs on the right (spot, rectangle, polygon; drag to move, type a size); every ROI's time
 course along the bottom, raw or dF/F by our pipeline's method (`mesc_io.dff`, numpy only,
@@ -64,8 +77,10 @@ pip install -e ".[tiff,dev]"
 pytest
 ```
 
-The package lives under `src/`, so tests run against the installed copy.
-Tested on Python 3.9–3.14, Linux/macOS/Windows.
+The package lives under `src/`, so tests run against the installed copy. CI runs the suite on
+Python 3.9, 3.12 and 3.13 on Linux, macOS and Windows, plus one job with Suite2p for the
+registration tests; the browser checks (`tests/*_real_chrome.js`) run in a real Chrome and are
+not part of pytest.
 
 ## Licence
 

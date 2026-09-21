@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-09-21
 
 - The `register` extra pins Suite2p to the 0.14 line: 1.x renamed the arguments of
   `compute_reference`/`register_frames`, and 0.14 is what the registration is validated on.
@@ -8,7 +8,7 @@
   declares `roifile` (`mesc-io[imagej]`) instead of importing it unannounced.
 - The reader carries the position from zero (`stage_rel_um`) next to the stage (`stage_um`).
 
-First working version. Nothing is released yet, so nothing here is stable.
+First version. The API is young: names may still move before 1.0.
 
 ### Reading
 
@@ -82,5 +82,5 @@ First working version. Nothing is released yet, so nothing here is stable.
 ### Everything else
 
 - Every error raised on purpose derives from `MescIOError`, while staying its specific self.
-- Tested on Python 3.9, 3.12, 3.13 and 3.14, each with a real install, from outside the
+- Tested on Python 3.9, 3.12 and 3.13, each with a real install, from outside the
   source tree.

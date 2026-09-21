@@ -1,11 +1,12 @@
 # Publish to PyPI on a version tag, through Trusted Publishing — no token anywhere.
 #
-# One-time setup on pypi.org (and test.pypi.org): the project's "Publishing" page → add a
-# GitHub publisher: owner LynnYuSmith, repository mesc-io, workflow release.yml, environment
-# pypi (or testpypi). After that: `git tag v0.1.1 && git push --tags` publishes.
+# One-time setup on pypi.org: the project's "Publishing" page → a GitHub publisher: owner
+# LynnYuSmith, repository mesc-io, workflow release.yml. After that: `git tag v0.1.1 && git
+# push --tags` publishes. A version on PyPI is forever — the build job checks the wheel in a
+# clean environment first, and the tag must equal the package's own version.
 #
-#   tag v*         → build, then the test suite must be green, then TestPyPI, then PyPI
-#   workflow_dispatch → build + TestPyPI only (a rehearsal that cannot burn a real version)
+#   tag v*            → build + checks, then PyPI
+#   workflow_dispatch → build + checks only (a rehearsal)
 name: release
 
 on:
@@ -40,24 +41,8 @@ jobs:
           name: dist
           path: dist/
 
-  testpypi:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: testpypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
-
   pypi:
-    needs: testpypi
+    needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi

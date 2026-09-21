@@ -21,7 +21,7 @@ dependencies = ["h5py>=3.6", "numpy>=1.21"]
 [project.optional-dependencies]
 tiff = ["tifffile>=2021.11"]
 imagej = ["roifile>=2022.9"]
-register = ["suite2p>=0.14"]
+register = ["suite2p>=0.14,<1.0"]   # 1.x changed compute_reference/register_frames; validated on 0.14.x
 dev = ["pytest>=7", "roifile>=2022.9"]
 
 [project.scripts]

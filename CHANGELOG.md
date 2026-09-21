@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The `register` extra pins Suite2p to the 0.14 line: 1.x renamed the arguments of
+  `compute_reference`/`register_frames`, and 0.14 is what the registration is validated on.
+- Reads and writes of the page and the sidecars are UTF-8 on every platform; the ImageJ export
+  declares `roifile` (`mesc-io[imagej]`) instead of importing it unannounced.
+- The reader carries the position from zero (`stage_rel_um`) next to the stage (`stage_um`).
+
 First working version. Nothing is released yet, so nothing here is stable.
 
 ### Reading

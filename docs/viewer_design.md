@@ -1,7 +1,7 @@
 # The viewer, second layout
 
-Sketched by hand on 2026-09-18, then worked out. This is the shape; the page is built
-from it, not the other way round. Anything marked **?** is still open.
+Sketched by hand on 2026-09-18, then worked out. This is the shape; the page is built from it,
+not the other way round. Anything marked **?** is still open.
 
 ## The picture
 

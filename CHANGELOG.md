@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-09-24
+
+- The metadata window has a button. `GET /api/metadata/<unit>` shipped in 0.2.0 with nothing to
+  open it; **all…** beside the metadata heading now opens a panel with every attribute the unit
+  and its session carry, grouped, with a filter over names and values and esc to close. The
+  sidebar keeps its ten, which is what a glance wants.
+- `tests/view_metadata_real_chrome.js` drives it in a real Chrome over CDP — clicks the button,
+  counts the rows, types in the filter, presses esc, and fails on any console error.
+
 ## 0.2.0 — 2026-09-24
 
 **A z-stack is no longer read as a 1000 Hz recording.** The third axis is time in a recording

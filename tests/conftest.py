@@ -132,3 +132,45 @@ def moving_mesc(tmp_path):
         u.attrs["XAxisConversionConversionLinearScale"] = PIXEL_UM
         u.attrs["Comment"] = _text("a field that moved")
     return path, n_flat, shifts[:n_move]
+
+def _moving_unit(seed, blobs, shifts, n_flat=9, h=128, w=128):
+    """Frames of a fixed scene of `blobs` that the stage moved under, by `shifts`."""
+    rng = np.random.RandomState(seed)
+    scene = np.zeros((h, w), dtype=np.float64)
+    ys, xs = np.mgrid[0:h, 0:w]
+    for cy, cx, amp in blobs:
+        scene += amp * np.exp(-((ys - cy) ** 2 + (xs - cx) ** 2) / (2 * 3.5 ** 2))
+    frames = np.empty((n_flat + len(shifts), h, w), dtype=np.uint16)
+    frames[:n_flat] = (1040 + rng.normal(0, 6, (n_flat, h, w))).clip(0).astype(np.uint16)
+    for i, (dy, dx) in enumerate(shifts):
+        moved = np.roll(np.roll(scene, dy, axis=0), dx, axis=1)
+        frames[n_flat + i] = (1040 + moved + rng.normal(0, 6, (h, w))).clip(0).astype(np.uint16)
+    return frames
+
+
+@pytest.fixture
+def two_fields_mesc(tmp_path):
+    """Two units of two DIFFERENT fields, each moved by its own known sequence.
+
+    This is the ordinary shape of a session file, and the case a single shared reference
+    gets wrong: the blobs of one field are nowhere in the other.
+    """
+    shifts_a = [(0, 0)] * 6 + [(2, -3)] * 8 + [(-4, 1)] * 8 + [(3, 3)] * 8 + [(-1, -2)] * 10
+    shifts_b = [(0, 0)] * 6 + [(-3, 2)] * 8 + [(1, -4)] * 8 + [(4, 1)] * 8 + [(-2, -1)] * 10
+    a = _moving_unit(0, [(30, 40, 900), (70, 90, 1200), (100, 35, 700), (50, 64, 1000)],
+                     shifts_a)
+    b = _moving_unit(1, [(95, 100, 1100), (20, 105, 800), (60, 20, 950), (110, 70, 700)],
+                     shifts_b)
+
+    path = tmp_path / "two_fields.mesc"
+    with h5py.File(path, "w") as f:
+        sess = f.create_group("MSession_0")
+        for name, frames, what in (("MUnit_0", a, "field one"), ("MUnit_1", b, "field two")):
+            u = sess.create_group(name)
+            u.create_dataset("Channel_0", data=frames)
+            u.attrs["Channel_0_Conversion_ConversionLinearOffset"] = OFFSET_CH0
+            u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
+            u.attrs["ZAxisConversionConversionLinearScale"] = FRAME_PERIOD_MS
+            u.attrs["XAxisConversionConversionLinearScale"] = PIXEL_UM
+            u.attrs["Comment"] = _text(what)
+    return path, 9, {"MUnit_0": shifts_a, "MUnit_1": shifts_b}

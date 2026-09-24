@@ -1,17 +1,21 @@
-"""Motion-correct the units of a `.mesc` against one shared reference, with Suite2p.
+"""Motion-correct the units of a `.mesc` with Suite2p.
 
-Suite2p does the registration. What this module adds is the part that matters when a session
-holds several recordings of the same field:
+Suite2p does the registration. What this module adds is the part that matters when a file
+holds several recordings:
 
-* **one reference for all of them.** Registering each recording on its own aligns its frames
-  to itself and to nothing else, so two recordings of one field end up in two coordinate
-  frames and a structure cannot be followed from one to the next. Here every named unit is
-  registered to the same reference image.
-* **the reference comes from the first recording, not from all of them.** Tissue drifts and
-  deforms over a session. Suite2p's default reference is sampled across the whole movie, so a
-  reference built over the concatenation would be an average of early and late states and
-  match neither. Taking it from the first unit anchors everything to the state the session
-  started in. Pass `reference_from` to anchor elsewhere.
+* **each unit gets its own reference, unless you say otherwise.** One file usually holds
+  several different fields, and registering one field to another field's reference is not
+  registration: the search finds its best match against structure that is not there and
+  quietly returns displaced frames. So the default is per unit.
+* **`groups` is how you say two recordings are the same field.** Repeats of one field do
+  need one shared reference, or they end up in two coordinate frames and a structure cannot
+  be followed from one to the next. Name them together — `groups=[["MUnit_0", "MUnit_1"]]` —
+  and they share a reference while everything else keeps its own. Aligning *between* fields
+  is a separate problem and is not this module's job.
+* **a group's reference comes from one recording, not from all of them.** Tissue drifts and
+  deforms over a session. A reference built over a group's concatenation would be an average
+  of early and late states and match neither. Taking it from the group's first unit anchors
+  the group to the state it started in. Pass `reference_from` to anchor elsewhere.
 * **the other channels follow.** Registration is computed on one channel and the same shifts
   are applied to the rest, because they were recorded simultaneously and moving them
   independently would break their alignment to each other.
@@ -140,20 +144,62 @@ def compute_reference_image(source, unit: str, channel: int = 0, *, nonrigid: bo
     return reg.compute_reference(_as_int16(frames, scale), ops=ops)
 
 
+def _resolve_groups(f, units, groups, reference_from) -> List[List[str]]:
+    """The unit paths to register, split into the sets that share one reference.
+
+    Default: every unit is its own group, because a file holds several fields and one
+    field's reference means nothing to another. `groups` names the sets that ARE one field.
+    `reference_from` on its own is read as the older, explicit request for a single shared
+    reference over everything named — that is what it always meant, so it keeps meaning it.
+    """
+    if groups is not None:
+        if units is not None:
+            raise RegistrationError("pass either `units` or `groups`, not both")
+        out = [[f.unit(u).path for u in g] for g in groups if len(list(g))]
+        if not out:
+            raise RegistrationError("`groups` is empty")
+        seen = [p for g in out for p in g]
+        if len(seen) != len(set(seen)):
+            raise RegistrationError("a unit appears in more than one group")
+        return out
+
+    paths = [u.path for u in f.units()] if units is None else [f.unit(u).path for u in units]
+    if not paths:
+        raise RegistrationError("no units to register")
+    if reference_from is not None:
+        anchor = f.unit(reference_from).path
+        return [([anchor] + [p for p in paths if p != anchor])]
+    return [[p] for p in paths]
+
+
 def register_file(source, out, units: Optional[Sequence[str]] = None, channel: int = 0, *,
+                  groups: Optional[Sequence[Sequence[str]]] = None,
                   reference_from: Optional[str] = None, nonrigid: bool = False,
                   block_size: int = 128, max_shift: float = 0.1, max_shift_nr: float = 5.0,
                   batch: int = 500, tag: Optional[str] = "_MC",
                   progress=None) -> Dict:
-    """Register `units` to one reference and write the result into a copy of `source`.
+    """Register the units of `source` and write the result into a copy of it.
 
-    `units` defaults to every unit in the file — name them when the file holds more than one
-    field, since registering two different fields to one reference is meaningless.
-    `reference_from` defaults to the first named unit.
+    **By default every unit is registered to its own reference.** A `.mesc` normally holds
+    several different fields, and registering one field to another's reference is not a
+    weaker result, it is a wrong one: the search returns its best match against structure
+    that is not in the frame, and the frames come out displaced with nothing to say so.
 
-    Returns a report: the reference used, and per unit the per-frame y/x shifts, so the
-    registration can be inspected or reapplied. The frames are written through
-    `mesc_io.writeback`, which copies the source and never modifies it.
+    Repeats of ONE field are the case where a shared reference is needed — without it two
+    recordings of the same field land in two coordinate frames and a structure cannot be
+    followed between them. Say so explicitly:
+
+        groups=[["MUnit_0", "MUnit_1", "MUnit_2"], ["MUnit_5", "MUnit_6"]]
+
+    Each list shares one reference, taken from its first unit; units not named are left out.
+    `units` selects which units to register, one reference each. `reference_from` without
+    `groups` keeps its old meaning — one shared reference for every named unit, anchored
+    there — because that was always an explicit request rather than a default.
+
+    Returns a report: `groups` (each with its anchor, members and reference image), and per
+    unit the per-frame y/x shifts and the anchor it was registered to, so the registration
+    can be inspected or reapplied. The frames are written through `mesc_io.writeback`, which
+    copies the source and never modifies it.
 
     **Sign convention of the reported shifts.** They are Suite2p's, and they carry the same
     sign as the displacement itself: a field that moved down by two pixels reports `y_shift`
@@ -168,77 +214,83 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
     reg, _ = _suite2p()
     source, out = Path(source), Path(out)
     with MescFile(source) as f:
-        paths = [u.path for u in f.units()] if units is None else [f.unit(u).path for u in units]
-        if not paths:
-            raise RegistrationError(f"{source.name}: no units to register")
-        anchor = f.unit(reference_from).path if reference_from else paths[0]
-        if anchor not in paths:
-            paths = [anchor] + paths                      # the anchor is registered too
+        unit_groups = _resolve_groups(f, units, groups, reference_from)
+        all_paths = [p for g in unit_groups for p in g]
 
-        shapes = {f.unit(p).shape[1:] for p in paths}
-        if len(shapes) > 1:
-            raise RegistrationError(
-                f"units of different frame sizes cannot share a reference: {sorted(shapes)}")
+        for g in unit_groups:
+            shapes = {f.unit(p).shape[1:] for p in g}
+            if len(shapes) > 1:
+                raise RegistrationError(
+                    f"units of different frame sizes cannot share a reference: {sorted(shapes)}")
 
-        fs = f.unit(anchor).frame_rate_hz or 30.0
-        ops = _ops(fs, nonrigid, block_size, max_shift, max_shift_nr)
-        scale = _scale_for(f, paths, channel)
+        scale = _scale_for(f, all_paths, channel)        # one scale for the whole file
+        dark = {p: leading_flat_frames(f, p, channel) for p in all_paths}
 
-        dark = {p: leading_flat_frames(f, p, channel) for p in paths}
-        a_dark, a_n = dark[anchor], f.unit(anchor).n_frames
-        take = min(ops["nimg_init"], a_n - a_dark)
-        idx = np.unique(np.linspace(a_dark, a_n - 1, take).astype(int))
-        ref_src = f.read(anchor, channel=channel, frames=idx, reader_units=False, max_gb=None)
-        ref = reg.compute_reference(_as_int16(ref_src, scale), ops=ops)
-        masks = reg.compute_reference_masks(ref, ops=ops)
-
-        report = {"reference_from": anchor, "reference": ref, "int16_scale": scale,
-                  "nonrigid": bool(nonrigid), "leading_flat_frames": dark, "units": {}}
+        report = {"int16_scale": scale, "nonrigid": bool(nonrigid),
+                  "leading_flat_frames": dark, "groups": [], "units": {}}
         corrected: Dict[str, Dict[str, np.ndarray]] = {}
 
-        for path in paths:
-            u = f.unit(path)
-            n_ch = len(u.channels)
-            out_by_channel = {c.name: np.empty(u.shape, dtype=np.uint16) for c in u.channels}
-            ys, xs = [], []
-            for start in range(0, u.n_frames, batch):
-                sl = slice(start, min(start + batch, u.n_frames))
-                block = f.read(path, channel=channel, frames=sl, reader_units=False,
-                               max_gb=None)
-                # register_frames returns the registered frames first, then the rigid
-                # offsets, their correlation, the non-rigid offsets and theirs.
-                moved_reg, y, x, _c, y1, x1, _c1, _ = reg.register_frames(
-                    masks, _as_int16(block, scale), ops=ops)
-                ys.append(np.asarray(y)); xs.append(np.asarray(x))
-                for c in u.channels:                      # every channel takes the same shifts
-                    if c.index == channel:
-                        moved = moved_reg                 # already shifted by register_frames
-                    else:
-                        raw = f.read(path, channel=c.index, frames=sl, reader_units=False,
-                                     max_gb=None)
-                        moved = reg.shift_frames(_as_int16(raw, scale), y, x, y1, x1,
-                                                 blocks=masks[-1] if nonrigid else None,
-                                                 ops=ops)
-                    out_by_channel[c.name][sl] = np.clip(
-                        np.asarray(moved, dtype=np.int32) * scale, 0, 65535).astype(np.uint16)
-            # The flat head has no structure to align: registration matched it to noise, so
-            # put those frames back exactly as they were and zero their recorded shifts.
-            d = dark[path]
-            if d:
-                for c in u.channels:
-                    out_by_channel[c.name][:d] = f.read(
-                        path, channel=c.index, frames=slice(0, d), reader_units=False,
-                        max_gb=None)
-            y_all, x_all = np.concatenate(ys), np.concatenate(xs)
-            if dark[path]:
-                y_all[:dark[path]] = 0
-                x_all[:dark[path]] = 0
-            report["units"][path] = {"y_shift": y_all, "x_shift": x_all,
-                                     "n_frames": u.n_frames, "n_channels": n_ch,
-                                     "leading_flat_frames": dark[path]}
-            corrected[path] = out_by_channel
-            if progress:
-                progress(path, report["units"][path])
+        for group in unit_groups:
+            anchor = group[0]
+            a_unit = f.unit(anchor)
+            ops = _ops(a_unit.frame_rate_hz or 30.0, nonrigid, block_size, max_shift,
+                       max_shift_nr)
+            a_dark, a_n = dark[anchor], a_unit.n_frames
+            if a_n - a_dark <= 0:
+                raise RegistrationError(
+                    f"{anchor}: every frame is flat, there is nothing to build a reference on")
+            take = min(ops["nimg_init"], a_n - a_dark)
+            idx = np.unique(np.linspace(a_dark, a_n - 1, take).astype(int))
+            ref_src = f.read(anchor, channel=channel, frames=idx, reader_units=False,
+                             max_gb=None)
+            ref = reg.compute_reference(_as_int16(ref_src, scale), ops=ops)
+            masks = reg.compute_reference_masks(ref, ops=ops)
+            report["groups"].append({"anchor": anchor, "units": list(group), "reference": ref})
+
+            for path in group:
+                u = f.unit(path)
+                n_ch = len(u.channels)
+                out_by_channel = {c.name: np.empty(u.shape, dtype=np.uint16) for c in u.channels}
+                ys, xs = [], []
+                for start in range(0, u.n_frames, batch):
+                    sl = slice(start, min(start + batch, u.n_frames))
+                    block = f.read(path, channel=channel, frames=sl, reader_units=False,
+                                   max_gb=None)
+                    # register_frames returns the registered frames first, then the rigid
+                    # offsets, their correlation, the non-rigid offsets and theirs.
+                    moved_reg, y, x, _c, y1, x1, _c1, _ = reg.register_frames(
+                        masks, _as_int16(block, scale), ops=ops)
+                    ys.append(np.asarray(y)); xs.append(np.asarray(x))
+                    for c in u.channels:                  # every channel takes the same shifts
+                        if c.index == channel:
+                            moved = moved_reg             # already shifted by register_frames
+                        else:
+                            raw = f.read(path, channel=c.index, frames=sl, reader_units=False,
+                                         max_gb=None)
+                            moved = reg.shift_frames(_as_int16(raw, scale), y, x, y1, x1,
+                                                     blocks=masks[-1] if nonrigid else None,
+                                                     ops=ops)
+                        out_by_channel[c.name][sl] = np.clip(
+                            np.asarray(moved, dtype=np.int32) * scale, 0, 65535).astype(np.uint16)
+                # The flat head has no structure to align: registration matched it to noise, so
+                # put those frames back exactly as they were and zero their recorded shifts.
+                d = dark[path]
+                if d:
+                    for c in u.channels:
+                        out_by_channel[c.name][:d] = f.read(
+                            path, channel=c.index, frames=slice(0, d), reader_units=False,
+                            max_gb=None)
+                y_all, x_all = np.concatenate(ys), np.concatenate(xs)
+                if d:
+                    y_all[:d] = 0
+                    x_all[:d] = 0
+                report["units"][path] = {"y_shift": y_all, "x_shift": x_all,
+                                         "n_frames": u.n_frames, "n_channels": n_ch,
+                                         "leading_flat_frames": d,
+                                         "reference_from": anchor}
+                corrected[path] = out_by_channel
+                if progress:
+                    progress(path, report["units"][path])
 
     write_frames(source, out, corrected, reader_units=False, tag=tag,
                  tolerance=float("inf"))       # registration moves pixels on purpose

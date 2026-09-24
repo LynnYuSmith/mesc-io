@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+**Each unit is registered to its own reference now.** `register_file` used to build one
+reference from the first unit and register every other unit of the file against it. A `.mesc`
+normally holds several different fields, and a field registered to another field's reference
+is not less accurate, it is wrong: the search returns its best match against structure that is
+not in the frame, and the frames come out displaced with nothing in the output to say so.
+
+- Default: one reference per unit.
+- `groups=[["MUnit_0", "MUnit_1"]]` / `--group MUnit_0 MUnit_1` (repeatable) names the units
+  that ARE one field and must share a reference, anchored on the first. Repeats of one field
+  still need this — without it they land in two coordinate frames and a structure cannot be
+  followed between them. Aligning *between* fields is a separate problem, not this module's.
+- `reference_from` without `groups` keeps its old meaning — one shared reference over every
+  named unit — because that was always an explicit request rather than a default.
+- **Report shape changed**: `reference_from` and `reference` are no longer top-level. There is
+  `groups`, each with its `anchor`, `units` and `reference`, and every unit entry carries the
+  `reference_from` it was registered to.
+- A unit whose frames are all flat now raises instead of building a reference out of nothing.
+  `take` could reach zero and the reference was computed from an empty selection.
+- Two different fields in one file are a test fixture now, with a positive control: asked to
+  share one reference, the second field's known displacement is no longer recovered.
+
 ## 0.2.1 — 2026-09-24
 
 - The metadata window has a button. `GET /api/metadata/<unit>` shipped in 0.2.0 with nothing to

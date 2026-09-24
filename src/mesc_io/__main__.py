@@ -110,12 +110,16 @@ def _register(args) -> int:
               f"{info['leading_flat_frames']} flat at the front, "
               f"shift |y|<={abs(info['y_shift']).max()} |x|<={abs(info['x_shift']).max()} px")
 
-    rep = register_file(args.source, args.out, units=args.units or None, channel=args.channel,
+    rep = register_file(args.source, args.out, units=args.units or None,
+                        groups=args.group or None, channel=args.channel,
                         reference_from=args.reference_from, nonrigid=args.nonrigid,
                         block_size=args.block_size, max_shift=args.max_shift,
                         max_shift_nr=args.max_shift_nr,
                         tag=None if args.no_tag else args.tag, progress=_say)
-    print(f"  reference from {rep['reference_from']}"
+    for g in rep["groups"]:
+        shared = f" shared by {len(g['units'])} units" if len(g["units"]) > 1 else " (alone)"
+        print(f"  reference from {g['anchor']}{shared}")
+    print(f"  {len(rep['groups'])} reference(s)"
           f"{' (non-rigid)' if rep['nonrigid'] else ''}")
     print(f"  {rep['out']}")
     return 0
@@ -180,17 +184,20 @@ def main(argv=None) -> int:
     p.set_defaults(func=_view)
 
     p = sub.add_parser("register",
-                       help="motion-correct units against one shared reference (needs Suite2p)")
+                       help="motion-correct units, one reference each (needs Suite2p)")
     p.add_argument("source")
     p.add_argument("out")
     p.add_argument("--units", nargs="*", default=None,
-                   help="which units; all of them by default. Name them when the file holds "
-                        "more than one field — one reference across two fields is meaningless")
+                   help="which units; all of them by default. Each gets its OWN reference")
+    p.add_argument("--group", nargs="+", action="append", default=None, metavar="UNIT",
+                   help="units that are the same field and must share one reference, anchored "
+                        "on the first. Repeat the flag for several fields: "
+                        "--group MUnit_0 MUnit_1 --group MUnit_5 MUnit_6")
     p.add_argument("--channel", type=int, default=0,
                    help="the channel registration is computed on; the others take its shifts")
     p.add_argument("--reference-from", default=None,
-                   help="anchor unit (default: the first one), so the reference is the state "
-                        "the session started in rather than an average over it")
+                   help="put every named unit in ONE group anchored here — the old behaviour, "
+                        "now only when you ask for it")
     p.add_argument("--nonrigid", action="store_true",
                    help="also correct a smooth position-dependent warp")
     p.add_argument("--block-size", type=int, default=128)

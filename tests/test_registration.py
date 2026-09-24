@@ -87,4 +87,63 @@ def test_the_source_is_untouched_and_the_unit_is_tagged(moving_mesc, tmp_path):
 def test_units_of_different_frame_sizes_cannot_share_a_reference(dirty_mesc, tmp_path):
     from mesc_io.registration import RegistrationError
     with pytest.raises(RegistrationError, match="frame sizes"):
-        register_file(dirty_mesc, tmp_path / "x.mesc", units=["MUnit_0", "MUnit_1"])
+        register_file(dirty_mesc, tmp_path / "x.mesc", groups=[["MUnit_0", "MUnit_1"]])
+
+
+def _recovery_error(info, n_flat, shifts):
+    """How far the reported shifts are from the applied ones, after the constant offset."""
+    y, x = info["y_shift"][n_flat:], info["x_shift"][n_flat:]
+    wy = np.array([s[0] for s in shifts])
+    wx = np.array([s[1] for s in shifts])
+    return max(np.abs((y - wy) - np.median(y - wy)).max(),
+               np.abs((x - wx) - np.median(x - wx)).max())
+
+
+def test_by_default_each_unit_gets_its_own_reference(two_fields_mesc, tmp_path):
+    """Two different fields in one file: each must be registered to itself."""
+    path, n_flat, shifts = two_fields_mesc
+    rep = register_file(path, tmp_path / "out.mesc")
+
+    assert len(rep["groups"]) == 2
+    assert [g["units"] for g in rep["groups"]] == [["MSession_0/MUnit_0"],
+                                                   ["MSession_0/MUnit_1"]]
+    for unit in ("MUnit_0", "MUnit_1"):
+        info = rep["units"][f"MSession_0/{unit}"]
+        assert info["reference_from"] == f"MSession_0/{unit}"
+        assert _recovery_error(info, n_flat, shifts[unit]) <= 1
+
+
+def test_one_reference_over_two_fields_is_what_goes_wrong(two_fields_mesc, tmp_path):
+    """The positive control for the default: asked to share, the second field is registered
+    against blobs that are not in it, and its known displacement is no longer recovered."""
+    path, n_flat, shifts = two_fields_mesc
+    own = register_file(path, tmp_path / "own.mesc")
+    shared = register_file(path, tmp_path / "shared.mesc", reference_from="MUnit_0")
+
+    assert [g["units"] for g in shared["groups"]] == [["MSession_0/MUnit_0",
+                                                       "MSession_0/MUnit_1"]]
+    key = "MSession_0/MUnit_1"
+    assert _recovery_error(own["units"][key], n_flat, shifts["MUnit_1"]) <= 1
+    assert _recovery_error(shared["units"][key], n_flat, shifts["MUnit_1"]) > 1
+
+
+def test_named_groups_share_a_reference_and_others_do_not(two_fields_mesc, tmp_path):
+    path, _, _ = two_fields_mesc
+    rep = register_file(path, tmp_path / "out.mesc", groups=[["MUnit_0", "MUnit_1"]])
+    assert len(rep["groups"]) == 1
+    assert rep["units"]["MSession_0/MUnit_1"]["reference_from"] == "MSession_0/MUnit_0"
+
+
+def test_a_unit_cannot_be_in_two_groups(two_fields_mesc, tmp_path):
+    from mesc_io.registration import RegistrationError
+    path, _, _ = two_fields_mesc
+    with pytest.raises(RegistrationError, match="more than one group"):
+        register_file(path, tmp_path / "x.mesc",
+                      groups=[["MUnit_0", "MUnit_1"], ["MUnit_1"]])
+
+
+def test_units_and_groups_are_not_both_accepted(two_fields_mesc, tmp_path):
+    from mesc_io.registration import RegistrationError
+    path, _, _ = two_fields_mesc
+    with pytest.raises(RegistrationError, match="not both"):
+        register_file(path, tmp_path / "x.mesc", units=["MUnit_0"], groups=[["MUnit_1"]])

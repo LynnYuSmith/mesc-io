@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.0 — 2026-09-24
+
+**A z-stack is no longer read as a 1000 Hz recording.** The third axis is time in a recording
+and depth in a stack, and the file says which — `ZAxisGeomRole` is 0 for time and 3 for depth.
+Reading its scale without asking turned a 1 µm slice spacing into "1000 Hz": a number that is
+plausible, correctly typed, and would have reached a rolling baseline and an event window
+without a murmur. Five of the nine units of a calibration file were read that way.
+
+- `frame_rate_hz` is now `None` when the third axis is depth. **Breaking for those files**, and
+  meant to be: a caller that used to get 1000.0 was getting a wrong number, and every caller in
+  this package already handled `None`.
+- `z_step_um` carries the slice spacing instead.
+- `pixel_size_y_um` appears when the y pixel size differs from x. Femtonics writes the axes
+  separately and they are not always equal — 0.126171875 µm against 0.12629686820504823 on a
+  408×512 frame. `pixel_size_um` still carries x, as before.
+
+### Viewer
+
+- `GET /api/metadata/<unit>` returns **every** attribute the unit and its session carry, grouped
+  and decoded. The reader keeps 15 of about 278, which is the right number for code and the
+  wrong one for a person deciding whether something matters.
+- Text stored as an integer array is decoded from its low bytes: Femtonics writes strings as
+  uint8 in one field and int16 in the next, and reading the raw bytes of a multi-byte dtype
+  prints `M E S c   4 . 0`. Empty attributes come back as `null` rather than failing the request.
+
 ## 0.1.1 — 2026-09-21
 
 - The package description on PyPI said the package was not on PyPI: it was the README as

@@ -65,16 +65,42 @@ def _suite2p():
 
 
 def _ops(fs: float, nonrigid: bool, block_size: int, max_shift: float,
-         max_shift_nr: float) -> Dict:
+         max_shift_nr: float, extra: Optional[Dict] = None, batch: int = 1000) -> Dict:
+    """The settings a two-photon bouton pipeline has been running these recordings with.
+
+    Not a fresh guess: `nonrigid=False`, `smooth_sigma_time=0`, `block_size=[128, 128]`,
+    `maxregshift=0.1`, `snr_thresh=1.2`, `batch_size=1000` are the values in daily use on
+    this kind of data. All but `nonrigid` and `batch_size` happen to agree with Suite2p's
+    own defaults, and they are spelled out anyway — a silent agreement is not a decision, and
+    if a future Suite2p moves one of them we want to see it move.
+
+    `nonrigid` is the deliberate departure. Suite2p turns it on; a warp correction with a
+    loose cap slides blocks onto the wrong features, so here it is opt-in.
+
+    `block_size` is 128 because that is the pipeline's value, and it is worth writing down
+    what it buys, because the obvious reading is wrong: Suite2p's blocks OVERLAP, and
+    `calculate_nblocks` gives `ceil(1.5 * L / block_size)` per axis. On a 256 px frame 128
+    is a 3x3 grid of nine blocks, not the 2x2 it looks like; 2x2 would need 0.75 * L, i.e.
+    192. Only matters when `nonrigid` is on.
+
+    `extra` is applied last and wins over all of it.
+    """
     _, default_ops = _suite2p()
     ops = default_ops()
     ops.update({
         "fs": float(fs), "do_registration": True, "roidetect": False, "spikedetect": False,
         "nonrigid": bool(nonrigid), "block_size": [int(block_size)] * 2,
         "maxregshift": float(max_shift), "maxregshiftNR": float(max_shift_nr),
-        "smooth_sigma_time": 0, "snr_thresh": 1.2, "batch_size": 500, "nimg_init": 300,
+        "smooth_sigma_time": 0, "snr_thresh": 1.2, "batch_size": int(batch), "nimg_init": 300,
         "reg_tif": False, "reg_tif_chan2": False,
     })
+    if extra:
+        unknown = sorted(k for k in extra if k not in ops)
+        if unknown:
+            raise RegistrationError(
+                f"Suite2p has no such option(s): {', '.join(unknown)}. "
+                "A misspelled key would have changed nothing and said nothing.")
+        ops.update(extra)
     return ops
 
 
@@ -176,7 +202,7 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
                   groups: Optional[Sequence[Sequence[str]]] = None,
                   reference_from: Optional[str] = None, nonrigid: bool = False,
                   block_size: int = 128, max_shift: float = 0.1, max_shift_nr: float = 5.0,
-                  batch: int = 500, tag: Optional[str] = "_MC",
+                  ops: Optional[Dict] = None, batch: int = 1000, tag: Optional[str] = "_MC",
                   progress=None) -> Dict:
     """Register the units of `source` and write the result into a copy of it.
 
@@ -195,6 +221,12 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
     `units` selects which units to register, one reference each. `reference_from` without
     `groups` keeps its old meaning — one shared reference for every named unit, anchored
     there — because that was always an explicit request rather than a default.
+
+    `ops` goes straight to Suite2p and is applied last, over everything above: anything in
+    `suite2p.default_ops()` can be set — `{"smooth_sigma": 2.0}` for a noisier field,
+    `{"two_step_registration": True}` to build the reference again from the registered movie,
+    `{"1Preg": True, "spatial_hp_reg": 42}` when a smooth background dominates the match. A key
+    Suite2p does not have raises rather than being ignored.
 
     Returns a report: `groups` (each with its anchor, members and reference image), and per
     unit the per-frame y/x shifts and the anchor it was registered to, so the registration
@@ -226,25 +258,25 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
         scale = _scale_for(f, all_paths, channel)        # one scale for the whole file
         dark = {p: leading_flat_frames(f, p, channel) for p in all_paths}
 
-        report = {"int16_scale": scale, "nonrigid": bool(nonrigid),
+        report = {"int16_scale": scale, "nonrigid": bool(nonrigid), "ops": dict(ops or {}),
                   "leading_flat_frames": dark, "groups": [], "units": {}}
         corrected: Dict[str, Dict[str, np.ndarray]] = {}
 
         for group in unit_groups:
             anchor = group[0]
             a_unit = f.unit(anchor)
-            ops = _ops(a_unit.frame_rate_hz or 30.0, nonrigid, block_size, max_shift,
-                       max_shift_nr)
+            group_ops = _ops(a_unit.frame_rate_hz or 30.0, nonrigid, block_size,
+                             max_shift, max_shift_nr, ops, batch)
             a_dark, a_n = dark[anchor], a_unit.n_frames
             if a_n - a_dark <= 0:
                 raise RegistrationError(
                     f"{anchor}: every frame is flat, there is nothing to build a reference on")
-            take = min(ops["nimg_init"], a_n - a_dark)
+            take = min(group_ops["nimg_init"], a_n - a_dark)
             idx = np.unique(np.linspace(a_dark, a_n - 1, take).astype(int))
             ref_src = f.read(anchor, channel=channel, frames=idx, reader_units=False,
                              max_gb=None)
-            ref = reg.compute_reference(_as_int16(ref_src, scale), ops=ops)
-            masks = reg.compute_reference_masks(ref, ops=ops)
+            ref = reg.compute_reference(_as_int16(ref_src, scale), ops=group_ops)
+            masks = reg.compute_reference_masks(ref, ops=group_ops)
             report["groups"].append({"anchor": anchor, "units": list(group), "reference": ref})
 
             for path in group:
@@ -259,7 +291,7 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
                     # register_frames returns the registered frames first, then the rigid
                     # offsets, their correlation, the non-rigid offsets and theirs.
                     moved_reg, y, x, _c, y1, x1, _c1, _ = reg.register_frames(
-                        masks, _as_int16(block, scale), ops=ops)
+                        masks, _as_int16(block, scale), ops=group_ops)
                     ys.append(np.asarray(y)); xs.append(np.asarray(x))
                     for c in u.channels:                  # every channel takes the same shifts
                         if c.index == channel:
@@ -269,7 +301,7 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
                                          max_gb=None)
                             moved = reg.shift_frames(_as_int16(raw, scale), y, x, y1, x1,
                                                      blocks=masks[-1] if nonrigid else None,
-                                                     ops=ops)
+                                                     ops=group_ops)
                         out_by_channel[c.name][sl] = np.clip(
                             np.asarray(moved, dtype=np.int32) * scale, 0, 65535).astype(np.uint16)
                 # The flat head has no structure to align: registration matched it to noise, so

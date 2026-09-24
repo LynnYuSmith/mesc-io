@@ -23,6 +23,21 @@ not in the frame, and the frames come out displaced with nothing in the output t
 - Two different fields in one file are a test fixture now, with a positive control: asked to
   share one reference, the second field's known displacement is no longer recovered.
 
+**The defaults are the pipeline's motion-correction settings**, written down rather than
+inherited: `nonrigid=False`, `smooth_sigma_time=0`, `block_size=[128, 128]`, `maxregshift=0.1`,
+`snr_thresh=1.2`, `batch_size=1000`. All but the last two agree with Suite2p's own defaults;
+`batch_size` was 500 and is now the pipeline's 1000, and `nonrigid` stays off where Suite2p
+turns it on. A test pins them, so a future Suite2p moving one of them is visible.
+
+- `ops={...}` / `--ops KEY=VALUE` passes anything in `suite2p.default_ops()` straight through,
+  applied last and winning over everything above — `{"smooth_sigma": 2.0}` for a noisier field,
+  `{"two_step_registration": True}` to rebuild the reference from the registered movie. A key
+  Suite2p does not have **raises**; a misspelled option would otherwise change nothing and say
+  nothing. The report carries what was passed.
+- Written down in `_ops`, because the obvious reading is wrong: Suite2p's non-rigid blocks
+  overlap (`ceil(1.5 * L / block_size)` per axis), so `block_size=128` on a 256 px frame is a
+  3x3 grid of nine blocks, not 2x2. Pinned by a test.
+
 ## 0.2.1 — 2026-09-24
 
 - The metadata window has a button. `GET /api/metadata/<unit>` shipped in 0.2.0 with nothing to

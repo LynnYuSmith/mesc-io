@@ -147,3 +147,46 @@ def test_units_and_groups_are_not_both_accepted(two_fields_mesc, tmp_path):
     path, _, _ = two_fields_mesc
     with pytest.raises(RegistrationError, match="not both"):
         register_file(path, tmp_path / "x.mesc", units=["MUnit_0"], groups=[["MUnit_1"]])
+
+
+def test_ops_reach_suite2p_and_are_recorded(moving_mesc, tmp_path):
+    path, _, _ = moving_mesc
+    rep = register_file(path, tmp_path / "out.mesc", ops={"smooth_sigma": 2.0})
+    assert rep["ops"] == {"smooth_sigma": 2.0}
+
+
+def test_a_misspelled_op_is_an_error_not_a_no_op(moving_mesc, tmp_path):
+    from mesc_io.registration import RegistrationError
+    path, _, _ = moving_mesc
+    with pytest.raises(RegistrationError, match="no such option"):
+        register_file(path, tmp_path / "x.mesc", ops={"smooth_sgima": 2.0})
+
+
+def test_the_defaults_are_the_pipeline_settings():
+    """These are in daily use on this data; a silent drift would change every output."""
+    from mesc_io.registration import _ops
+    ops = _ops(61.9, False, 128, 0.1, 5.0)
+    assert ops["nonrigid"] is False
+    assert ops["smooth_sigma_time"] == 0
+    assert list(ops["block_size"]) == [128, 128]
+    assert ops["maxregshift"] == 0.1
+    assert ops["snr_thresh"] == 1.2
+    assert ops["batch_size"] == 1000
+    assert ops["fs"] == 61.9                     # from the file, never a literal
+
+
+def test_ops_win_over_the_named_arguments(moving_mesc, tmp_path):
+    """The passthrough is last, so it can undo a default this module chose."""
+    from mesc_io.registration import _ops
+    assert _ops(30.0, False, 128, 0.1, 5.0)["nonrigid"] is False
+    assert _ops(30.0, False, 128, 0.1, 5.0, {"nonrigid": True})["nonrigid"] is True
+
+
+def test_the_block_grid_is_what_we_think_it_is():
+    """block_size is not the grid: suite2p's blocks overlap, so 128 on a 256 px frame is
+    nine blocks, not four. Pinned because the wrong reading is the natural one."""
+    from suite2p.registration.nonrigid import make_blocks
+    from mesc_io.registration import _ops
+    bs = _ops(61.9, True, 128, 0.1, 5.0)["block_size"]
+    *_, n, _, _ = make_blocks(256, 256, bs)
+    assert list(n) == [3, 3]

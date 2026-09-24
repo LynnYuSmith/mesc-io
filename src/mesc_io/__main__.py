@@ -102,6 +102,21 @@ def _view(args) -> int:
     return 0
 
 
+def _parse_ops(pairs):
+    """`--ops smooth_sigma=2.0 --ops 1Preg=true` -> a dict, values read as JSON."""
+    import json
+    out = {}
+    for pair in pairs or []:
+        if "=" not in pair:
+            raise SystemExit(f"--ops wants KEY=VALUE, got {pair!r}")
+        k, _, v = pair.partition("=")
+        try:
+            out[k.strip()] = json.loads(v)
+        except ValueError:
+            out[k.strip()] = v                      # a plain string, e.g. a path
+    return out
+
+
 def _register(args) -> int:
     from .registration import register_file
 
@@ -114,7 +129,7 @@ def _register(args) -> int:
                         groups=args.group or None, channel=args.channel,
                         reference_from=args.reference_from, nonrigid=args.nonrigid,
                         block_size=args.block_size, max_shift=args.max_shift,
-                        max_shift_nr=args.max_shift_nr,
+                        max_shift_nr=args.max_shift_nr, ops=_parse_ops(args.ops),
                         tag=None if args.no_tag else args.tag, progress=_say)
     for g in rep["groups"]:
         shared = f" shared by {len(g['units'])} units" if len(g["units"]) > 1 else " (alone)"
@@ -205,6 +220,10 @@ def main(argv=None) -> int:
                    help="rigid cap, as a fraction of the frame (default: 0.1)")
     p.add_argument("--max-shift-nr", type=float, default=5.0,
                    help="non-rigid cap in px; keep it small (default: 5)")
+    p.add_argument("--ops", action="append", default=None, metavar="KEY=VALUE",
+                   help="any suite2p option, applied last and winning over the rest: "
+                        "--ops smooth_sigma=2.0 --ops two_step_registration=true. "
+                        "A key suite2p does not have is an error, not a no-op")
     p.add_argument("--tag", default="_MC")
     p.add_argument("--no-tag", action="store_true")
     p.set_defaults(func=_register)

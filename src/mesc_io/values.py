@@ -20,11 +20,15 @@ import numpy as np
 
 from .errors import MescIOError
 
-__all__ = ["to_reader_units", "from_reader_units", "ConversionError"]
+__all__ = ["to_reader_units", "from_reader_units", "ConversionError", "ConversionWarning"]
 
 
 class ConversionError(MescIOError, ValueError):
-    """A file's conversion attributes are missing, or disagree with its own data."""
+    """A conversion cannot be applied — its scale is zero, so it has no inverse."""
+
+
+class ConversionWarning(UserWarning):
+    """A channel states no conversion, so "reader units" are the stored integers unchanged."""
 
 
 def to_reader_units(stored, offset: float, scale: float = 1.0, halved: bool = False):
@@ -56,6 +60,8 @@ def from_reader_units(values, offset: float, scale: float = 1.0, dtype=np.uint16
     if float(scale) == 0.0:
         raise ConversionError("conversion scale is zero — cannot invert")
     a = (np.asarray(values, dtype=np.float64) - float(offset)) / float(scale)
+    if np.issubdtype(np.dtype(dtype), np.integer):
+        a = np.rint(a)          # nearest, not towards zero: truncating biased every value by -0.5
     if clip:
         info = np.iinfo(dtype)
         a = np.clip(a, info.min, info.max)

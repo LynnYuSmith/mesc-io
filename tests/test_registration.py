@@ -310,3 +310,12 @@ def test_a_group_cannot_mix_a_z_stack_with_a_recording(two_fields_mesc, tmp_path
     _as_z_stack(path, "MUnit_1")
     with pytest.raises(RegistrationError, match="mixes z-stacks"):
         register_file(path, tmp_path / "out.mesc", groups=[["MUnit_0", "MUnit_1"]])
+
+
+def test_a_pixel_past_int16_is_saturated_not_wrapped_to_black():
+    from mesc_io.registration import RegistrationWarning, _as_int16
+    ok = _as_int16(np.array([0, 30000, 32767], dtype=np.uint16), 1)
+    assert ok.tolist() == [0, 30000, 32767]                              # the control
+    with pytest.warns(RegistrationWarning, match="saturated"):
+        got = _as_int16(np.array([40000, 65535], dtype=np.uint16), 1)
+    assert got.tolist() == [32767, 32767]                   # a plain cast gave [-25536, -1]

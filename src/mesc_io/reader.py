@@ -18,6 +18,7 @@ Read-only. Nothing here modifies a file.
 """
 from __future__ import annotations
 
+import warnings
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +28,7 @@ import h5py
 import numpy as np
 
 from .errors import MescIOError
-from .values import to_reader_units
+from .values import ConversionWarning, to_reader_units
 
 __all__ = ["MescFile", "Unit", "Channel", "MescError"]
 
@@ -54,6 +55,10 @@ class Channel:
     name: str
     offset: float
     scale: float
+    #: False when the file gave no offset or scale for this channel and 0 / 1 stand in for them.
+    #: Reading it "in reader units" then returns the stored integers unchanged, which is worth
+    #: a warning: the −786 the reader removes is exactly what a missing attribute would keep.
+    converted: bool = True
 
     @property
     def dataset(self) -> str:
@@ -207,6 +212,7 @@ class MescFile:
         block = ds[:] if frames is None else ds[frames]
         if not reader_units:
             return block
+        self._warn_unconverted(u, ch)
         return to_reader_units(block, offset=ch.offset, scale=ch.scale)
 
     def iter_frames(self, unit: str, channel: int = 0, block: int = 500,
@@ -221,6 +227,8 @@ class MescFile:
         ds = self._f[f"{u.path}/{ch.dataset}"]
         if block < 1:
             raise ValueError("block must be at least 1 frame")
+        if reader_units:
+            self._warn_unconverted(u, ch)
         for start in range(0, ds.shape[0], block):
             chunk = ds[start:start + block]
             yield (to_reader_units(chunk, offset=ch.offset, scale=ch.scale)
@@ -233,6 +241,14 @@ class MescFile:
         except (IndexError, StopIteration):
             raise KeyError(f"{u.path} has no channel {channel!r} "
                            f"(has {[c.name for c in u.channels]})") from None
+
+    @staticmethod
+    def _warn_unconverted(u: "Unit", ch: Channel) -> None:
+        if not ch.converted:
+            warnings.warn(
+                f"{u.path}/{ch.name} states no ConversionLinearOffset/Scale — these 'reader units' "
+                "are the stored integers unchanged, with the PMT offset still in them",
+                ConversionWarning, stacklevel=3)
 
     @staticmethod
     def _check_size(ds, frames, reader_units, max_gb: float, what: str) -> None:
@@ -262,7 +278,8 @@ class MescFile:
             sc = _float_or_none(_attr(a, f"{cn}_Conversion_ConversionLinearScale"))
             channels.append(Channel(index=i, name=cn,
                                     offset=0.0 if off is None else off,
-                                    scale=1.0 if sc is None else sc))
+                                    scale=1.0 if sc is None else sc,
+                                    converted=off is not None and sc is not None))
         first = grp[chan_names[0]]
         n, h, w = (first.shape + (0, 0, 0))[:3]
         # The third axis is TIME in a recording and DEPTH in a z-stack, and the file says

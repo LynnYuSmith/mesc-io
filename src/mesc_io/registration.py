@@ -148,8 +148,21 @@ def _ops(fs: float, nonrigid: bool, block_size: int, max_shift: float,
 
 
 def _as_int16(block: np.ndarray, scale: int) -> np.ndarray:
-    """Suite2p registers int16. `scale` halves the data when it would otherwise overflow."""
-    return (block // scale if scale > 1 else block).astype(np.int16)
+    """Suite2p registers int16. `scale` halves the data when it would otherwise overflow.
+
+    The scale is chosen from a sample of frames, so a brighter pixel elsewhere can still exceed
+    int16. A plain cast wraps it round to negative, and the write-back then clips that to 0: a
+    bright pixel came out black. It is saturated at the int16 ceiling instead, and said so.
+    On the 2026-09-18 bouton session the true peak over every frame was 14718, so this is a
+    guard, not a correction that normally fires.
+    """
+    b = block // scale if scale > 1 else block
+    over = int(np.count_nonzero(b > INT16_MAX))
+    if over:
+        warnings.warn(f"{over} pixel(s) above the int16 range at scale {scale} were saturated "
+                      "at 32767 rather than wrapped", RegistrationWarning, stacklevel=2)
+        b = np.minimum(b, INT16_MAX)
+    return b.astype(np.int16)
 
 
 def _scale_for(f: MescFile, unit_paths: Sequence[str], channel: int) -> int:

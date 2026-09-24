@@ -585,7 +585,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "path": u.path, "name": u.name, "session": u.session,
                 "frames": u.n_frames, "height": u.height, "width": u.width,
                 "frame_rate_hz": u.frame_rate_hz, "duration_s": u.duration_s,
-                "pixel_size_um": u.pixel_size_um, "comment": u.comment,
+                "pixel_size_um": u.pixel_size_um, "pixel_size_y_um": u.pixel_size_y_um,
+                "z_step_um": u.z_step_um, "comment": u.comment,
                 "channels": [c.name for c in u.channels],
                 "stage_um": u.stage_um,
                 "stage_rel_um": u.stage_rel_um,
@@ -669,23 +670,31 @@ class _Handler(BaseHTTPRequestHandler):
         small = img[:hh, :ww].reshape(hh // k, k, ww // k, k).mean(axis=(1, 3))
         self._send(_png(small, *self._window(q)), "image/png")
 
-    def _mean_image(self, unit, ch):
-        key = (str(self.mesc_path), unit, ch)
+    def _mean_image(self, unit, ch, mode="mean"):
+        """The whole third axis collapsed into one picture — averaged, or its brightest.
+
+        A mean is the right collapse for a recording: it averages the noise away and what is
+        left is the field. It is the wrong one for a z-stack, where a bouton lives in three or
+        four slices out of thirty and is diluted sevenfold by the ones it is absent from. A
+        maximum keeps it. Both are offered because both axes exist in these files.
+        """
+        key = (str(self.mesc_path), unit, ch, mode)
         with self._file() as f:
             u = f.unit(unit)
             idx = np.unique(np.linspace(0, u.n_frames - 1, min(300, u.n_frames)).astype(int))
-            img = f.read(unit, channel=ch, frames=idx, reader_units=True,
-                         max_gb=None).mean(axis=0)
+            block = f.read(unit, channel=ch, frames=idx, reader_units=True, max_gb=None)
+            img = block.max(axis=0) if mode == "max" else block.mean(axis=0)
         with self._lock:
             self._cache[key] = img
         return img
 
     def _mean(self, unit, ch, q):
-        key = (str(self.mesc_path), unit, ch)
+        mode = "max" if q.get("mode", ["mean"])[0] == "max" else "mean"
+        key = (str(self.mesc_path), unit, ch, mode)
         with self._lock:
             img = self._cache.get(key)
         if img is None:
-            img = self._mean_image(unit, ch)
+            img = self._mean_image(unit, ch, mode)
         self._send(_png(img, *self._window(q)), "image/png")
 
     def _trace(self, unit, ch, q):

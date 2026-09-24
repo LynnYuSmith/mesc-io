@@ -196,7 +196,8 @@
       <label class="stepper" title="average this many frames around the slider (1 = the raw frame)">
         <span>AVG</span><input type="number" id="avgN" min="1" max="999" step="1" value="1">
       </label>
-      <button id="meanBtn" title="the whole recording collapsed into one picture">mean</button>
+      <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button>
+      <button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button>
     </div>
     <div class="instr" style="margin-top:6px">
       <button id="toolSpot" class="on" title="a disc where you click">spot</button>
@@ -272,7 +273,7 @@ const $ = id => document.getElementById(id);
    state — everything the view IS, and therefore everything that is saved. One object, so the
    session file and the screen cannot disagree about what is being looked at. */
 const V = {
-  unit: null, ch: 0, frame: 0, avg: 1, mean: true, lo: 1, hi: 99.5,
+  unit: null, ch: 0, frame: 0, avg: 1, proj: "mean", lo: 1, hi: 99.5,   // proj: "" | mean | max
   zoom: { x: 0, y: 0, w: 0, h: 0 },        // in image pixels; w=0 means the whole frame
   traceMode: "stack", grid: true, traceZoom: null,   // [t0, t1] in frames, or null
   valueZoom: null,                          // overlay only: [lo, hi] in reader units, or null
@@ -325,8 +326,12 @@ async function boot() {
     </div>`).join("");
   $("units").onclick = e => { const d = e.target.closest(".u"); if (d) pick(+d.dataset.i); };
   const saved = (await (await fetch("/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","mean","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW"]));
   if (!V.yFixedBy || typeof V.yFixedBy !== "object") V.yFixedBy = { raw: null, dff: null };
+  // A session saved before 0.2.2 carries `mean: true|false`, which is now `proj` with a third
+  // state. Reading it keeps someone's open view open across the upgrade instead of dropping
+  // them back to slice 0 with the projection off.
+  if (typeof V.proj !== "string") V.proj = saved.mean === false ? "" : "mean";
   applyStatic();
   const idx = Math.max(0, FILE.units.findIndex(u => u.path === saved.unit));
   if (FILE.units.length) pick(idx, true);
@@ -337,7 +342,8 @@ const pickKeys = (o, ks) => Object.fromEntries(ks.filter(k => o[k] !== undefined
 function applyStatic() {                 // controls that reflect V without a unit
   $("lo").value = V.lo; $("hi").value = V.hi; $("loVal").textContent = V.lo + " %"; $("hiVal").textContent = V.hi + " %";
   $("avgN").value = V.avg;
-  $("meanBtn").classList.toggle("on", V.mean);
+  $("meanBtn").classList.toggle("on", V.proj === "mean");
+  $("maxBtn").classList.toggle("on", V.proj === "max");
   $("modeStack").classList.toggle("on", V.traceMode === "stack");
   $("modeOverlay").classList.toggle("on", V.traceMode === "overlay");
   $("gridBtn").classList.toggle("on", V.grid);
@@ -398,7 +404,7 @@ const fmt = v => (v == null ? "—" : (Math.round(v * 10) / 10).toString());
 let imgEl = null, imgUrl = "", frameInFlight = false;
 function frameUrl() {
   const w = `lo=${V.lo}&hi=${V.hi}`;
-  return V.mean ? `/api/mean/${unit.path}/${V.ch}?${w}`
+  return V.proj ? `/api/mean/${unit.path}/${V.ch}?${w}&mode=${V.proj}`
                 : `/api/frame/${unit.path}/${V.ch}/${V.frame}?${w}&n=${V.avg}`;
 }
 function draw() {
@@ -412,9 +418,16 @@ function draw() {
     im.onerror = () => { frameInFlight = false; if (imgUrl === url) { imgEl = null; paint(); badge("frame failed to load", true); } };
     im.src = url;
   } else paint();
-  $("frameLbl").textContent = V.mean ? "mean of the recording"
-    : `frame ${V.frame} / ${unit.frames - 1}` + (fs() ? ` · ${(V.frame / fs()).toFixed(2)} s` : "")
-      + (V.avg > 1 ? ` · ×${V.avg}` : "");
+  // A stack's third axis is depth, so the slider counts slices and the label says microns.
+  // Calling a slice a "frame" and offering it in seconds is how a 1 um step became "1000 Hz"
+  // one layer down; the same axis deserves its own name here too.
+  const dz = unit.z_step_um;
+  $("frameLbl").textContent = V.proj
+    ? (V.proj === "max" ? "brightest over " : "mean over ") + (dz ? "depth" : "the recording")
+    : dz
+      ? `slice ${V.frame} / ${unit.frames - 1} · ${((V.frame - (unit.frames - 1) / 2) * dz).toFixed(1)} µm`
+      : `frame ${V.frame} / ${unit.frames - 1}` + (fs() ? ` · ${(V.frame / fs()).toFixed(2)} s` : "")
+        + (V.avg > 1 ? ` · ×${V.avg}` : "");
 }
 /* The canvas is the stage's size; the zoom rectangle (image px) maps onto it. ROIs are drawn
    in image coordinates through the same mapping, so they stay put under any zoom. */
@@ -509,7 +522,7 @@ $("stage").addEventListener("mousemove", ev => {
   clearTimeout(hoverT);
   hoverT = setTimeout(async () => {
     const seq = ++hoverSeq;
-    const qs = V.mean ? `x=${x}&y=${y}` : `x=${x}&y=${y}&i=${V.frame}&n=${V.avg}`;
+    const qs = V.proj ? `x=${x}&y=${y}` : `x=${x}&y=${y}&i=${V.frame}&n=${V.avg}`;
     try {
       const d = await (await fetch(`/api/pixel/${unit.path}/${V.ch}?${qs}`)).json();
       if (seq !== hoverSeq || d.error) return;
@@ -599,8 +612,16 @@ function togglePlay() {
   }, 40);
 }
 $("playBtn").onclick = togglePlay;
-function showFrames() { V.mean = false; $("meanBtn").classList.remove("on"); }
-$("meanBtn").onclick = () => { V.mean = !V.mean; $("meanBtn").classList.toggle("on", V.mean); draw(); saveView(); };
+function showFrames() { V.proj = ""; $("meanBtn").classList.remove("on");
+  $("maxBtn").classList.remove("on"); }
+// Two collapses of the third axis, and only one at a time: clicking the active one returns to
+// the slices. A mean is right for a recording and wrong for a stack, where a bouton sits in
+// three slices of thirty and averaging dilutes it tenfold; max keeps it.
+const setProj = (m) => { V.proj = (V.proj === m) ? "" : m;
+  $("meanBtn").classList.toggle("on", V.proj === "mean");
+  $("maxBtn").classList.toggle("on", V.proj === "max"); draw(); saveView(); };
+$("meanBtn").onclick = () => setProj("mean");
+$("maxBtn").onclick = () => setProj("max");
 
 // -- every attribute, because the panel above shows ten ------------------------------------
 // The reader keeps fifteen of the ~278 a MESc unit carries, which is the right number for code
@@ -890,7 +911,7 @@ function plotTraces() {
     }
   }
   // the frame cursor: the slider and the trace strip are the same number
-  if (!V.mean) { const x = Math.round(X(V.frame)) + .5; g.strokeStyle = "#4ea3dd"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); }
+  if (!V.proj) { const x = Math.round(X(V.frame)) + .5; g.strokeStyle = "#4ea3dd"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); }
   if (stack) {
     lastAuto = ts.length ? limits((ts.find(t => t.i === V.sel) || ts[0]).v.slice(t0, t1 + 1)) : null;
     ts.forEach((t, row) => {
@@ -1023,7 +1044,7 @@ window.addEventListener("mouseup", ev => {
     if (d.v != null && Math.abs(ev.clientY - d.y) > 6) { const v2 = traceValue(ev); V.valueZoom = [Math.min(d.v, v2), Math.max(d.v, v2)]; }
   } else {
     clearTimeout(pendingTraceClick);
-    pendingTraceClick = setTimeout(() => { pendingTraceClick = 0; V.frame = f; $("frame").value = f; V.mean = false;
+    pendingTraceClick = setTimeout(() => { pendingTraceClick = 0; V.frame = f; $("frame").value = f; V.proj = "";
       $("meanBtn").classList.remove("on"); draw(); plotTraces(); saveView(); }, 230);
     return;
   }

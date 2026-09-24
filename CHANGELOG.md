@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-09-24
 
 **Each unit is registered to its own reference now.** `register_file` used to build one
 reference from the first unit and register every other unit of the file against it. A `.mesc`

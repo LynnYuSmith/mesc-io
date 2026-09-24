@@ -162,24 +162,37 @@ def test_a_misspelled_op_is_an_error_not_a_no_op(moving_mesc, tmp_path):
         register_file(path, tmp_path / "x.mesc", ops={"smooth_sgima": 2.0})
 
 
-def test_the_defaults_are_the_pipeline_settings():
-    """These are in daily use on this data; a silent drift would change every output."""
+def test_the_defaults_are_the_pipeline_settings(moving_mesc, tmp_path):
+    """The point of this module is to reproduce that correction, so these are the DEFAULTS.
+    Pinned against lib/mesc/concat_mc._suite2p_ops_base + the session config it is run with
+    (suite2p_nonrigid: true, block_size 64, maxregshift_nr 3.0)."""
+    import inspect
     from mesc_io.registration import _ops
-    ops = _ops(61.9, False, 128, 0.1, 5.0)
-    assert ops["nonrigid"] is False
+    sig = inspect.signature(register_file).parameters
+    assert sig["nonrigid"].default is True
+    assert sig["block_size"].default == 64
+    assert sig["max_shift_nr"].default == 3.0
+
+    ops = _ops(61.9, sig["nonrigid"].default, sig["block_size"].default,
+               sig["max_shift"].default, sig["max_shift_nr"].default)
+    assert ops["nonrigid"] is True
+    assert list(ops["block_size"]) == [64, 64]
+    assert ops["maxregshiftNR"] == 3.0
     assert ops["smooth_sigma_time"] == 0
-    assert list(ops["block_size"]) == [128, 128]
     assert ops["maxregshift"] == 0.1
     assert ops["snr_thresh"] == 1.2
     assert ops["batch_size"] == 1000
     assert ops["fs"] == 61.9                     # from the file, never a literal
 
+    path, _, _ = moving_mesc
+    assert register_file(path, tmp_path / "out.mesc")["nonrigid"] is True
+
 
 def test_ops_win_over_the_named_arguments(moving_mesc, tmp_path):
     """The passthrough is last, so it can undo a default this module chose."""
     from mesc_io.registration import _ops
-    assert _ops(30.0, False, 128, 0.1, 5.0)["nonrigid"] is False
-    assert _ops(30.0, False, 128, 0.1, 5.0, {"nonrigid": True})["nonrigid"] is True
+    assert _ops(30.0, True, 64, 0.1, 3.0)["nonrigid"] is True
+    assert _ops(30.0, True, 64, 0.1, 3.0, {"nonrigid": False})["nonrigid"] is False
 
 
 def test_the_block_grid_is_what_we_think_it_is():
@@ -206,8 +219,8 @@ def test_the_pipeline_preset_is_the_pipeline_settings(moving_mesc, tmp_path):
 
     path, _, _ = moving_mesc
     rep = register_file(path, tmp_path / "out.mesc", preset="pipeline")
-    assert rep["preset"] == "pipeline" and rep["nonrigid"] is False   # the flag, not the op
-    assert rep["ops"]["nonrigid"] is True
+    assert rep["preset"] == "pipeline"
+    assert rep["ops"]["nonrigid"] is True        # a no-op now: it is already the default
 
 
 def test_the_preset_does_not_group_units(two_fields_mesc, tmp_path):
@@ -222,3 +235,39 @@ def test_an_unknown_preset_is_an_error(moving_mesc, tmp_path):
     path, _, _ = moving_mesc
     with pytest.raises(RegistrationError, match="no such preset"):
         register_file(path, tmp_path / "x.mesc", preset="pipelien")
+
+
+def test_a_unit_too_short_to_register_is_skipped_not_fatal(dirty_mesc, tmp_path):
+    """dirty_mesc's MUnit_1 was aborted after one frame — the ordinary case of a session
+    carrying an "ignore" unit. Before 0.3.1 it killed the whole run inside suite2p with
+    "cannot convert float NaN to integer"."""
+    import warnings as w
+    from mesc_io.registration import RegistrationWarning
+    seen = []
+    with w.catch_warnings():
+        w.simplefilter("always")
+        rep = register_file(dirty_mesc, tmp_path / "out.mesc",
+                            on_skip=lambda units, why: seen.append((tuple(units), why)))
+    assert any("MUnit_1" in u for us, _ in seen for u in us), seen
+    assert any("MUnit_1" in k for k in rep["skipped"]), rep["skipped"]
+    assert rep["out"]                                  # the run finished and wrote a file
+
+
+def test_a_skipped_unit_reaches_the_output_unchanged(dirty_mesc, tmp_path):
+    """Skipped means not registered, not missing: writeback copies the source."""
+    out = tmp_path / "out.mesc"
+    rep = register_file(dirty_mesc, out)
+    skipped = [k for k in rep["skipped"]]
+    assert skipped
+    with MescFile(dirty_mesc) as a, MescFile(out) as b:
+        for path in skipped:
+            u = path.rsplit("/", 1)[-1]
+            assert np.array_equal(a.read(u, reader_units=False),
+                                  b.read(u, reader_units=False))
+
+
+def test_rigid_only_is_available_and_is_a_different_correction(moving_mesc, tmp_path):
+    """Opting out must be possible and must be visible in the report — the numbers differ."""
+    path, _, _ = moving_mesc
+    rep = register_file(path, tmp_path / "rigid.mesc", nonrigid=False)
+    assert rep["nonrigid"] is False

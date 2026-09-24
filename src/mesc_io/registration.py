@@ -29,6 +29,7 @@ Needs Suite2p: `pip install mesc-io[register]`.
 """
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -67,9 +68,21 @@ PIPELINE_OPS = {
 
 PRESETS = {"pipeline": PIPELINE_OPS}
 
+#: Fewest usable frames (after the flat head) a unit needs before Suite2p can build a
+#: reference from it. `compute_reference` sorts frames by their correlation to a running
+#: average and averages the best fraction of them; below a handful that selection comes out
+#: empty and the mean of it is NaN, which surfaces as `cannot convert float NaN to integer`
+#: deep inside suite2p. A session normally carries a unit or two like this — one aborted
+#: frame, commented "ignore" — so this is the ordinary case, not the exceptional one.
+MIN_FRAMES_FOR_REFERENCE = 16
+
 
 class RegistrationError(MescIOError, RuntimeError):
     """Registration could not be run, or the data does not suit it."""
+
+
+class RegistrationWarning(UserWarning):
+    """A unit was left unregistered; the rest of the file went through."""
 
 
 def _suite2p():
@@ -90,14 +103,22 @@ def _ops(fs: float, nonrigid: bool, block_size: int, max_shift: float,
          max_shift_nr: float, extra: Optional[Dict] = None, batch: int = 1000) -> Dict:
     """The settings a two-photon bouton pipeline has been running these recordings with.
 
+    These are the DEFAULTS, not a mode to opt into: the point of this module is to reproduce
+    that correction, and a reader that quietly ran something else would be worse than useless.
+
     Not a fresh guess: `nonrigid=False`, `smooth_sigma_time=0`, `block_size=[128, 128]`,
     `maxregshift=0.1`, `snr_thresh=1.2`, `batch_size=1000` are the values in daily use on
     this kind of data. All but `nonrigid` and `batch_size` happen to agree with Suite2p's
     own defaults, and they are spelled out anyway — a silent agreement is not a decision, and
     if a future Suite2p moves one of them we want to see it move.
 
-    `nonrigid` is the deliberate departure. Suite2p turns it on; a warp correction with a
-    loose cap slides blocks onto the wrong features, so here it is opt-in.
+    Non-rigid is ON, with the pipeline's 64 px blocks and its tight 3 px cap. It warps each
+    block by its own subpixel shift, so it RESAMPLES every frame and the output is softer than
+    the input even where nothing moved — measured at 0.36 of the raw pixel-to-pixel variance
+    and 0.87 of the mean image's sharpness. That is bought deliberately: the immersion gel
+    dries from its edges inward over a session, the refractive index changes with it, and the
+    image warps at the periphery in a way no whole-frame shift can touch. `nonrigid=False`
+    turns it off and costs nothing measurable, but it is then not the same correction.
 
     `block_size` is 128 because that is the pipeline's value, and it is worth writing down
     what it buys, because the obvious reading is wrong: Suite2p's blocks OVERLAP, and
@@ -177,9 +198,9 @@ def leading_flat_frames(f: MescFile, unit: str, channel: int = 0,
     return n
 
 
-def compute_reference_image(source, unit: str, channel: int = 0, *, nonrigid: bool = False,
-                            block_size: int = 128, max_shift: float = 0.1,
-                            max_shift_nr: float = 5.0) -> np.ndarray:
+def compute_reference_image(source, unit: str, channel: int = 0, *, nonrigid: bool = True,
+                            block_size: int = 64, max_shift: float = 0.1,
+                            max_shift_nr: float = 3.0) -> np.ndarray:
     """The reference image Suite2p picks from one unit, as int16."""
     reg, _ = _suite2p()
     with MescFile(source) as f:
@@ -220,13 +241,27 @@ def _resolve_groups(f, units, groups, reference_from) -> List[List[str]]:
     return [[p] for p in paths]
 
 
+def _skip(report: Dict, group: Sequence[str], why: str, on_skip) -> None:
+    """Record a group we could not register, and say so where it will be seen.
+
+    The units keep the frames they had: `writeback` copies the source and replaces only
+    what it is handed, so a skipped unit reaches the output unregistered rather than
+    missing. That is the honest outcome, and the report says which ones they are.
+    """
+    for path in group:
+        report["skipped"][path] = why
+    warnings.warn(f"not registered — {why}", RegistrationWarning, stacklevel=2)
+    if on_skip is not None:
+        on_skip(list(group), why)
+
+
 def register_file(source, out, units: Optional[Sequence[str]] = None, channel: int = 0, *,
                   groups: Optional[Sequence[Sequence[str]]] = None,
-                  reference_from: Optional[str] = None, nonrigid: bool = False,
-                  block_size: int = 128, max_shift: float = 0.1, max_shift_nr: float = 5.0,
+                  reference_from: Optional[str] = None, nonrigid: bool = True,
+                  block_size: int = 64, max_shift: float = 0.1, max_shift_nr: float = 3.0,
                   preset: Optional[str] = None, ops: Optional[Dict] = None,
                   batch: int = 1000, tag: Optional[str] = "_MC",
-                  progress=None) -> Dict:
+                  progress=None, on_skip=None) -> Dict:
     """Register the units of `source` and write the result into a copy of it.
 
     **By default every unit is registered to its own reference.** A `.mesc` normally holds
@@ -245,10 +280,10 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
     `groups` keeps its old meaning — one shared reference for every named unit, anchored
     there — because that was always an explicit request rather than a default.
 
-    `preset="pipeline"` swaps in the settings the calcium-imaging pipeline runs (see
-    `PIPELINE_OPS`) — chiefly non-rigid warping, which is why its output is visibly smoother
-    than a rigid-only run. It changes settings only: units are still registered one reference
-    each unless `groups` says they share a field.
+The settings ARE the pipeline's (see `_ops`), non-rigid included — this reproduces that
+    correction rather than offering a different one. `nonrigid=False` gives a rigid-only run,
+    which changes the numbers. `preset="pipeline"` is kept as an explicit no-op for callers
+    written against 0.3.0, where those settings had to be asked for.
 
     `ops` goes straight to Suite2p and is applied last, over everything above: anything in
     `suite2p.default_ops()` can be set — `{"smooth_sigma": 2.0}` for a noisier field,
@@ -294,11 +329,18 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
 
         report = {"int16_scale": scale, "nonrigid": bool(nonrigid), "preset": preset,
                   "ops": dict(ops or {}),
-                  "leading_flat_frames": dark, "groups": [], "units": {}}
+                  "leading_flat_frames": dark, "groups": [], "units": {},
+                  "skipped": {}}
         corrected: Dict[str, Dict[str, np.ndarray]] = {}
 
         for group in unit_groups:
             anchor = group[0]
+            usable = f.unit(anchor).n_frames - dark[anchor]
+            if usable < MIN_FRAMES_FOR_REFERENCE:
+                _skip(report, group, f"{anchor} has {usable} usable frame(s), fewer than "
+                                     f"{MIN_FRAMES_FOR_REFERENCE} — no reference can be built",
+                      on_skip)
+                continue
             a_unit = f.unit(anchor)
             group_ops = _ops(a_unit.frame_rate_hz or 30.0, nonrigid, block_size,
                              max_shift, max_shift_nr, ops, batch)
@@ -310,8 +352,13 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
             idx = np.unique(np.linspace(a_dark, a_n - 1, take).astype(int))
             ref_src = f.read(anchor, channel=channel, frames=idx, reader_units=False,
                              max_gb=None)
-            ref = reg.compute_reference(_as_int16(ref_src, scale), ops=group_ops)
-            masks = reg.compute_reference_masks(ref, ops=group_ops)
+            try:
+                ref = reg.compute_reference(_as_int16(ref_src, scale), ops=group_ops)
+                masks = reg.compute_reference_masks(ref, ops=group_ops)
+            except Exception as exc:               # noqa: BLE001 — one bad unit is not the run
+                _skip(report, group, f"suite2p could not build a reference from {anchor}: "
+                                     f"{type(exc).__name__}: {exc}", on_skip)
+                continue
             report["groups"].append({"anchor": anchor, "units": list(group), "reference": ref})
 
             for path in group:

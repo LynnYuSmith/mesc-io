@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.1 — 2026-09-24
+
+**The pipeline's correction is the default now, not a preset.** 0.3.0 shipped the analysis
+pipeline's settings as `--preset pipeline` while the defaults stayed rigid-only, so a plain
+`mesc-io register` produced numbers that were not the ones this package exists to reproduce.
+Defaults are now `nonrigid=True`, `block_size=64`, `max_shift_nr=3.0` — the session config
+those recordings are processed with. Verified against the pipeline's own master on the same
+unit, as the fraction of the raw frame's pixel-to-pixel variance that survives: **0.354 from
+these defaults against 0.357 in the master.** `--rigid` opts out and costs no sharpness, but
+it is then a different correction and the gel warp at the edges goes uncorrected.
+`--preset pipeline` is kept as an explicit no-op for anything written against 0.3.0.
+
+**A unit too short to register no longer kills the run.** A session normally carries a unit or
+two aborted after a frame or two, commented "ignore". Suite2p's `compute_reference` sorts
+frames by their correlation to a running average and averages the best fraction; below a
+handful that selection is empty, its mean is NaN, and the run died with `cannot convert float
+NaN to integer` deep inside suite2p — after registering six units, losing all of it.
+
+- `MIN_FRAMES_FOR_REFERENCE = 16` usable frames (after the flat head) is the floor, and any
+  other suite2p failure while building a group's reference is caught the same way.
+- The group is skipped with a `RegistrationWarning`, listed in `report["skipped"]` with the
+  reason, and reported through an `on_skip` callback; the CLI prints it to stderr.
+- Skipped means **not registered, not missing**: `writeback` copies the source, so those units
+  reach the output exactly as they were. A test pins that.
+
 ## 0.3.0 — 2026-09-24
 
 **Each unit is registered to its own reference now.** `register_file` used to build one

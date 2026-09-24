@@ -120,6 +120,9 @@ def _parse_ops(pairs):
 def _register(args) -> int:
     from .registration import register_file
 
+    def _skipped(units, why):
+        print(f"  SKIPPED {', '.join(units)} — {why}", file=sys.stderr)
+
     def _say(path, info):
         print(f"  {path}: {info['n_frames']} frames, {info['n_channels']} channel(s), "
               f"{info['leading_flat_frames']} flat at the front, "
@@ -127,14 +130,19 @@ def _register(args) -> int:
 
     rep = register_file(args.source, args.out, units=args.units or None,
                         groups=args.group or None, channel=args.channel,
-                        reference_from=args.reference_from, nonrigid=args.nonrigid,
+                        reference_from=args.reference_from, nonrigid=not args.rigid,
                         block_size=args.block_size, max_shift=args.max_shift,
                         max_shift_nr=args.max_shift_nr, preset=args.preset,
                         ops=_parse_ops(args.ops),
-                        tag=None if args.no_tag else args.tag, progress=_say)
+                        tag=None if args.no_tag else args.tag, progress=_say,
+                        on_skip=_skipped)
     for g in rep["groups"]:
         shared = f" shared by {len(g['units'])} units" if len(g["units"]) > 1 else " (alone)"
         print(f"  reference from {g['anchor']}{shared}")
+    if rep["skipped"]:
+        print(f"  {len(rep['skipped'])} unit(s) left UNREGISTERED, copied through as they were:")
+        for u, why in rep["skipped"].items():
+            print(f"    {u} — {why}")
     print(f"  {len(rep['groups'])} reference(s)"
           f"{' (non-rigid)' if rep['nonrigid'] else ''}")
     print(f"  {rep['out']}")
@@ -214,16 +222,20 @@ def main(argv=None) -> int:
     p.add_argument("--reference-from", default=None,
                    help="put every named unit in ONE group anchored here — the old behaviour, "
                         "now only when you ask for it")
-    p.add_argument("--nonrigid", action="store_true",
-                   help="also correct a smooth position-dependent warp")
-    p.add_argument("--block-size", type=int, default=128)
+    p.add_argument("--rigid", action="store_true",
+                   help="whole-frame shifts only. Cheaper — a rigid shift costs no sharpness — "
+                        "but it is then NOT the correction the analysis pipeline runs, and the "
+                        "gel warp at the edges of the field goes uncorrected")
+    p.add_argument("--block-size", type=int, default=64,
+                   help="non-rigid block EDGE in px, not the grid: blocks overlap, so 64 on a "
+                        "256 px frame is 6x6 = 36 of them (default: 64, the pipeline's)")
     p.add_argument("--max-shift", type=float, default=0.1,
                    help="rigid cap, as a fraction of the frame (default: 0.1)")
-    p.add_argument("--max-shift-nr", type=float, default=5.0,
-                   help="non-rigid cap in px; keep it small (default: 5)")
+    p.add_argument("--max-shift-nr", type=float, default=3.0,
+                   help="non-rigid cap in px; keep it small — the warp is 1-2 px and a loose "
+                        "cap slides blocks onto their neighbours (default: 3, the pipeline's)")
     p.add_argument("--preset", choices=["pipeline"], default=None,
-                   help="run the settings the analysis pipeline runs — non-rigid warping with "
-                        "64 px blocks. Settings only: units still get a reference each")
+                   help="kept for 0.3.0 callers; those settings are the defaults now")
     p.add_argument("--ops", action="append", default=None, metavar="KEY=VALUE",
                    help="any suite2p option, applied last and winning over the rest: "
                         "--ops smooth_sigma=2.0 --ops two_step_registration=true. "

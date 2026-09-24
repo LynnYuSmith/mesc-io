@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+**A z-stack is no longer motion-corrected.** `register` took every unit by default, stacks
+included, and aligned their slices — which are depths, not moments — to one reference. On a
+calibration file with five stacks that moved slices by 35 to 72 pixels and wrote them back tagged
+`_MC`. Stacks are now skipped with the reason, the recordings beside them still go through, and
+a group mixing a stack with a recording is refused.
+
+**A channel with no conversion warns when read.** Its offset and scale fell back to 0 and 1 in
+silence, so "reader units" were the stored integers with the PMT offset still in them.
+`ConversionWarning` now says so, and `Channel.converted` tells you in advance. No channel of the
+four real files checked lacks one.
+
+**Write-back rounds.** `from_reader_units` truncated towards zero, a −0.5-count bias on every
+non-integer value; it now rounds to the nearest count.
+
+**int16 saturates instead of wrapping.** Registration picks its int16 scale from 12 sampled
+frames; a brighter pixel elsewhere wrapped to negative and came out black. It is now held at
+32767 with a warning. On a 20-unit bouton session the true peak was 14718, so this is a guard.
+
 ## 0.3.1 — 2026-09-24
 
 **The pipeline's correction is the default now, not a preset.** 0.3.0 shipped the analysis

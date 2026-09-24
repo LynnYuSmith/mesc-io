@@ -271,3 +271,42 @@ def test_rigid_only_is_available_and_is_a_different_correction(moving_mesc, tmp_
     path, _, _ = moving_mesc
     rep = register_file(path, tmp_path / "rigid.mesc", nonrigid=False)
     assert rep["nonrigid"] is False
+
+
+def _as_z_stack(path, unit):
+    """Relabel one unit of a synthetic file the way MESc labels a z-stack: depth, in µm."""
+    import h5py
+    with h5py.File(path, "r+") as f:
+        u = f[f"MSession_0/{unit}"]
+        u.attrs["ZAxisGeomRole"] = 3
+        u.attrs["ZAxisConversionConversionLinearScale"] = 1.0
+        u.attrs["ZAxisConversionUnitName"] = np.array([ord(c) for c in "µm"] + [0], dtype=np.uint16)
+    return path
+
+
+def test_a_z_stack_is_skipped_loudly_and_its_slices_are_not_moved(two_fields_mesc, tmp_path):
+    """A stack's frames are depths. Registered by default, the five stacks of the 2026-09-24
+    calibration file came back with their slices moved by 35 to 72 pixels, tagged as corrected.
+    """
+    path, n_flat, shifts = two_fields_mesc
+    _as_z_stack(path, "MUnit_1")
+    out = tmp_path / "out.mesc"
+    seen = []
+    with pytest.warns(Warning, match="z-stack"):
+        rep = register_file(path, out, on_skip=lambda units, why: seen.append(why))
+    assert list(rep["skipped"]) == ["MSession_0/MUnit_1"] and "z-stack" in seen[0]
+    # the control: the recording beside it is still registered, and still correctly
+    assert "MSession_0/MUnit_0" in rep["units"]
+    y = rep["units"]["MSession_0/MUnit_0"]["y_shift"][n_flat:]
+    assert np.ptp(y) >= 3
+    with MescFile(path) as a, MescFile(out) as b:
+        assert np.array_equal(a.read("MUnit_1", reader_units=False),
+                              b.read("MUnit_1", reader_units=False))
+
+
+def test_a_group_cannot_mix_a_z_stack_with_a_recording(two_fields_mesc, tmp_path):
+    from mesc_io.registration import RegistrationError
+    path, _, _ = two_fields_mesc
+    _as_z_stack(path, "MUnit_1")
+    with pytest.raises(RegistrationError, match="mixes z-stacks"):
+        register_file(path, tmp_path / "out.mesc", groups=[["MUnit_0", "MUnit_1"]])

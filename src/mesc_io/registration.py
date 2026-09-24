@@ -106,25 +106,25 @@ def _ops(fs: float, nonrigid: bool, block_size: int, max_shift: float,
     These are the DEFAULTS, not a mode to opt into: the point of this module is to reproduce
     that correction, and a reader that quietly ran something else would be worse than useless.
 
-    Not a fresh guess: `nonrigid=False`, `smooth_sigma_time=0`, `block_size=[128, 128]`,
-    `maxregshift=0.1`, `snr_thresh=1.2`, `batch_size=1000` are the values in daily use on
-    this kind of data. All but `nonrigid` and `batch_size` happen to agree with Suite2p's
-    own defaults, and they are spelled out anyway — a silent agreement is not a decision, and
-    if a future Suite2p moves one of them we want to see it move.
+    Not a fresh guess: they are what the calcium-imaging pipeline's sessions run — the ops
+    ``lib/mesc/concat_mc._suite2p_ops_base`` builds (`maxregshift=0.1`, `smooth_sigma_time=0`,
+    `snr_thresh=1.2`, `batch_size=1000`), called with `PipelineConfig`'s `block_size=64` and
+    `maxregshift_nr=3.0` and with `suite2p_nonrigid: true`, which every session YAML sets. The ones that happen to agree
+    with Suite2p's own defaults are spelled out anyway — a silent agreement is not a decision,
+    and if a future Suite2p moves one of them we want to see it move.
 
-    Non-rigid is ON, with the pipeline's 64 px blocks and its tight 3 px cap. It warps each
-    block by its own subpixel shift, so it RESAMPLES every frame and the output is softer than
-    the input even where nothing moved — measured at 0.36 of the raw pixel-to-pixel variance
-    and 0.87 of the mean image's sharpness. That is bought deliberately: the immersion gel
-    dries from its edges inward over a session, the refractive index changes with it, and the
-    image warps at the periphery in a way no whole-frame shift can touch. `nonrigid=False`
-    turns it off and costs nothing measurable, but it is then not the same correction.
+    Non-rigid is ON, with 64 px blocks and a tight 3 px cap. It warps each block by its own
+    subpixel shift, so it RESAMPLES every frame and the output is softer than the input even
+    where nothing moved — measured at 0.36 of the raw pixel-to-pixel variance and 0.87 of the
+    mean image's sharpness. That is bought deliberately: the immersion gel dries from its edges
+    inward over a session, the refractive index changes with it, and the image warps at the
+    periphery in a way no whole-frame shift can touch. `nonrigid=False` turns it off and costs
+    nothing measurable, but it is then not the same correction.
 
-    `block_size` is 128 because that is the pipeline's value, and it is worth writing down
-    what it buys, because the obvious reading is wrong: Suite2p's blocks OVERLAP, and
-    `calculate_nblocks` gives `ceil(1.5 * L / block_size)` per axis. On a 256 px frame 128
-    is a 3x3 grid of nine blocks, not the 2x2 it looks like; 2x2 would need 0.75 * L, i.e.
-    192. Only matters when `nonrigid` is on.
+    What `block_size` buys is not what it looks like: Suite2p's blocks OVERLAP, and
+    `calculate_nblocks` gives `ceil(1.5 * L / block_size)` per axis. On a 256 px frame 64 is a
+    6x6 grid of 36 blocks and 128 would be 3x3 — not the 4x4 and 2x2 the division suggests.
+    Only matters when `nonrigid` is on.
 
     `extra` is applied last and wins over all of it.
     """
@@ -319,6 +319,11 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
         all_paths = [p for g in unit_groups for p in g]
 
         for g in unit_groups:
+            depth = [p for p in g if f.unit(p).z_step_um]
+            if depth and len(depth) < len(g):
+                raise RegistrationError(
+                    f"a group mixes z-stacks ({', '.join(depth)}) with recordings — a stack's "
+                    "third axis is depth, and it cannot share a reference with a movie")
             shapes = {f.unit(p).shape[1:] for p in g}
             if len(shapes) > 1:
                 raise RegistrationError(
@@ -335,6 +340,15 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
 
         for group in unit_groups:
             anchor = group[0]
+            if f.unit(anchor).z_step_um:
+                # Its frames are slices at different depths, not one field over time. Aligning
+                # them to a single reference is not motion correction: on the 2026-09-24
+                # calibration file it moved the slices of five stacks by 35 to 72 pixels and
+                # wrote them back tagged as corrected.
+                _skip(report, group, f"{anchor} is a z-stack ({f.unit(anchor).z_step_um:g} µm "
+                                     "per slice) — its third axis is depth, not time, and "
+                                     "there is no motion to correct across it", on_skip)
+                continue
             usable = f.unit(anchor).n_frames - dark[anchor]
             if usable < MIN_FRAMES_FOR_REFERENCE:
                 _skip(report, group, f"{anchor} has {usable} usable frame(s), fewer than "

@@ -190,3 +190,35 @@ def test_the_block_grid_is_what_we_think_it_is():
     bs = _ops(61.9, True, 128, 0.1, 5.0)["block_size"]
     *_, n, _, _ = make_blocks(256, 256, bs)
     assert list(n) == [3, 3]
+
+
+def test_the_pipeline_preset_is_the_pipeline_settings(moving_mesc, tmp_path):
+    """Pinned against lib/mesc/concat_mc._suite2p_ops_base as of 2026-09-24: of 90 keys only
+    these differed (plus input_format, which only run_s2p reads)."""
+    from mesc_io.registration import PIPELINE_OPS, _ops
+    got = _ops(61.9, False, 128, 0.1, 5.0, PIPELINE_OPS)
+    assert got["nonrigid"] is True
+    assert list(got["block_size"]) == [64, 64]
+    assert got["maxregshiftNR"] == 3.0
+    assert got["soma_crop"] is False
+    # and the rest is untouched
+    assert got["maxregshift"] == 0.1 and got["snr_thresh"] == 1.2 and got["batch_size"] == 1000
+
+    path, _, _ = moving_mesc
+    rep = register_file(path, tmp_path / "out.mesc", preset="pipeline")
+    assert rep["preset"] == "pipeline" and rep["nonrigid"] is False   # the flag, not the op
+    assert rep["ops"]["nonrigid"] is True
+
+
+def test_the_preset_does_not_group_units(two_fields_mesc, tmp_path):
+    """Settings only: a preset must not quietly put two fields on one reference."""
+    path, _, _ = two_fields_mesc
+    rep = register_file(path, tmp_path / "out.mesc", preset="pipeline")
+    assert len(rep["groups"]) == 2
+
+
+def test_an_unknown_preset_is_an_error(moving_mesc, tmp_path):
+    from mesc_io.registration import RegistrationError
+    path, _, _ = moving_mesc
+    with pytest.raises(RegistrationError, match="no such preset"):
+        register_file(path, tmp_path / "x.mesc", preset="pipelien")

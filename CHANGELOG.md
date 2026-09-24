@@ -34,6 +34,18 @@ turns it on. A test pins them, so a future Suite2p moving one of them is visible
   `{"two_step_registration": True}` to rebuild the reference from the registered movie. A key
   Suite2p does not have **raises**; a misspelled option would otherwise change nothing and say
   nothing. The report carries what was passed.
+**`preset="pipeline"` / `--preset pipeline`** runs the settings the analysis pipeline runs.
+Diffed key by key against its `_suite2p_ops_base`: of 90 options only four matter here —
+`nonrigid=True`, `block_size=[64, 64]`, `maxregshiftNR=3.0`, `soma_crop=False`. Settings only;
+units still get one reference each unless `groups` says they share a field.
+
+Verified on a real session (abf001 260918_1, MUnit_2), as the fraction of the raw frame's
+pixel-to-pixel variance that survives: raw 1.000 · rigid default **1.000** · preset 0.382 ·
+preset with the group's anchor as reference 0.354 · the same unit in the pipeline's own master
+0.357. So a rigid shift costs nothing and the whole softening is the non-rigid warp — which is
+bought deliberately there, to correct the smooth peripheral warp of the immersion gel drying
+inward over a session.
+
 - Written down in `_ops`, because the obvious reading is wrong: Suite2p's non-rigid blocks
   overlap (`ceil(1.5 * L / block_size)` per axis), so `block_size=128` on a 256 px frame is a
   3x3 grid of nine blocks, not 2x2. Pinned by a test.

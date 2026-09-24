@@ -46,6 +46,28 @@ INT16_MAX = 32767
 FLAT_FRACTION = 0.5
 
 
+#: The four Suite2p options that separate this module's defaults from the calcium-imaging
+#: pipeline's motion correction (``lib/mesc/concat_mc._suite2p_ops_base``, measured against it
+#: 2026-09-24: 5 of 90 keys differed, and ``input_format`` only matters to ``run_s2p``, which
+#: is not the path taken here). Non-rigid is the substantive one — it warps each block by its
+#: own subpixel shift, which resamples EVERY frame, so the output is softer than the input even
+#: where nothing moved. That is a deliberate trade there: it corrects the smooth peripheral
+#: warp from the immersion gel drying inward over a session, which a rigid shift cannot touch.
+#: Grouping is NOT part of this: units stay one-reference-each unless `groups` says otherwise.
+#: Checked against a real session (abf001 260918_1, MUnit_2, 300 frames), as the fraction of
+#: the raw frame's pixel-to-pixel variance that survives: raw 1.000, rigid default 1.000 (a
+#: rigid shift costs nothing), this preset 0.382 alone and 0.354 with the group's anchor as
+#: reference, against 0.357 for the same unit inside the pipeline's own master.
+PIPELINE_OPS = {
+    "nonrigid": True,
+    "block_size": [64, 64],     # 6x6 = 36 blocks on a 256 px frame; they overlap
+    "maxregshiftNR": 3.0,       # the warp is 1-2 px; a loose cap slides blocks onto neighbours
+    "soma_crop": False,
+}
+
+PRESETS = {"pipeline": PIPELINE_OPS}
+
+
 class RegistrationError(MescIOError, RuntimeError):
     """Registration could not be run, or the data does not suit it."""
 
@@ -202,7 +224,8 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
                   groups: Optional[Sequence[Sequence[str]]] = None,
                   reference_from: Optional[str] = None, nonrigid: bool = False,
                   block_size: int = 128, max_shift: float = 0.1, max_shift_nr: float = 5.0,
-                  ops: Optional[Dict] = None, batch: int = 1000, tag: Optional[str] = "_MC",
+                  preset: Optional[str] = None, ops: Optional[Dict] = None,
+                  batch: int = 1000, tag: Optional[str] = "_MC",
                   progress=None) -> Dict:
     """Register the units of `source` and write the result into a copy of it.
 
@@ -221,6 +244,11 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
     `units` selects which units to register, one reference each. `reference_from` without
     `groups` keeps its old meaning — one shared reference for every named unit, anchored
     there — because that was always an explicit request rather than a default.
+
+    `preset="pipeline"` swaps in the settings the calcium-imaging pipeline runs (see
+    `PIPELINE_OPS`) — chiefly non-rigid warping, which is why its output is visibly smoother
+    than a rigid-only run. It changes settings only: units are still registered one reference
+    each unless `groups` says they share a field.
 
     `ops` goes straight to Suite2p and is applied last, over everything above: anything in
     `suite2p.default_ops()` can be set — `{"smooth_sigma": 2.0}` for a noisier field,
@@ -243,6 +271,12 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
     """
     from .writeback import write_frames
 
+    if preset is not None:
+        if preset not in PRESETS:
+            raise RegistrationError(
+                f"no such preset: {preset!r}. Have: {', '.join(sorted(PRESETS))}")
+        ops = {**PRESETS[preset], **(ops or {})}     # an explicit ops still wins
+
     reg, _ = _suite2p()
     source, out = Path(source), Path(out)
     with MescFile(source) as f:
@@ -258,7 +292,8 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
         scale = _scale_for(f, all_paths, channel)        # one scale for the whole file
         dark = {p: leading_flat_frames(f, p, channel) for p in all_paths}
 
-        report = {"int16_scale": scale, "nonrigid": bool(nonrigid), "ops": dict(ops or {}),
+        report = {"int16_scale": scale, "nonrigid": bool(nonrigid), "preset": preset,
+                  "ops": dict(ops or {}),
                   "leading_flat_frames": dark, "groups": [], "units": {}}
         corrected: Dict[str, Dict[str, np.ndarray]] = {}
 

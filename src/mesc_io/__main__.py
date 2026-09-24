@@ -129,7 +129,8 @@ def _register(args) -> int:
                         groups=args.group or None, channel=args.channel,
                         reference_from=args.reference_from, nonrigid=args.nonrigid,
                         block_size=args.block_size, max_shift=args.max_shift,
-                        max_shift_nr=args.max_shift_nr, ops=_parse_ops(args.ops),
+                        max_shift_nr=args.max_shift_nr, preset=args.preset,
+                        ops=_parse_ops(args.ops),
                         tag=None if args.no_tag else args.tag, progress=_say)
     for g in rep["groups"]:
         shared = f" shared by {len(g['units'])} units" if len(g["units"]) > 1 else " (alone)"
@@ -220,6 +221,9 @@ def main(argv=None) -> int:
                    help="rigid cap, as a fraction of the frame (default: 0.1)")
     p.add_argument("--max-shift-nr", type=float, default=5.0,
                    help="non-rigid cap in px; keep it small (default: 5)")
+    p.add_argument("--preset", choices=["pipeline"], default=None,
+                   help="run the settings the analysis pipeline runs — non-rigid warping with "
+                        "64 px blocks. Settings only: units still get a reference each")
     p.add_argument("--ops", action="append", default=None, metavar="KEY=VALUE",
                    help="any suite2p option, applied last and winning over the rest: "
                         "--ops smooth_sigma=2.0 --ops two_step_registration=true. "

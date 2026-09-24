@@ -69,10 +69,20 @@ class Unit:
     height: int
     width: int
     dtype: str
+    #: Frames per second — only for a unit whose third axis is TIME. A z-stack's third axis
+    #: is depth, and dividing 1000 by its step gave "1000 Hz" for a 1 µm slice spacing: a
+    #: plausible number, in the right unit, that nothing in a pipeline would question.
     frame_rate_hz: Optional[float]
     pixel_size_um: Optional[float]
     comment: str
     channels: List[Channel]
+    #: Slice spacing in µm — set instead of ``frame_rate_hz`` when the third axis is depth.
+    z_step_um: Optional[float] = None
+    #: The y pixel size, when it differs from x. Femtonics writes the two axes separately and
+    #: they are not always equal: on a 408x512 frame of the 2026-09-24 calibration set, x is
+    #: 0.126171875 µm against y 0.12629686820504823. ``pixel_size_um`` keeps x, as every caller
+    #: already expects; this is here so anisotropy is visible rather than silently dropped.
+    pixel_size_y_um: Optional[float] = None
     #: The microscope STAGE position (VirtX/VirtY/VirtZ, µm) — where the objective physically
     #: was. Not the injection-relative numbers people type into comments, and not
     #: ``GeomTransTransl``, whose x and y are zero. None when the file does not carry it.
@@ -255,17 +265,52 @@ class MescFile:
                                     scale=1.0 if sc is None else sc))
         first = grp[chan_names[0]]
         n, h, w = (first.shape + (0, 0, 0))[:3]
-        # frame PERIOD in ms -> rate in Hz. Guard the reciprocal: a zero or absent scale is a
-        # file that cannot tell you its rate, which is worth None rather than a made-up 60.
-        period_ms = _float_or_none(_attr(a, "ZAxisConversionConversionLinearScale"))
-        rate = 1000.0 / period_ms if period_ms else None
+        # The third axis is TIME in a recording and DEPTH in a z-stack, and the file says
+        # which: ``ZAxisGeomRole`` is 0 for time and 3 for depth, with the unit name ("ms" or
+        # "µm") agreeing. Reading the scale without asking turned a 1 µm slice spacing into
+        # "1000 Hz" on five of the nine units of the 2026-09-24 calibration set — a number that
+        # is plausible, correctly typed, and would have gone into a rolling baseline and an
+        # event window without a murmur. So the rate is only offered when the axis is time,
+        # and the spacing only when it is depth.
+        z_scale = _float_or_none(_attr(a, "ZAxisConversionConversionLinearScale"))
+        rate = z_step = None
+        if z_scale:
+            if _z_axis_is_time(a):
+                rate = 1000.0 / z_scale          # the scale is a frame PERIOD in ms
+            else:
+                z_step = z_scale                 # µm per slice
         px = _float_or_none(_attr(a, "XAxisConversionConversionLinearScale"))
+        py = _float_or_none(_attr(a, "YAxisConversionConversionLinearScale"))
         return Unit(name=name, session=session, n_frames=int(n), height=int(h), width=int(w),
-                    dtype=str(first.dtype), frame_rate_hz=rate,
+                    dtype=str(first.dtype), frame_rate_hz=rate, z_step_um=z_step,
                     pixel_size_um=px if px and px > 0 else None,
+                    pixel_size_y_um=(py if py and py > 0 and px and abs(py - px) > 1e-9
+                                     else None),
                     comment=_text(_attr(a, "Comment")), channels=channels,
                     stage_um=_stage_position(a),
                     stage_rel_um=_stage_position(a, "AttributeRelativePosition", "Slow"))
+
+
+#: ``ZAxisGeomRole``: 0 is the time axis of a recording, 3 the depth axis of a z-stack.
+Z_ROLE_TIME, Z_ROLE_DEPTH = 0, 3
+
+
+def _z_axis_is_time(attrs) -> bool:
+    """Is the third axis time, or depth?
+
+    ``ZAxisGeomRole`` answers it outright. The unit name is the fallback for a file that omits
+    the role: "ms" or "s" is time, "µm" is depth. When neither says anything, time is assumed,
+    because every recording this reader was written for is one.
+    """
+    role = _float_or_none(_attr(attrs, "ZAxisGeomRole"))
+    if role is not None:
+        return int(role) != Z_ROLE_DEPTH
+    name = _text(_attr(attrs, "ZAxisConversionUnitName")).strip().lower()
+    if name in ("ms", "s", "us", "µs"):
+        return True
+    if "m" == name.replace("µ", "").replace("u", "").strip():
+        return False
+    return True
 
 
 def _stage_position(attrs, attribute: str = "AttributePosition", prefix: str = "Virt") -> Optional[Dict[str, float]]:

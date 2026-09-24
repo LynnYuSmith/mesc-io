@@ -342,3 +342,46 @@ def test_pixel_of_the_mean_and_out_of_field(server):
     assert "value" in d and "patch_mean" in d
     with pytest.raises(urllib.error.HTTPError):
         get(server + "/api/pixel/MSession_0/MUnit_0/0?x=99&y=0")
+
+
+def test_every_attribute_is_offered_not_the_fifteen_the_reader_keeps(server):
+    """The reader surfaces 15 of a unit's ~278 attributes, which is right for code and wrong
+    for a person deciding whether something matters. The window shows all of them."""
+    d = get_json(f"{server}/api/metadata/MSession_0/MUnit_0")
+    assert d["unit"] == "MSession_0/MUnit_0"
+    flat = {k: v for g in d["groups"].values() for k, v in g.items()}
+    assert d["n_attributes"] == len(flat) >= 4
+    assert "ZAxisConversionConversionLinearScale" in flat
+    assert "Channel_0_Conversion_ConversionLinearOffset" in flat
+    assert "session" in d and "curves" in d
+
+
+def test_text_stored_as_an_integer_array_comes_back_as_text(server, recording):
+    """Femtonics writes strings as integers, and not always the same width — Channel_0_Name is
+    uint8, ExperimenterSetupID int16. Read as raw bytes of a multi-byte dtype it printed as
+    "M E S c   4 . 0"; narrowed to low bytes it reads."""
+    with h5py.File(recording, "r+") as f:
+        u = f["MSession_0/MUnit_0"]
+        u.attrs["CreatingMEScVersion"] = np.array(
+            [ord(c) for c in "MESc 4.0"] + [0], dtype=np.uint8)
+        u.attrs["ExperimenterSetupID"] = np.array(
+            [ord(c) for c in "SN2019-X"] + [0], dtype=np.int16)
+    _Handler._cache = {}
+    d = get_json(f"{server}/api/metadata/MSession_0/MUnit_0")
+    who = d["groups"]["who wrote it"]
+    assert who["CreatingMEScVersion"] == "MESc 4.0"
+    assert who["ExperimenterSetupID"] == "SN2019-X"
+
+
+def test_an_empty_attribute_is_null_rather_than_a_crash(server, recording):
+    """PointsPositions0..7 are h5py Empty unless points were marked on the rig, and an Empty
+    is not JSON — the first version answered the whole request with a TypeError."""
+    with h5py.File(recording, "r+") as f:
+        f["MSession_0/MUnit_0"].attrs.create("PointsPositions0", h5py.Empty("f8"))
+    _Handler._cache = {}
+    d = get_json(f"{server}/api/metadata/MSession_0/MUnit_0")
+    assert d["groups"]["points"]["PointsPositions0"] is None
+
+
+def test_a_unit_that_is_not_there_says_so(server):
+    assert "error" in get_json(f"{server}/api/metadata/MSession_0/MUnit_99")

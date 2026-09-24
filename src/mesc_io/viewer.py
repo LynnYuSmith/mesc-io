@@ -209,6 +209,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._pixel("/".join(parts[2:-1]), int(parts[-1]), q)
             if parts[:2] == ["api", "thumb"] and len(parts) >= 4:
                 return self._thumb("/".join(parts[2:-1]), int(parts[-1]), q)
+            if parts[:2] == ["api", "metadata"] and len(parts) >= 3:
+                return self._json(self._metadata("/".join(parts[2:])))
             if parts[:2] == ["api", "view"]:
                 return self._json({"view": self._load_view(), "path": str(self.view_path)})
             if parts[:2] == ["api", "trace"] and len(parts) >= 4:
@@ -238,6 +240,8 @@ class _Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         try:
             parts = [p for p in url.path.split("/") if p]
+            if parts[:2] == ["api", "metadata"] and len(parts) >= 3:
+                return self._json(self._metadata("/".join(parts[2:])))
             if parts[:2] == ["api", "view"]:
                 n = int(self.headers.get("Content-Length", 0))
                 view = json.loads(self.rfile.read(n) or b"{}")
@@ -499,6 +503,81 @@ class _Handler(BaseHTTPRequestHandler):
         with self._lock:
             self._cache[key] = out
         return out
+
+    def _metadata(self, unit_path):
+        """Every attribute the file carries for one unit, decoded, nothing filtered.
+
+        The reader surfaces fifteen of the two hundred and seventy-eight attributes a MESc unit
+        holds, which is the right number for code — the rest are format versions, display
+        colours and LUT bounds. It is the wrong number for a person deciding whether something
+        matters, so this returns all of them and lets the eye do the choosing.
+
+        Grouped by where they live (the unit, its channels, its axes, its curves) because the
+        flat list is unreadable, and with the byte-array strings decoded, since Femtonics
+        stores text as UTF-16 that prints as "M E S c   4 . 0" if taken literally.
+        """
+        import h5py
+        import numpy as np
+
+        def val(v):
+            # h5py hands back an `Empty` for a null attribute — `PointsPositions0..7` are
+            # empty unless someone marked points on the rig — and it is not JSON.
+            if isinstance(v, h5py.Empty):
+                return None
+            if isinstance(v, bytes):
+                return v.decode("utf-8", "replace").rstrip("\x00")
+            if isinstance(v, np.ndarray):
+                # Femtonics stores text as an integer array, and not always the same integer:
+                # `Channel_0_Name` is uint8 ("UG"), `ExperimenterSetupID` is int16. `bytes()`
+                # on a multi-byte dtype reads the padding as characters, so each element is
+                # narrowed to its low byte first — which is what the file means, since every
+                # code point here is ASCII.
+                if v.dtype.kind in "iu" and v.size > 1:
+                    try:
+                        raw = np.asarray(v).ravel()
+                        t = bytes(int(x) & 0xFF for x in raw if 0 < int(x) < 256)
+                        t = t.decode("utf-8", "replace").rstrip("\x00")
+                        if t.strip() and all(ch.isprintable() for ch in t):
+                            return t
+                    except Exception:
+                        pass
+                if v.size > 24:
+                    return f"<{v.size} values, {v.dtype}>"
+                return [val(x) for x in np.ravel(v)]
+            if isinstance(v, (np.integer, np.floating)):
+                return v.item()
+            return v
+
+        def bucket(k):
+            if k.startswith("Channel_"):
+                return f"channel {k.split('_')[1]}"
+            if k[:1] in "XYZ" and "Axis" in k:
+                return f"axis {k[0]}"
+            if k.startswith("Points"):
+                return "points"
+            if k.startswith(("Creating", "Experimenter")):
+                return "who wrote it"
+            if k.startswith(("Measurement", "Comment", "Uuid", "SpaceName", "Type")):
+                return "measurement"
+            return "other"
+
+        with self._file() as f, h5py.File(self.mesc_path, "r") as h5:
+            if unit_path not in h5:
+                return {"error": f"no such unit: {unit_path}"}
+            g = h5[unit_path]
+            groups = {}
+            for k in sorted(g.attrs):
+                groups.setdefault(bucket(k), {})[k] = val(g.attrs[k])
+            curves = {}
+            for c in sorted(x for x in g if x.startswith("Curve_")):
+                ca = {k: val(g[c].attrs[k]) for k in sorted(g[c].attrs)}
+                d = g[c].get("CurveDataYRawData")
+                ca["_n_points"] = int(d.size) if d is not None and d.size else 0
+                curves[c] = ca
+            sess = unit_path.split("/")[0]
+            session = {k: val(h5[sess].attrs[k]) for k in sorted(h5[sess].attrs)}
+        return {"unit": unit_path, "session": session, "groups": groups, "curves": curves,
+                "n_attributes": sum(len(v) for v in groups.values())}
 
     def _describe_uncached(self):
         with self._file() as f:

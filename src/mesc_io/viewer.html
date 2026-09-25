@@ -207,6 +207,8 @@
         <button id="volGlass" title="semi-transparent: every voxel adds light and hides a little of what is behind it">glass</button>
         <button id="volDepth" title="MIP coloured by the depth the brightest voxel sits at — an axon's colour says how deep it runs">depth</button>
         <label title="below this, a voxel is empty (fraction of the window). Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"></label>
+        <label title="above this, a voxel is cut away (or held at white, with clip): the brightest blobs stop hiding what is around and behind them">ceiling <input type="range" id="volCeil" min="0.05" max="1" step="0.01"></label>
+        <button id="volCut" title="what happens above the ceiling: cut = the voxel is empty, so a bright blob disappears and what is behind it shows; clip = it stays, held at white">cut</button>
         <button id="volAuto" title="the floor back at the stack's own percentile — 99.7 for MIP and depth, 97 for glass: the background empty, what stands out of it kept">auto</button>
         <label title="how much a voxel hides what is behind it (glass only)">density <input type="range" id="volDen" min="0.02" max="1" step="0.01"></label>
         <label title="brightness">gain <input type="range" id="volGain" min="0.5" max="4" step="0.05"></label>
@@ -1168,14 +1170,14 @@ boot();
    ========================================================================================== */
 function volState(v) {
   const d = { on: false, ortho: false, oMax: false, oCross: true, cx: -1, cy: -1, cz: -1,
-              mode: "mip", thr: 0.5, thrFor: "", den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: 0, dist: 1 };
+              mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: 0, dist: 1 };
   if (!v || typeof v !== "object") return d;
   const o = { ...d, ...v };
   o.on = !!o.on; o.ortho = !!o.ortho && !o.on; o.oMax = !!o.oMax; o.oCross = o.oCross !== false;
   for (const k of ["cx", "cy", "cz"]) o[k] = Number.isInteger(o[k]) ? o[k] : -1;
   o.mode = ["mip", "glass", "depth"].includes(o.mode) ? o.mode : "mip";
   const cl = (x, a, b, def) => (Number.isFinite(+x) ? Math.max(a, Math.min(b, +x)) : def);
-  o.thr = cl(o.thr, 0, .95, d.thr); o.thrFor = typeof o.thrFor === "string" ? o.thrFor : ""; o.den = cl(o.den, .02, 1, d.den); o.gain = cl(o.gain, .5, 4, d.gain);
+  o.thr = cl(o.thr, 0, .95, d.thr); o.ceil = cl(o.ceil, .05, 1, 1); o.ceilSet = cl(o.ceilSet, .05, 1, o.ceil); o.cut = o.cut !== false; o.thrFor = typeof o.thrFor === "string" ? o.thrFor : ""; o.den = cl(o.den, .02, 1, d.den); o.gain = cl(o.gain, .5, 4, d.gain);
   o.z = cl(o.z, 1, 8, 1); o.yaw = cl(o.yaw, -1e4, 1e4, 0); o.pitch = cl(o.pitch, -1.55, 1.55, 0);
   o.dist = cl(o.dist, .25, 4, 1);
   return o;
@@ -1189,7 +1191,7 @@ void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2
 const FS = `#version 300 es
 precision highp float; precision highp sampler3D;
 uniform sampler3D vol; uniform vec3 ext, camPos, camR, camU, camF;
-uniform float tanHalf, aspect, thr, gain, den, dt; uniform int mode;
+uniform float tanHalf, aspect, thr, gain, den, dt, ceil_; uniform int mode, cut;
 in vec2 ndc; out vec4 o;
 vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
 void main() {
@@ -1207,16 +1209,17 @@ void main() {
     vec3 p = camPos + rd * t;
     vec3 uvw = vec3((p.x / ext.x + 1.0) * 0.5, 1.0 - (p.y / ext.y + 1.0) * 0.5, 1.0 - (p.z / ext.z + 1.0) * 0.5);
     float v = texture(vol, uvw).r;
+    if (v > ceil_) { if (cut == 1) continue; v = ceil_; }   // above the ceiling: gone, or held
     if (mode == 1) {
-      float a = clamp((v - thr) / (1.0 - thr), 0.0, 1.0);
+      float a = clamp((v - thr) / (ceil_ - thr), 0.0, 1.0);
       float s = 1.0 - exp(-den * a * dt * 60.0);
-      vec3 c = vec3(0.62, 1.0, 0.70) * clamp(v * gain, 0.0, 1.0);
+      vec3 c = vec3(0.62, 1.0, 0.70) * clamp(v / ceil_ * gain, 0.0, 1.0);
       acc.rgb += (1.0 - acc.a) * s * c; acc.a += (1.0 - acc.a) * s;
       if (acc.a > 0.985) break;
     } else if (v > m) { m = v; mz = uvw.z; }
   }
   if (mode == 1) { o = vec4(acc.rgb, 1.0); return; }
-  float g = clamp((m - thr) / (1.0 - thr) * gain, 0.0, 1.0);
+  float g = clamp((m - thr) / (ceil_ - thr) * gain, 0.0, 1.0);
   o = vec4(mode == 2 ? hue(mz * 0.75) * g : vec3(g), 1.0);
 }`;
 const LVS = `#version 300 es
@@ -1255,7 +1258,7 @@ async function volLoad() {
     if (volLoading !== key) return;                   // a newer request took over
     // The bytes are kept: the XYZ views cut them here, and 3D puts them on the GPU only when it
     // is actually shown (volDraw -> volUpload), so the orthogonal views never need WebGL.
-    volData = data; volProj = {};
+    volData = data; volProj = {}; volCut = null; volCutFor = "";
     volMetaFrom(r, shape, vox, data);
     volKey = key; badge("stack loaded");
   } catch (e) {
@@ -1268,11 +1271,54 @@ function volUpload() {             // the bytes are here from an XYZ view; 3D wa
   const gl = glInit(), [D, Hy, Wx] = volMeta.shape;
   if (!volTex) volTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_3D, volTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, Wx, Hy, D, 0, gl.RED, gl.UNSIGNED_BYTE, volData);
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, Wx, Hy, D, 0, gl.RED, gl.UNSIGNED_BYTE, volCutData());
   for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
     [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]])
     gl.texParameteri(gl.TEXTURE_3D, k, v);
-  volTexKey = volKey;
+  volTexKey = volKey + "|" + volCutKey();
+}
+/* Cutting a blob means cutting its rim too. Dropping only the voxels above the ceiling left
+   each blob as a hollow shell just under it, which the window then stretched back to white —
+   the blob stayed, as a ring. So a cut takes every voxel above the ceiling and everything within
+   BLOB_RIM_UM of one, in all three axes at the stack's own voxel size, and leaves the rest as it
+   was. Computed on the CPU (a separable max filter, then a mask) when the ceiling is set. */
+const BLOB_RIM_UM = 1.5;
+let volCut = null, volCutFor = "";
+// The window follows the slider as it moves; the mask follows it when it is let go (ceilSet),
+// since cutting a 125-slice stack is a second of work and should not run on every step.
+function volCutKey() { return V.vol.cut && V.vol.ceilSet < 1 ? `cut${V.vol.ceilSet.toFixed(2)}` : "raw"; }
+function volCutData() {
+  const key = volKey + "|" + volCutKey();
+  if (volCutKey() === "raw") return volData;
+  if (volCutFor === key && volCut) return volCut;
+  const [D, Hy, Wx] = volMeta.shape, [vz, vy, vx] = volMeta.vox, lim = Math.floor(V.vol.ceilSet * 255);
+  let m = new Uint8Array(volData.length);
+  for (let i = 0; i < m.length; i++) m[i] = volData[i] > lim ? 1 : 0;
+  // grow the seeds by r voxels along one axis: a running count of seeds in the window
+  const grow = (src, n, stride, count, step, r) => {
+    const out = new Uint8Array(src.length);
+    for (let line = 0; line < count; line++) {
+      const base = Math.floor(line / step) * step * n + (line % step);
+      let run = 0;
+      for (let k = 0; k <= Math.min(r, n - 1); k++) run += src[base + k * stride];
+      for (let k = 0; k < n; k++) {
+        if (run > 0) out[base + k * stride] = 1;
+        const add = k + r + 1, drop = k - r;
+        if (add < n) run += src[base + add * stride];
+        if (drop >= 0) run -= src[base + drop * stride];
+      }
+    }
+    return out;
+  };
+  const rx = Math.max(1, Math.round(BLOB_RIM_UM / vx)), ry = Math.max(1, Math.round(BLOB_RIM_UM / vy));
+  const rz = Math.max(1, Math.round(BLOB_RIM_UM / vz));
+  m = grow(m, Wx, 1, D * Hy, 1, rx);                 // along x: lines are rows
+  m = grow(m, Hy, Wx, D * Wx, Wx, ry);               // along y: stride one row
+  m = grow(m, D, Wx * Hy, Wx * Hy, Wx * Hy, rz);     // along z: stride one slice
+  const out = new Uint8Array(volData.length);
+  for (let i = 0; i < out.length; i++) out[i] = m[i] ? 0 : volData[i];
+  volCut = out; volCutFor = key;
+  return out;
 }
 function volMetaFrom(r, shape, vox, data) {
     const hist = new Uint32Array(256); for (let i = 0; i < data.length; i += 7) hist[data[i]]++;
@@ -1294,7 +1340,9 @@ function volShow() {
   $("volBtn").classList.toggle("on", on);
   $("stageHint").hidden = on || ortho;
   ["volMip", "volGlass", "volDepth"].forEach(id => $(id).classList.toggle("on", "vol" + V.vol.mode[0].toUpperCase() + V.vol.mode.slice(1) === id));
-  $("volThr").value = V.vol.thr; $("volDen").value = V.vol.den; $("volGain").value = V.vol.gain; $("volZ").value = V.vol.z;
+  $("volThr").value = V.vol.thr; $("volCeil").value = V.vol.ceil;
+  $("volCut").textContent = V.vol.cut ? "cut" : "clip"; $("volCut").classList.toggle("on", V.vol.cut);
+  $("volDen").value = V.vol.den; $("volGain").value = V.vol.gain; $("volZ").value = V.vol.z;
   $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z;
   $("volDen").disabled = V.vol.mode !== "glass";
   if (on || ortho) volLoad();
@@ -1309,7 +1357,7 @@ const v3 = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot: (a, b)
   norm: a => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; } };
 function volDraw() {
   if (!V.vol.on || !volMeta || !unit) return;
-  if (volTexKey !== volKey) volUpload();
+  if (volTexKey !== volKey + "|" + volCutKey()) volUpload();   // new stack, or a new cut
   const gl = GL, cv = $("vol"), dpr = window.devicePixelRatio || 1;
   const W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
@@ -1328,7 +1376,9 @@ function volDraw() {
   gl.uniform3fv(u("ext"), ext); gl.uniform3fv(u("camPos"), eye); gl.uniform3fv(u("camR"), R);
   gl.uniform3fv(u("camU"), U); gl.uniform3fv(u("camF"), F);
   gl.uniform1f(u("tanHalf"), tanHalf); gl.uniform1f(u("aspect"), aspect);
+  const ceil = Math.max(V.vol.ceil, V.vol.thr + 0.01);
   gl.uniform1f(u("thr"), V.vol.thr); gl.uniform1f(u("gain"), V.vol.gain); gl.uniform1f(u("den"), V.vol.den);
+  gl.uniform1f(u("ceil_"), ceil); gl.uniform1i(u("cut"), V.vol.cut ? 1 : 0);
   gl.uniform1f(u("dt"), 1.0 / Math.max(Wx, Hy, D * V.vol.z * vz / Math.min(vx, vy)));
   gl.uniform1i(u("mode"), { mip: 0, glass: 1, depth: 2 }[V.vol.mode]);
   gl.disable(gl.DEPTH_TEST); gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1397,7 +1447,11 @@ for (const [id, mode] of [["volMip", "mip"], ["volGlass", "glass"], ["volDepth",
 function volAutoThr() { return V.vol.mode === "glass" ? volMeta.p97 : volMeta.p997; }
 $("volAuto").onclick = () => { if (!volMeta) return; V.vol.thr = volAutoThr(); V.vol.thrFor = "";
   $("volThr").value = V.vol.thr; volDraw(); saveView(); };
-for (const [id, k] of [["volThr", "thr"], ["volDen", "den"], ["volGain", "gain"], ["volZ", "z"]])
+$("volCut").onclick = () => { V.vol.cut = !V.vol.cut; volShow(); volDraw(); saveView(); };
+$("volCeil").onchange = () => { V.vol.ceilSet = V.vol.ceil;         // let go: now cut the blobs
+  if (V.vol.cut && V.vol.ceilSet < 1) badge("cutting the blobs…");
+  setTimeout(() => { volDraw(); if (V.vol.cut && V.vol.ceilSet < 1) badge("blobs above the ceiling cut"); saveView(); }, 0); };
+for (const [id, k] of [["volThr", "thr"], ["volCeil", "ceil"], ["volDen", "den"], ["volGain", "gain"], ["volZ", "z"]])
   $(id).oninput = () => { V.vol[k] = +$(id).value; if (k === "thr") V.vol.thrFor = unit.path; if (k === "z") $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z; volDraw(); saveView(); };
 new ResizeObserver(() => volDraw()).observe($("stage"));
 

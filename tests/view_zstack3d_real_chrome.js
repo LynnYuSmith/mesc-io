@@ -73,6 +73,34 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   if (turned.sig === top.sig) fail("turning did not change the picture");
   await shot("mip_turned");
 
+  // The ceiling. Measured where the blobs ARE: the brightest pixels of the full picture. With clip
+  // they stay white; with cut they are gone and only what surrounds them is left. Counting lit
+  // pixels over the whole frame would not show it: in a MIP the window stretches to floor..ceiling,
+  // so cutting the blobs brightens everything under the ceiling.
+  const setv = (k, v) => ev(`V.vol.${k} = ${v}; if ("${k}" === "ceil") V.vol.ceilSet = ${v}; volShow(); volDraw(); 'ok'`);
+  const grab = () => ev(`(()=>{const c=document.getElementById('vol'),g=c.getContext('webgl2');
+    const p=new Uint8Array(c.width*c.height*4); g.readPixels(0,0,c.width,c.height,g.RGBA,g.UNSIGNED_BYTE,p);
+    window.__px = p; return p.length;})()`);
+  const atBlobs = () => ev(`(()=>{const c=document.getElementById('vol'),g=c.getContext('webgl2');
+    const p=new Uint8Array(c.width*c.height*4); g.readPixels(0,0,c.width,c.height,g.RGBA,g.UNSIGNED_BYTE,p);
+    let s=0; for (const i of window.__blob) s += p[i]; return s / window.__blob.length;})()`);
+  await setv("thr", 0.5); await setv("gain", 1); await setv("ceil", 1); await setv("cut", true); await sleep(200);
+  const full = await look(); await grab();
+  await ev(`(()=>{const p=window.__px, idx=[]; for(let i=0;i<p.length;i+=4) if(p[i]>=250) idx.push(i);
+    window.__blob = idx; return idx.length;})()`);
+  const nBlob = await ev("window.__blob.length");
+  if (nBlob < 200) fail("no bright blob to test the ceiling on: " + nBlob);
+  await setv("ceil", 0.8); await setv("cut", false); await sleep(200);
+  const clipped = await atBlobs();
+  await setv("cut", true); await sleep(200);
+  const cutv = await atBlobs(); await shot("mip_ceiling_cut");
+  if (!(clipped > 240)) fail(`clip should hold the blobs at white: ${clipped}`);
+  if (!(cutv < clipped * 0.8)) fail(`cut should remove the blobs: ${cutv} vs clip ${clipped}`);
+  await setv("cut", false); await sleep(100);
+  if (await ev("document.getElementById('volCut').textContent") !== "clip") fail("the cut/clip button does not say which");
+  await setv("ceil", 1); await setv("cut", true); await sleep(200);
+  if ((await look()).sig !== full.sig) fail("a ceiling of 1 is not the picture it was before the ceiling existed");
+  console.log("  ceiling     :", JSON.stringify({ blob_px: nBlob, at_blobs_clip: +clipped.toFixed(1), at_blobs_cut: +cutv.toFixed(1) }));
   await click("#volDepth"); const depth = await look(); await shot("depth_turned");
   if (depth.chroma < 40) fail("depth mode is not coloured: " + JSON.stringify(depth));
   await click("#volGlass"); const glass = await look(); await shot("glass_turned");

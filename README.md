@@ -48,6 +48,18 @@ mesc-io view      recording.mesc                            # the recording in a
 
 `info` and `check` take `--json`.
 
+### Motion correction
+
+```
+mesc-io register recording.mesc recording_MC.mesc          # one reference per unit
+mesc-io preset save soma --block-size 128 --max-shift-nr 5 # name a set of settings
+mesc-io register recording.mesc out.mesc --preset soma     # use it; a flag still wins
+```
+
+Needs `pip install "mesc-io[register]"`. The defaults are the calcium-imaging pipeline's own
+correction; z-stacks and units too short to register are skipped and said so. Groups, presets,
+where they are kept and how to share them: [docs/registration.md](docs/registration.md).
+
 ### The viewer
 
 `mesc-io view` opens the recording in a private browser window: units on the left with a

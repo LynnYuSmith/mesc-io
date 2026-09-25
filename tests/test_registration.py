@@ -166,15 +166,12 @@ def test_the_defaults_are_the_pipeline_settings(moving_mesc, tmp_path):
     """The point of this module is to reproduce that correction, so these are the DEFAULTS.
     Pinned against lib/mesc/concat_mc._suite2p_ops_base + the session config it is run with
     (suite2p_nonrigid: true, block_size 64, maxregshift_nr 3.0)."""
-    import inspect
-    from mesc_io.registration import _ops
-    sig = inspect.signature(register_file).parameters
-    assert sig["nonrigid"].default is True
-    assert sig["block_size"].default == 64
-    assert sig["max_shift_nr"].default == 3.0
+    from mesc_io.registration import DEFAULTS, _ops
+    assert DEFAULTS == {"nonrigid": True, "block_size": 64, "max_shift": 0.1,
+                        "max_shift_nr": 3.0}
 
-    ops = _ops(61.9, sig["nonrigid"].default, sig["block_size"].default,
-               sig["max_shift"].default, sig["max_shift_nr"].default)
+    ops = _ops(61.9, DEFAULTS["nonrigid"], DEFAULTS["block_size"],
+               DEFAULTS["max_shift"], DEFAULTS["max_shift_nr"])
     assert ops["nonrigid"] is True
     assert list(ops["block_size"]) == [64, 64]
     assert ops["maxregshiftNR"] == 3.0
@@ -185,7 +182,8 @@ def test_the_defaults_are_the_pipeline_settings(moving_mesc, tmp_path):
     assert ops["fs"] == 61.9                     # from the file, never a literal
 
     path, _, _ = moving_mesc
-    assert register_file(path, tmp_path / "out.mesc")["nonrigid"] is True
+    rep = register_file(path, tmp_path / "out.mesc")        # nothing passed, no preset
+    assert rep["nonrigid"] is True and rep["settings"] == DEFAULTS and rep["preset"] is None
 
 
 def test_ops_win_over_the_named_arguments(moving_mesc, tmp_path):
@@ -219,8 +217,9 @@ def test_the_pipeline_preset_is_the_pipeline_settings(moving_mesc, tmp_path):
 
     path, _, _ = moving_mesc
     rep = register_file(path, tmp_path / "out.mesc", preset="pipeline")
-    assert rep["preset"] == "pipeline"
-    assert rep["ops"]["nonrigid"] is True        # a no-op now: it is already the default
+    assert rep["preset"]["name"] == "pipeline" and rep["preset"]["source"] == "built in"
+    assert rep["settings"] == {"nonrigid": True, "block_size": 64, "max_shift": 0.1,
+                               "max_shift_nr": 3.0}      # a no-op now: it is the default
 
 
 def test_the_preset_does_not_group_units(two_fields_mesc, tmp_path):
@@ -233,7 +232,7 @@ def test_the_preset_does_not_group_units(two_fields_mesc, tmp_path):
 def test_an_unknown_preset_is_an_error(moving_mesc, tmp_path):
     from mesc_io.registration import RegistrationError
     path, _, _ = moving_mesc
-    with pytest.raises(RegistrationError, match="no such preset"):
+    with pytest.raises(RegistrationError, match="no preset 'pipelien'"):
         register_file(path, tmp_path / "x.mesc", preset="pipelien")
 
 

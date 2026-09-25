@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+**Presets you can save.** `mesc-io preset save NAME` stores a set of registration settings
+(rigid or non-rigid, block edge, both shift caps, any Suite2p option) as a small JSON file in
+`~/.config/mesc-io/presets` or `$MESC_IO_PRESETS`; `list`, `show` and `delete` do what they say.
+`register --preset` takes a saved name or a path to a preset file, and each setting resolves as
+flag → preset → default, so a flag still wins over the preset. A preset holds settings only and
+never groups, so it cannot put two fields on one reference. The report records the preset in
+full and where it was read from. `pipeline` is built in and equals the defaults. Instructions:
+`docs/registration.md`.
+
 **A z-stack is no longer motion-corrected.** `register` took every unit by default, stacks
 included, and aligned their slices — which are depths, not moments — to one reference. On a
 calibration file with five stacks that moved slices by 35 to 72 pixels and wrote them back tagged

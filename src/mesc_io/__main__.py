@@ -130,12 +130,20 @@ def _register(args) -> int:
 
     rep = register_file(args.source, args.out, units=args.units or None,
                         groups=args.group or None, channel=args.channel,
-                        reference_from=args.reference_from, nonrigid=not args.rigid,
+                        reference_from=args.reference_from,
+                        nonrigid=False if args.rigid else None,
                         block_size=args.block_size, max_shift=args.max_shift,
                         max_shift_nr=args.max_shift_nr, preset=args.preset,
                         ops=_parse_ops(args.ops),
                         tag=None if args.no_tag else args.tag, progress=_say,
                         on_skip=_skipped)
+    if rep["preset"]:
+        pr = rep["preset"]
+        print(f"  preset {pr['name'] or '(dict)'} — {pr['source']}")
+    st = rep["settings"]
+    print(f"  settings: {'non-rigid' if st['nonrigid'] else 'rigid'}, block {st['block_size']}, "
+          f"max shift {st['max_shift']:g}, non-rigid cap {st['max_shift_nr']:g} px"
+          + (f", ops {rep['ops']}" if rep["ops"] else ""))
     for g in rep["groups"]:
         shared = f" shared by {len(g['units'])} units" if len(g["units"]) > 1 else " (alone)"
         print(f"  reference from {g['anchor']}{shared}")
@@ -146,6 +154,36 @@ def _register(args) -> int:
     print(f"  {len(rep['groups'])} reference(s)"
           f"{' (non-rigid)' if rep['nonrigid'] else ''}")
     print(f"  {rep['out']}")
+    return 0
+
+
+def _preset(args) -> int:
+    from .presets import delete_preset, list_presets, load_preset, preset_dir, save_preset
+    import json
+    if args.action == "list":
+        print(f"  saved presets live in {preset_dir()}")
+        for p in list_presets():
+            print(f"  {p['name']:<20} {p['description']}  [{p['source']}]")
+        return 0
+    if args.action == "show":
+        got = load_preset(args.name)
+        print(json.dumps(got, indent=2))
+        return 0
+    if args.action == "delete":
+        print(f"  deleted {delete_preset(args.name)}")
+        return 0
+    settings = {}
+    if args.rigid:
+        settings["nonrigid"] = False
+    for key in ("block_size", "max_shift", "max_shift_nr"):
+        if getattr(args, key) is not None:
+            settings[key] = getattr(args, key)
+    ops = _parse_ops(args.ops)
+    if ops:
+        settings["ops"] = ops
+    path = save_preset(args.name, settings, args.description or "", overwrite=args.force)
+    print(f"  saved {args.name} -> {path}")
+    print(f"  settings: {json.dumps(settings)}")
     return 0
 
 
@@ -222,20 +260,22 @@ def main(argv=None) -> int:
     p.add_argument("--reference-from", default=None,
                    help="put every named unit in ONE group anchored here — the old behaviour, "
                         "now only when you ask for it")
-    p.add_argument("--rigid", action="store_true",
+    p.add_argument("--rigid", action="store_true", default=None,
                    help="whole-frame shifts only. Cheaper — a rigid shift costs no sharpness — "
                         "but it is then NOT the correction the analysis pipeline runs, and the "
                         "gel warp at the edges of the field goes uncorrected")
-    p.add_argument("--block-size", type=int, default=64,
+    p.add_argument("--block-size", type=int, default=None,
                    help="non-rigid block EDGE in px, not the grid: blocks overlap, so 64 on a "
                         "256 px frame is 6x6 = 36 of them (default: 64, the pipeline's)")
-    p.add_argument("--max-shift", type=float, default=0.1,
+    p.add_argument("--max-shift", type=float, default=None,
                    help="rigid cap, as a fraction of the frame (default: 0.1)")
-    p.add_argument("--max-shift-nr", type=float, default=3.0,
+    p.add_argument("--max-shift-nr", type=float, default=None,
                    help="non-rigid cap in px; keep it small — the warp is 1-2 px and a loose "
                         "cap slides blocks onto their neighbours (default: 3, the pipeline's)")
-    p.add_argument("--preset", choices=["pipeline"], default=None,
-                   help="kept for 0.3.0 callers; those settings are the defaults now")
+    p.add_argument("--preset", default=None, metavar="NAME|FILE",
+                   help="saved settings (see `mesc-io preset list`), or a preset .json file. "
+                        "Flags given here override it; 'pipeline' is built in and equals the "
+                        "defaults")
     p.add_argument("--ops", action="append", default=None, metavar="KEY=VALUE",
                    help="any suite2p option, applied last and winning over the rest: "
                         "--ops smooth_sigma=2.0 --ops two_step_registration=true. "
@@ -243,6 +283,28 @@ def main(argv=None) -> int:
     p.add_argument("--tag", default="_MC")
     p.add_argument("--no-tag", action="store_true")
     p.set_defaults(func=_register)
+
+    p = sub.add_parser("preset", help="save, list, show or delete named registration settings")
+    psub = p.add_subparsers(dest="action", required=True)
+    q = psub.add_parser("list", help="the built-in and saved presets, and where they live")
+    q.set_defaults(func=_preset)
+    q = psub.add_parser("show", help="one preset in full")
+    q.add_argument("name", help="a name, or a path to a preset .json")
+    q.set_defaults(func=_preset)
+    q = psub.add_parser("delete", help="remove a saved preset")
+    q.add_argument("name")
+    q.set_defaults(func=_preset)
+    q = psub.add_parser("save", help="store settings under a name; only what you give is stored")
+    q.add_argument("name")
+    q.add_argument("--description", default="", help="one sentence: what it is for")
+    q.add_argument("--rigid", action="store_true", help="whole-frame shifts only")
+    q.add_argument("--block-size", type=int, default=None, help="non-rigid block edge, px")
+    q.add_argument("--max-shift", type=float, default=None, help="rigid cap, fraction of frame")
+    q.add_argument("--max-shift-nr", type=float, default=None, help="non-rigid cap, px")
+    q.add_argument("--ops", action="append", default=None, metavar="KEY=VALUE",
+                   help="any suite2p option, as for register")
+    q.add_argument("--force", action="store_true", help="overwrite a preset of that name")
+    q.set_defaults(func=_preset)
 
     args = ap.parse_args(argv)
     try:

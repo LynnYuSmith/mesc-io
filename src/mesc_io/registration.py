@@ -66,7 +66,11 @@ PIPELINE_OPS = {
     "soma_crop": False,
 }
 
-PRESETS = {"pipeline": PIPELINE_OPS}
+PRESETS = {"pipeline": PIPELINE_OPS}      # kept for 0.3.0 importers; see mesc_io.presets
+
+#: The four named settings and their defaults — the pipeline's. A preset overrides these, and an
+#: argument passed explicitly overrides the preset.
+DEFAULTS = {"nonrigid": True, "block_size": 64, "max_shift": 0.1, "max_shift_nr": 3.0}
 
 #: Fewest usable frames (after the flat head) a unit needs before Suite2p can build a
 #: reference from it. `compute_reference` sorts frames by their correlation to a running
@@ -136,6 +140,7 @@ def _ops(fs: float, nonrigid: bool, block_size: int, max_shift: float,
         "maxregshift": float(max_shift), "maxregshiftNR": float(max_shift_nr),
         "smooth_sigma_time": 0, "snr_thresh": 1.2, "batch_size": int(batch), "nimg_init": 300,
         "reg_tif": False, "reg_tif_chan2": False,
+        "soma_crop": False,   # read only by detection, never by registration; set for parity
     })
     if extra:
         unknown = sorted(k for k in extra if k not in ops)
@@ -270,9 +275,10 @@ def _skip(report: Dict, group: Sequence[str], why: str, on_skip) -> None:
 
 def register_file(source, out, units: Optional[Sequence[str]] = None, channel: int = 0, *,
                   groups: Optional[Sequence[Sequence[str]]] = None,
-                  reference_from: Optional[str] = None, nonrigid: bool = True,
-                  block_size: int = 64, max_shift: float = 0.1, max_shift_nr: float = 3.0,
-                  preset: Optional[str] = None, ops: Optional[Dict] = None,
+                  reference_from: Optional[str] = None, nonrigid: Optional[bool] = None,
+                  block_size: Optional[int] = None, max_shift: Optional[float] = None,
+                  max_shift_nr: Optional[float] = None,
+                  preset=None, ops: Optional[Dict] = None,
                   batch: int = 1000, tag: Optional[str] = "_MC",
                   progress=None, on_skip=None) -> Dict:
     """Register the units of `source` and write the result into a copy of it.
@@ -295,8 +301,13 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
 
 The settings ARE the pipeline's (see `_ops`), non-rigid included — this reproduces that
     correction rather than offering a different one. `nonrigid=False` gives a rigid-only run,
-    which changes the numbers. `preset="pipeline"` is kept as an explicit no-op for callers
-    written against 0.3.0, where those settings had to be asked for.
+    which changes the numbers.
+
+    `preset` names a saved set of these settings (`mesc_io.presets`): a name, a path to a
+    preset file, or a dict. Each of `nonrigid`, `block_size`, `max_shift` and `max_shift_nr`
+    comes from the argument if it is passed, else from the preset, else from the pipeline's
+    defaults; the preset's `ops` go under the `ops` passed here. `"pipeline"` is built in and
+    equals the defaults. The report records the preset in full, and where it was read from.
 
     `ops` goes straight to Suite2p and is applied last, over everything above: anything in
     `suite2p.default_ops()` can be set — `{"smooth_sigma": 2.0}` for a noisier field,
@@ -319,11 +330,22 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
     """
     from .writeback import write_frames
 
+    from .presets import PresetError, load_preset
+    used = None
+    base = {}
     if preset is not None:
-        if preset not in PRESETS:
-            raise RegistrationError(
-                f"no such preset: {preset!r}. Have: {', '.join(sorted(PRESETS))}")
-        ops = {**PRESETS[preset], **(ops or {})}     # an explicit ops still wins
+        try:
+            used = load_preset(preset)
+        except PresetError as exc:
+            raise RegistrationError(str(exc)) from None
+        base = dict(used["settings"])
+    ops = {**base.pop("ops", {}), **(ops or {})}          # an explicit ops still wins
+    given = {"nonrigid": nonrigid, "block_size": block_size, "max_shift": max_shift,
+             "max_shift_nr": max_shift_nr}
+    resolved = {k: (given[k] if given[k] is not None else base.get(k, DEFAULTS[k]))
+                for k in DEFAULTS}
+    nonrigid, block_size = resolved["nonrigid"], resolved["block_size"]
+    max_shift, max_shift_nr = resolved["max_shift"], resolved["max_shift_nr"]
 
     reg, _ = _suite2p()
     source, out = Path(source), Path(out)
@@ -345,7 +367,11 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
         scale = _scale_for(f, all_paths, channel)        # one scale for the whole file
         dark = {p: leading_flat_frames(f, p, channel) for p in all_paths}
 
-        report = {"int16_scale": scale, "nonrigid": bool(nonrigid), "preset": preset,
+        report = {"int16_scale": scale, "nonrigid": bool(nonrigid),
+                  "preset": None if used is None else {
+                      "name": used["name"], "source": used["source"],
+                      "description": used["description"], "settings": used["settings"]},
+                  "settings": resolved,
                   "ops": dict(ops or {}),
                   "leading_flat_frames": dark, "groups": [], "units": {},
                   "skipped": {}}

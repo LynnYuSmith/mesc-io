@@ -21,6 +21,8 @@ Endpoints:
     GET  /api/pixel/{unit}/{ch}?x=&y=&i=&n=  → one pixel's value in reader units (n frames averaged;
                                               i omitted = the mean image), for the hover readout
     GET  /api/thumb/{unit}/{ch}             → small PNG of the mean image, for the unit list
+    GET  /api/volume/{unit}/{ch}            → a z-stack as raw uint8 (z, y, x) for the 3D view
+                                              (?lo=&hi=); shape and voxel size in the headers
     GET  /api/view                          → the saved view (unit, frame, zoom, …) or {}
     PUT  /api/view                          → replace the saved view (written beside the ROIs)
     GET  /api/trace/{unit}/{ch}?x=&y=&r=    → JSON time course of a disc, in reader units
@@ -74,6 +76,10 @@ MAX_AVG_FRAMES = 256
 #: The reader's memory guard, kept on for every read this server does. A slice that would
 #: exceed it answers 400 with the reader's own message instead of being attempted.
 MAX_READ_GB = 2.0
+#: The largest z-stack sent whole to the 3D view, in voxels (one byte each). 32 M is 128
+#: slices of 512x512, and it fits a WebGL 3D texture on any laptop GPU; bigger stacks are
+#: block-averaged in x and y until they fit, and the factor is sent with them.
+MAX_VOLUME_VOXELS = 32 * 1024 * 1024
 
 
 def _in_polygon(pts: np.ndarray, h: int, w: int) -> np.ndarray:
@@ -209,6 +215,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._pixel("/".join(parts[2:-1]), int(parts[-1]), q)
             if parts[:2] == ["api", "thumb"] and len(parts) >= 4:
                 return self._thumb("/".join(parts[2:-1]), int(parts[-1]), q)
+            if parts[:2] == ["api", "volume"] and len(parts) >= 4:
+                return self._volume("/".join(parts[2:-1]), int(parts[-1]), q)
             if parts[:2] == ["api", "metadata"] and len(parts) >= 3:
                 return self._json(self._metadata("/".join(parts[2:])))
             if parts[:2] == ["api", "view"]:
@@ -599,6 +607,53 @@ class _Handler(BaseHTTPRequestHandler):
     @staticmethod
     def _window(q):
         return float(q.get("lo", ["1"])[0]), float(q.get("hi", ["99.5"])[0])
+
+    def _volume(self, unit, ch, q):
+        """A z-stack, whole, as 8-bit voxels for the browser to render in 3D.
+
+        One window for the whole stack, on percentiles of all of it: windowing slice by slice
+        would brighten the empty ones and flatten the depth that the 3D view is there to show.
+        The voxel size travels with it — x and y from the pixel size, z from the slice step —
+        because a stack of thirty 1 µm slices over a 65 µm field is a slab, not a cube, and
+        drawn as a cube every axon in it would run at the wrong angle.
+
+        Only for a z-stack: a recording's third axis is time, and a 5000-frame "volume" of it
+        is neither small nor meaningful. Above ``MAX_VOLUME_VOXELS`` the frame is block-averaged
+        in x and y by an integer factor, which is returned rather than hidden.
+        """
+        lo_pct, hi_pct = self._window(q)
+        with self._file() as f:
+            u = f.unit(unit)
+            if not u.z_step_um:
+                raise ValueError(f"{unit} is not a z-stack — its third axis is time, "
+                                 "and there is no volume to show")
+            k = 1
+            while u.n_frames * (u.height // k) * (u.width // k) > MAX_VOLUME_VOXELS:
+                k += 1
+            hh, ww = (u.height // k) * k, (u.width // k) * k
+            vol = np.empty((u.n_frames, hh // k, ww // k), dtype=np.float32)
+            for z0 in range(0, u.n_frames, 64):
+                block = f.read(unit, channel=ch, frames=slice(z0, z0 + 64), reader_units=True,
+                               max_gb=None)[:, :hh, :ww]
+                vol[z0:z0 + len(block)] = block.reshape(
+                    len(block), hh // k, k, ww // k, k).mean(axis=(2, 4))
+        sample = vol[:, ::max(1, vol.shape[1] // 128), ::max(1, vol.shape[2] // 128)]
+        lo, hi = np.percentile(sample, [lo_pct, hi_pct])
+        if hi <= lo:
+            hi = lo + 1.0
+        body = (np.clip((vol - lo) / (hi - lo), 0, 1) * 255).astype(np.uint8).tobytes()
+        px = u.pixel_size_um or 1.0
+        py = u.pixel_size_y_um or px
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Volume-Shape", f"{vol.shape[0]},{vol.shape[1]},{vol.shape[2]}")
+        self.send_header("X-Voxel-Um", f"{u.z_step_um},{py * k},{px * k}")
+        self.send_header("X-Downsample", str(k))
+        self.send_header("X-Window", f"{lo},{hi}")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _frame(self, unit, ch, i, q):
         """One frame — or the mean of ``n`` frames centred on it.

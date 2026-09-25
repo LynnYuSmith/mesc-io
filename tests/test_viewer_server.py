@@ -385,3 +385,69 @@ def test_an_empty_attribute_is_null_rather_than_a_crash(server, recording):
 
 def test_a_unit_that_is_not_there_says_so(server):
     assert "error" in get_json(f"{server}/api/metadata/MSession_0/MUnit_99")
+
+
+# --- the 3D view: a z-stack sent whole --------------------------------------------------------
+
+@pytest.fixture
+def stack_server(tmp_path):
+    """A 5-slice stack with one bright 'axon' running diagonally through depth: in slice z it
+    sits at y = 2, x = z. Plus a recording beside it, which has no volume to give."""
+    path = tmp_path / "stack.mesc"
+    with h5py.File(path, "w") as f:
+        sess = f.create_group("MSession_0")
+        u = sess.create_group("MUnit_0")
+        data = np.full((5, 6, 8), 1000, dtype=np.uint16)
+        for z in range(5):
+            data[z, 2, z] = 3000
+        u.create_dataset("Channel_0", data=data)
+        u.attrs["Channel_0_Conversion_ConversionLinearOffset"] = OFFSET
+        u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
+        u.attrs["ZAxisGeomRole"] = 3
+        u.attrs["ZAxisConversionConversionLinearScale"] = 2.0
+        u.attrs["XAxisConversionConversionLinearScale"] = 0.25
+        r = sess.create_group("MUnit_1")
+        r.create_dataset("Channel_0", data=np.zeros((4, 6, 8), dtype=np.uint16))
+        r.attrs["ZAxisGeomRole"] = 0
+        r.attrs["ZAxisConversionConversionLinearScale"] = 16.0
+    _Handler.mesc_path = path
+    _Handler.rois_path = tmp_path / "stack_rois.json"
+    _Handler._cache = {}
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    httpd = HTTPServer(("127.0.0.1", port), _Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{port}"
+    httpd.shutdown()
+
+
+def _volume(url):
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return r.read(), r.headers
+
+
+def test_a_stack_is_sent_whole_with_its_voxel_size(stack_server):
+    body, h = _volume(f"{stack_server}/api/volume/MSession_0/MUnit_0/0?lo=0&hi=100")
+    assert h["X-Volume-Shape"] == "5,6,8" and len(body) == 5 * 6 * 8
+    # z from the slice step, y and x from the pixel: a slab, not a cube
+    assert [float(v) for v in h["X-Voxel-Um"].split(",")] == [2.0, 0.25, 0.25]
+    vol = np.frombuffer(body, dtype=np.uint8).reshape(5, 6, 8)
+    for z in range(5):
+        assert np.unravel_index(int(np.argmax(vol[z])), (6, 8)) == (2, z)   # the axon, in place
+        assert vol[z, 2, z] == 255 and vol[z, 0, 7] == 0                     # one window for all
+
+
+def test_a_recording_has_no_volume(stack_server):
+    with pytest.raises(urllib.error.HTTPError) as err:
+        _volume(f"{stack_server}/api/volume/MSession_0/MUnit_1/0")
+    assert err.value.code == 400 and b"not a z-stack" in err.value.read()
+
+
+def test_a_big_stack_is_shrunk_in_xy_and_says_by_how_much(stack_server, monkeypatch):
+    import mesc_io.viewer as viewer
+    monkeypatch.setattr(viewer, "MAX_VOLUME_VOXELS", 5 * 3 * 4)
+    body, h = _volume(f"{stack_server}/api/volume/MSession_0/MUnit_0/0?lo=0&hi=100")
+    assert h["X-Volume-Shape"] == "5,3,4" and h["X-Downsample"] == "2"
+    assert [float(v) for v in h["X-Voxel-Um"].split(",")] == [2.0, 0.5, 0.5]
+    assert len(body) == 5 * 3 * 4

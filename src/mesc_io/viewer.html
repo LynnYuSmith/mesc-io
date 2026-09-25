@@ -103,6 +103,20 @@
   #stageHint { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted);
                background:rgba(18,20,23,.7); padding:2px 6px; border-radius:3px; pointer-events:none }
 
+  /* ---- the 3D view of a z-stack: over the stage, same size ---- */
+  #vol { position:absolute; left:0; top:0; width:100%; height:100%; cursor:grab; background:#000 }
+  #vol.drag { cursor:grabbing }
+  #volBar[hidden], #volInfo[hidden], #vol[hidden] { display:none }
+  #volBar { position:absolute; left:8px; top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+            max-width:calc(100% - 16px); background:rgba(18,20,23,.82); border:1px solid var(--line);
+            border-radius:4px; padding:4px 8px; font-size:11px }
+  #volBar button { padding:2px 8px; font-size:11px }
+  #volBar label { display:flex; align-items:center; gap:4px; color:var(--muted) }
+  #volBar input[type=range] { width:84px }
+  #volInfo { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted); pointer-events:none;
+             background:rgba(18,20,23,.7); padding:2px 6px; border-radius:3px; white-space:pre; text-align:right }
+  #volInfo b { color:var(--ink); font-weight:600 }
+
   /* ---- instruments (right) ---- */
   #toolsCol { grid-area:tools; display:flex; flex-direction:column; min-height:0; position:relative;
               background:var(--panel); border-left:1px solid var(--line) }
@@ -178,6 +192,19 @@
       <div id="rubber"></div>
       <div id="stageHint">drag a box to zoom · drag an ROI to move it · wheel zooms · double-click resets</div>
       <div id="pixelRead" class="readout"></div>
+      <canvas id="vol" hidden></canvas>
+      <div id="volBar" hidden>
+        <button id="volMip" title="the brightest voxel along each line of sight">MIP</button>
+        <button id="volGlass" title="semi-transparent: every voxel adds light and hides a little of what is behind it">glass</button>
+        <button id="volDepth" title="MIP coloured by the depth the brightest voxel sits at — an axon's colour says how deep it runs">depth</button>
+        <label title="below this, a voxel is empty (fraction of the window). Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"></label>
+        <button id="volAuto" title="the floor back at the stack's own percentile — 99.7 for MIP and depth, 97 for glass: the background empty, what stands out of it kept">auto</button>
+        <label title="how much a voxel hides what is behind it (glass only)">density <input type="range" id="volDen" min="0.02" max="1" step="0.01"></label>
+        <label title="brightness">gain <input type="range" id="volGain" min="0.5" max="4" step="0.05"></label>
+        <label title="stretch depth. ×1 is the true proportion; anything else exaggerates it and says so">z ×<input type="range" id="volZ" min="1" max="8" step="0.5"><span id="volZv"></span></label>
+        <button id="volReset" title="look straight down the stack again (double-click does the same)">reset</button>
+      </div>
+      <div id="volInfo" hidden></div>
     </div>
     <div id="player">
       <button id="playBtn" title="space">▶</button>
@@ -198,6 +225,7 @@
       </label>
       <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button>
       <button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button>
+      <button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button>
     </div>
     <div class="instr" style="margin-top:6px">
       <button id="toolSpot" class="on" title="a disc where you click">spot</button>
@@ -326,7 +354,8 @@ async function boot() {
     </div>`).join("");
   $("units").onclick = e => { const d = e.target.closest(".u"); if (d) pick(+d.dataset.i); };
   const saved = (await (await fetch("/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW","vol"]));
+  V.vol = volState(V.vol);
   if (!V.yFixedBy || typeof V.yFixedBy !== "object") V.yFixedBy = { raw: null, dff: null };
   // A session saved before 0.2.2 carries `mean: true|false`, which is now `proj` with a third
   // state. Reading it keeps someone's open view open across the upgrade instead of dropping
@@ -392,6 +421,9 @@ function pick(i, restoring) {
   const mine = FILE.findings.filter(f => !f.units.length || f.units.some(u => unit.path.endsWith(u) || u.endsWith(unit.name)));
   $("findings").innerHTML = mine.map(f => `<div class="finding ${f.level}">${esc(f.message)}</div>`).join("");
   $("roiUnit").textContent = "· " + unit.name;
+  $("volBtn").hidden = !unit.z_step_um;
+  if (!unit.z_step_um && V.vol.on) V.vol.on = false;
+  volShow();
   if (!restoring) V.sel = -1;
   draw();
   loadRois().then(() => plotTraces());
@@ -408,6 +440,7 @@ function frameUrl() {
                 : `/api/frame/${unit.path}/${V.ch}/${V.frame}?${w}&n=${V.avg}`;
 }
 function draw() {
+  if (V.vol && V.vol.on) { volLoad(); volDraw(); }     // a new window or channel reloads the stack
   if (!unit) return;
   const url = frameUrl();
   if (url !== imgUrl) {
@@ -1102,6 +1135,231 @@ window.addEventListener("mousemove", ev => {
 window.addEventListener("mouseup", () => { if (sdown) { sdown = null; plotTraces(); saveView(); } });
 
 boot();
+
+/* ==========================================================================================
+   A z-stack in 3D. The stack goes to the GPU once as a 3D texture (one byte per voxel, the
+   server's single window over the whole stack) and is ray-marched per pixel: MIP keeps the
+   brightest voxel along each line of sight, glass lets every voxel add a little light and hide
+   a little of what is behind it, depth is a MIP coloured by how deep its brightest voxel lies.
+   The box is scaled by the voxel size — x and y from the pixel, z from the slice step — so the
+   proportions on screen are the tissue's. It starts looking straight down the stack, which is
+   the picture the max projection already shows; turning it is what adds the depth.
+   ========================================================================================== */
+function volState(v) {
+  const d = { on: false, mode: "mip", thr: 0.5, thrFor: "", den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: 0, dist: 1 };
+  if (!v || typeof v !== "object") return d;
+  const o = { ...d, ...v };
+  o.on = !!o.on; o.mode = ["mip", "glass", "depth"].includes(o.mode) ? o.mode : "mip";
+  const cl = (x, a, b, def) => (Number.isFinite(+x) ? Math.max(a, Math.min(b, +x)) : def);
+  o.thr = cl(o.thr, 0, .95, d.thr); o.thrFor = typeof o.thrFor === "string" ? o.thrFor : ""; o.den = cl(o.den, .02, 1, d.den); o.gain = cl(o.gain, .5, 4, d.gain);
+  o.z = cl(o.z, 1, 8, 1); o.yaw = cl(o.yaw, -1e4, 1e4, 0); o.pitch = cl(o.pitch, -1.55, 1.55, 0);
+  o.dist = cl(o.dist, .25, 4, 1);
+  return o;
+}
+V.vol = volState(V.vol);
+
+const VS = `#version 300 es
+out vec2 ndc;
+void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  ndc = p * 2.0 - 1.0; gl_Position = vec4(ndc, 0.0, 1.0); }`;
+const FS = `#version 300 es
+precision highp float; precision highp sampler3D;
+uniform sampler3D vol; uniform vec3 ext, camPos, camR, camU, camF;
+uniform float tanHalf, aspect, thr, gain, den, dt; uniform int mode;
+in vec2 ndc; out vec4 o;
+vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+void main() {
+  vec3 rd = normalize(camF + ndc.x * tanHalf * aspect * camR + ndc.y * tanHalf * camU);
+  vec3 inv = 1.0 / rd, t0 = (-ext - camPos) * inv, t1 = (ext - camPos) * inv;
+  vec3 lo = min(t0, t1), hi = max(t0, t1);
+  float ta = max(max(lo.x, lo.y), lo.z), tb = min(min(hi.x, hi.y), hi.z);
+  if (ta > tb || tb < 0.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  ta = max(ta, 0.0);
+  float jit = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  float m = 0.0, mz = 0.0; vec4 acc = vec4(0.0);
+  for (int i = 0; i < 2048; i++) {
+    float t = ta + (float(i) + jit) * dt;
+    if (t > tb) break;
+    vec3 p = camPos + rd * t;
+    vec3 uvw = vec3((p.x / ext.x + 1.0) * 0.5, 1.0 - (p.y / ext.y + 1.0) * 0.5, 1.0 - (p.z / ext.z + 1.0) * 0.5);
+    float v = texture(vol, uvw).r;
+    if (mode == 1) {
+      float a = clamp((v - thr) / (1.0 - thr), 0.0, 1.0);
+      float s = 1.0 - exp(-den * a * dt * 60.0);
+      vec3 c = vec3(0.62, 1.0, 0.70) * clamp(v * gain, 0.0, 1.0);
+      acc.rgb += (1.0 - acc.a) * s * c; acc.a += (1.0 - acc.a) * s;
+      if (acc.a > 0.985) break;
+    } else if (v > m) { m = v; mz = uvw.z; }
+  }
+  if (mode == 1) { o = vec4(acc.rgb, 1.0); return; }
+  float g = clamp((m - thr) / (1.0 - thr) * gain, 0.0, 1.0);
+  o = vec4(mode == 2 ? hue(mz * 0.75) * g : vec3(g), 1.0);
+}`;
+const LVS = `#version 300 es
+in vec3 pos; uniform mat4 mvp; void main() { gl_Position = mvp * vec4(pos, 1.0); }`;
+const LFS = `#version 300 es
+precision mediump float; uniform vec4 col; out vec4 o; void main() { o = col; }`;
+
+let GL = null, volTex = null, volKey = "", volMeta = null, volLoading = "", volProg = null, lineProg = null, lineBuf = null;
+function glProgram(gl, vs, fs) {
+  const mk = (t, src) => { const sh = gl.createShader(t); gl.shaderSource(sh, src); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh)); return sh; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, mk(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, mk(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+  return pr;
+}
+function glInit() {
+  if (GL) return GL;
+  const gl = $("vol").getContext("webgl2", { antialias: true, preserveDrawingBuffer: true });
+  if (!gl) throw new Error("this browser has no WebGL2, which the 3D view needs");
+  volProg = glProgram(gl, VS, FS); lineProg = glProgram(gl, LVS, LFS);
+  lineBuf = gl.createBuffer();
+  return (GL = gl);
+}
+async function volLoad() {
+  const key = `${unit.path}|${V.ch}|${V.lo}|${V.hi}`;
+  if (key === volKey || key === volLoading) return;
+  volLoading = key; badge("loading the stack…");
+  try {
+    const r = await fetch(`/api/volume/${unit.path}/${V.ch}?lo=${V.lo}&hi=${V.hi}`);
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
+    const shape = r.headers.get("X-Volume-Shape").split(",").map(Number);
+    const vox = r.headers.get("X-Voxel-Um").split(",").map(Number);
+    const data = new Uint8Array(await r.arrayBuffer());
+    if (volLoading !== key) return;                   // a newer request took over
+    const gl = glInit();
+    if (!volTex) volTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, volTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, shape[2], shape[1], shape[0], 0, gl.RED, gl.UNSIGNED_BYTE, data);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+      [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]])
+      gl.texParameteri(gl.TEXTURE_3D, k, v);
+    // The window puts the background noise mid-scale on a sparse stack, and a floor of a few
+    // percent then fills the whole box with it. So the floor starts at the stack's own 97th
+    // percentile — most voxels are background — unless one was set by hand on this unit.
+    const hist = new Uint32Array(256); for (let i = 0; i < data.length; i += 7) hist[data[i]]++;
+    const total = Math.ceil(data.length / 7), pct = q => { let acc = 0;
+      for (let k = 0; k < 256; k++) { acc += hist[k]; if (acc >= q * total) return Math.min(.95, k / 255); } return .95; };
+    // A MIP keeps the brightest of dozens of voxels along each ray, and the brightest of dozens
+    // of background voxels is well above the 97th percentile of one — so the MIP modes start
+    // higher, at 99.7, and glass (where each voxel only adds a little) at 97.
+    volMeta = { shape, vox, down: +(r.headers.get("X-Downsample") || 1), p97: pct(.97), p997: pct(.997) };
+    if (V.vol.thrFor !== unit.path) { V.vol.thr = volAutoThr(); $("volThr").value = V.vol.thr; }
+    volKey = key; badge("stack in 3D");
+  } catch (e) {
+    badge("3D: " + e.message, true); V.vol.on = false; volShow();
+  } finally { if (volLoading === key) volLoading = ""; }
+  volDraw();
+}
+function volShow() {
+  const on = !!(V.vol.on && unit && unit.z_step_um);
+  $("vol").hidden = !on; $("volBar").hidden = !on; $("volInfo").hidden = !on;
+  $("volBtn").classList.toggle("on", on);
+  $("stageHint").hidden = on;
+  ["volMip", "volGlass", "volDepth"].forEach(id => $(id).classList.toggle("on", "vol" + V.vol.mode[0].toUpperCase() + V.vol.mode.slice(1) === id));
+  $("volThr").value = V.vol.thr; $("volDen").value = V.vol.den; $("volGain").value = V.vol.gain; $("volZ").value = V.vol.z;
+  $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z;
+  $("volDen").disabled = V.vol.mode !== "glass";
+  if (on) volLoad();
+}
+// column-major 4x4, as WebGL wants them
+const m4mul = (a, b) => { const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; }
+  return o; };
+const v3 = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  norm: a => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; } };
+function volDraw() {
+  if (!V.vol.on || !GL || !volMeta || !unit) return;
+  const gl = GL, cv = $("vol"), dpr = window.devicePixelRatio || 1;
+  const W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  gl.viewport(0, 0, W, H);
+  const [D, Hy, Wx] = volMeta.shape, [vz, vy, vx] = volMeta.vox;
+  const phys = [Wx * vx, Hy * vy, D * vz * V.vol.z], big = Math.max(...phys);
+  const ext = phys.map(p => p / big);
+  const fov = 30 * Math.PI / 180, tanHalf = Math.tan(fov / 2), aspect = W / H;
+  const dist = (1.35 / tanHalf) * Math.max(1, 1 / aspect) * V.vol.dist;
+  const { yaw, pitch } = V.vol;
+  const eye = [dist * Math.sin(yaw) * Math.cos(pitch), dist * Math.sin(pitch), dist * Math.cos(yaw) * Math.cos(pitch)];
+  const F = v3.norm(v3.sub([0, 0, 0], eye)), R = v3.norm(v3.cross(F, [0, 1, 0])), U = v3.cross(R, F);
+  gl.useProgram(volProg);
+  const u = n => gl.getUniformLocation(volProg, n);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_3D, volTex); gl.uniform1i(u("vol"), 0);
+  gl.uniform3fv(u("ext"), ext); gl.uniform3fv(u("camPos"), eye); gl.uniform3fv(u("camR"), R);
+  gl.uniform3fv(u("camU"), U); gl.uniform3fv(u("camF"), F);
+  gl.uniform1f(u("tanHalf"), tanHalf); gl.uniform1f(u("aspect"), aspect);
+  gl.uniform1f(u("thr"), V.vol.thr); gl.uniform1f(u("gain"), V.vol.gain); gl.uniform1f(u("den"), V.vol.den);
+  gl.uniform1f(u("dt"), 1.0 / Math.max(Wx, Hy, D * V.vol.z * vz / Math.min(vx, vy)));
+  gl.uniform1i(u("mode"), { mip: 0, glass: 1, depth: 2 }[V.vol.mode]);
+  gl.disable(gl.DEPTH_TEST); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  // the box, and the current slice as a frame inside it: the slider still means something
+  const f = 1 / tanHalf, nr = .01, fr = 100;
+  const P = new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (fr + nr) / (nr - fr), -1, 0, 0, 2 * fr * nr / (nr - fr), 0]);
+  const Vw = new Float32Array([R[0], U[0], -F[0], 0, R[1], U[1], -F[1], 0, R[2], U[2], -F[2], 0,
+    -v3.dot(R, eye), -v3.dot(U, eye), v3.dot(F, eye), 1]);
+  const mvp = m4mul(P, Vw), [ex, ey, ez] = ext;
+  const c = (x, y, z) => [x * ex, y * ey, z * ez];
+  const edges = [];
+  for (const a of [-1, 1]) for (const b of [-1, 1]) {
+    edges.push(...c(-1, a, b), ...c(1, a, b), ...c(a, -1, b), ...c(a, 1, b), ...c(a, b, -1), ...c(a, b, 1));
+  }
+  const zs = 1 - 2 * (V.frame + .5) / D;
+  const slice = [...c(-1, -1, zs), ...c(1, -1, zs), ...c(1, -1, zs), ...c(1, 1, zs), ...c(1, 1, zs), ...c(-1, 1, zs), ...c(-1, 1, zs), ...c(-1, -1, zs)];
+  gl.useProgram(lineProg);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
+  const loc = gl.getAttribLocation(lineProg, "pos");
+  gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  gl.uniformMatrix4fv(gl.getUniformLocation(lineProg, "mvp"), false, mvp);
+  const lines = (arr, rgba) => { gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STREAM_DRAW);
+    gl.uniform4fv(gl.getUniformLocation(lineProg, "col"), rgba); gl.drawArrays(gl.LINES, 0, arr.length / 3); };
+  lines(edges, [.55, .6, .66, .35]);
+  if (!V.proj) lines(slice, [.31, .64, .87, .8]);
+  gl.disable(gl.BLEND);
+  const tz = D * vz;
+  $("volInfo").innerHTML = `<b>${(Wx * vx).toFixed(0)} × ${(Hy * vy).toFixed(0)} × ${tz.toFixed(0)} µm</b>`
+    + (V.vol.z !== 1 ? `  · depth drawn ×${V.vol.z}` : "") + (volMeta.down > 1 ? `  · xy ÷${volMeta.down} to fit` : "")
+    + `\nslice 0 faces you at the start` + (V.vol.mode === "depth" ? " · red = slice 0 → blue = the last" : "")
+    + `\ndrag turns · wheel zooms · double-click resets`;
+}
+// turning and zooming
+let volDrag = null;
+// Pointer capture: the drag keeps coming to the canvas even off its edge, and nothing reaches
+// the 2D stage underneath — whose own mousemove would otherwise read pixels off a hidden image.
+const cvol = $("vol");
+cvol.addEventListener("pointerdown", e => { e.stopPropagation(); e.preventDefault();
+  cvol.setPointerCapture(e.pointerId);
+  volDrag = { x: e.clientX, y: e.clientY, yaw: V.vol.yaw, pitch: V.vol.pitch }; cvol.classList.add("drag"); });
+cvol.addEventListener("pointermove", e => {
+  e.stopPropagation();
+  if (!volDrag) return;
+  V.vol.yaw = volDrag.yaw + (e.clientX - volDrag.x) * 0.01;
+  V.vol.pitch = Math.max(-1.55, Math.min(1.55, volDrag.pitch + (e.clientY - volDrag.y) * 0.01));
+  volDraw();
+});
+const volEnd = e => { if (!volDrag) return; volDrag = null; cvol.classList.remove("drag");
+  try { cvol.releasePointerCapture(e.pointerId); } catch (_) {} saveView(); };
+cvol.addEventListener("pointerup", volEnd); cvol.addEventListener("pointercancel", volEnd);
+["mousedown", "mousemove", "mouseup", "click"].forEach(t => cvol.addEventListener(t, e => e.stopPropagation()));
+$("vol").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagation();
+  V.vol.dist = Math.max(.25, Math.min(4, V.vol.dist * Math.exp(e.deltaY * 0.0012))); volDraw(); saveView(); }, { passive: false });
+$("vol").addEventListener("dblclick", e => { e.stopPropagation(); volReset(); });
+function volReset() { Object.assign(V.vol, { yaw: 0, pitch: 0, dist: 1 }); volDraw(); saveView(); }
+$("volReset").onclick = volReset;
+$("volBtn").onclick = () => { V.vol.on = !V.vol.on; volShow(); volDraw(); saveView(); };
+for (const [id, mode] of [["volMip", "mip"], ["volGlass", "glass"], ["volDepth", "depth"]])
+  $(id).onclick = () => { V.vol.mode = mode;
+    if (volMeta && V.vol.thrFor !== unit.path) V.vol.thr = volAutoThr();   // a hand-set floor stays
+    volShow(); volDraw(); saveView(); };
+function volAutoThr() { return V.vol.mode === "glass" ? volMeta.p97 : volMeta.p997; }
+$("volAuto").onclick = () => { if (!volMeta) return; V.vol.thr = volAutoThr(); V.vol.thrFor = "";
+  $("volThr").value = V.vol.thr; volDraw(); saveView(); };
+for (const [id, k] of [["volThr", "thr"], ["volDen", "den"], ["volGain", "gain"], ["volZ", "z"]])
+  $(id).oninput = () => { V.vol[k] = +$(id).value; if (k === "thr") V.vol.thrFor = unit.path; if (k === "z") $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z; volDraw(); saveView(); };
+new ResizeObserver(() => volDraw()).observe($("stage"));
 </script>
 </body>
 </html>

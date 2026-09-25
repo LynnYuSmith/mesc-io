@@ -79,6 +79,35 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   if (glass.peak < 60) fail("glass shows nothing: " + JSON.stringify(glass));
   if (await ev("document.getElementById('volDen').disabled")) fail("density is disabled in glass");
 
+  // the three orthogonal views, from the same bytes
+  await click("#orthoBtn");
+  if (await ev("document.getElementById('ortho').hidden")) fail("the XYZ views did not show");
+  if (!(await ev("document.getElementById('vol').hidden"))) fail("3D and XYZ are both on");
+  const g = JSON.parse(await ev("JSON.stringify(oGeom)"));
+  const [vz, vy, vx] = meta.vox, [D, Hy, Wx] = meta.shape;
+  const want = (D * vz) / (Hy * vy), got = g.xz.h / g.xy.h, got2 = g.yz.w / g.xy.w;
+  if (Math.abs(got - want) > .02 || Math.abs(got2 - (D * vz) / (Wx * vx)) > .02)
+    fail(`the side views are not at physical proportions: ${got} vs ${want}`);
+  const xyBox = await box("#oXY");
+  await send("Input.dispatchMouseEvent",{type:"mousePressed",x:xyBox.x+xyBox.width*.25,y:xyBox.y+xyBox.height*.75,button:"left",clickCount:1});
+  await send("Input.dispatchMouseEvent",{type:"mouseReleased",x:xyBox.x+xyBox.width*.25,y:xyBox.y+xyBox.height*.75,button:"left",clickCount:1});
+  await sleep(300);
+  const cr = JSON.parse(await ev("JSON.stringify({x:V.vol.cx,y:V.vol.cy,z:V.vol.cz})"));
+  if (Math.abs(cr.x - Wx * .25) > 3 || Math.abs(cr.y - Hy * .75) > 3) fail("a click in XY did not move the crosshair there: " + JSON.stringify(cr));
+  const z0 = cr.z;
+  for (let k = 0; k < 5; k++) await send("Input.dispatchMouseEvent",{type:"mouseWheel",x:xyBox.x+20,y:xyBox.y+20,deltaX:0,deltaY:100});
+  await sleep(300);
+  const z1 = await ev("V.vol.cz");
+  if (z1 !== Math.min(D - 1, z0 + 5)) fail(`the wheel in XY did not step the depth: ${z0} -> ${z1}`);
+  const xzImg = () => ev("(()=>{const c=document.getElementById('oXZ'),g=c.getContext('2d'),d=g.getImageData(0,0,c.width,c.height).data;let s=0;for(let i=0;i<d.length;i+=40)s+=d[i];return s;})()");
+  const slice = await xzImg(); await shot("ortho_slices");
+  await click("#oMax"); const proj = await xzImg(); await shot("ortho_max");
+  if (!(proj > slice)) fail(`max did not brighten the side view: ${slice} -> ${proj}`);
+  await click("#volBtn");                                     // 3D after XYZ: the texture path
+  await sleep(600);
+  if ((await look()).peak < 100) fail("3D after the XYZ views is black");
+  console.log("  ortho       :", JSON.stringify({xz_over_xy: +got.toFixed(3), want: +want.toFixed(3), cross: cr, z_after_wheel: z1, xz_sum: [slice, proj]}));
+
   // the view saves the 3D state and a reload brings it back
   await sleep(600);
   await send("Page.reload"); await sleep(2600);

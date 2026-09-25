@@ -116,6 +116,15 @@
   #volInfo { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted); pointer-events:none;
              background:rgba(18,20,23,.7); padding:2px 6px; border-radius:3px; white-space:pre; text-align:right }
   #volInfo b { color:var(--ink); font-weight:600 }
+  /* ---- orthogonal views: XY, YZ to its right, XZ below, one crosshair through all three ---- */
+  #ortho { position:absolute; inset:0; background:#000 }
+  #ortho[hidden] { display:none }
+  #ortho canvas { position:absolute; cursor:crosshair; image-rendering:auto }
+  #ortho .olbl { position:absolute; font-size:11px; color:var(--muted); pointer-events:none;
+                 background:rgba(18,20,23,.7); padding:1px 5px; border-radius:3px; white-space:nowrap }
+  #orthoBar { position:absolute; right:8px; top:8px; display:flex; gap:6px; align-items:center; font-size:11px;
+              background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
+  #orthoBar button { padding:2px 8px; font-size:11px }
 
   /* ---- instruments (right) ---- */
   #toolsCol { grid-area:tools; display:flex; flex-direction:column; min-height:0; position:relative;
@@ -203,8 +212,19 @@
         <label title="brightness">gain <input type="range" id="volGain" min="0.5" max="4" step="0.05"></label>
         <label title="stretch depth. ×1 is the true proportion; anything else exaggerates it and says so">z ×<input type="range" id="volZ" min="1" max="8" step="0.5"><span id="volZv"></span></label>
         <button id="volReset" title="look straight down the stack again (double-click does the same)">reset</button>
+        <button id="volAxY" title="look along y: the stack from its side, depth running down">side y</button>
+        <button id="volAxX" title="look along x: the stack from its other side">side x</button>
       </div>
       <div id="volInfo" hidden></div>
+      <div id="ortho" hidden>
+        <canvas id="oXY"></canvas><canvas id="oYZ"></canvas><canvas id="oXZ"></canvas>
+        <div class="olbl" id="lXY"></div><div class="olbl" id="lYZ"></div><div class="olbl" id="lXZ"></div>
+        <div id="orthoBar">
+          <button id="oMax" title="each view becomes the brightest along its own depth axis — side projections of the stack">max</button>
+          <button id="oCross" class="on" title="show the crosshair">cross</button>
+          <span class="hint" id="oPos"></span>
+        </div>
+      </div>
     </div>
     <div id="player">
       <button id="playBtn" title="space">▶</button>
@@ -226,6 +246,7 @@
       <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button>
       <button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button>
       <button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button>
+      <button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
     </div>
     <div class="instr" style="margin-top:6px">
       <button id="toolSpot" class="on" title="a disc where you click">spot</button>
@@ -421,8 +442,8 @@ function pick(i, restoring) {
   const mine = FILE.findings.filter(f => !f.units.length || f.units.some(u => unit.path.endsWith(u) || u.endsWith(unit.name)));
   $("findings").innerHTML = mine.map(f => `<div class="finding ${f.level}">${esc(f.message)}</div>`).join("");
   $("roiUnit").textContent = "· " + unit.name;
-  $("volBtn").hidden = !unit.z_step_um;
-  if (!unit.z_step_um && V.vol.on) V.vol.on = false;
+  $("volBtn").hidden = $("orthoBtn").hidden = !unit.z_step_um;
+  if (!unit.z_step_um) { V.vol.on = false; V.vol.ortho = false; }
   volShow();
   if (!restoring) V.sel = -1;
   draw();
@@ -440,7 +461,7 @@ function frameUrl() {
                 : `/api/frame/${unit.path}/${V.ch}/${V.frame}?${w}&n=${V.avg}`;
 }
 function draw() {
-  if (V.vol && V.vol.on) { volLoad(); volDraw(); }     // a new window or channel reloads the stack
+  if (V.vol && (V.vol.on || V.vol.ortho)) { volLoad(); volDraw(); orthoDraw(); }   // a new window or channel reloads the stack
   if (!unit) return;
   const url = frameUrl();
   if (url !== imgUrl) {
@@ -1146,10 +1167,13 @@ boot();
    the picture the max projection already shows; turning it is what adds the depth.
    ========================================================================================== */
 function volState(v) {
-  const d = { on: false, mode: "mip", thr: 0.5, thrFor: "", den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: 0, dist: 1 };
+  const d = { on: false, ortho: false, oMax: false, oCross: true, cx: -1, cy: -1, cz: -1,
+              mode: "mip", thr: 0.5, thrFor: "", den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: 0, dist: 1 };
   if (!v || typeof v !== "object") return d;
   const o = { ...d, ...v };
-  o.on = !!o.on; o.mode = ["mip", "glass", "depth"].includes(o.mode) ? o.mode : "mip";
+  o.on = !!o.on; o.ortho = !!o.ortho && !o.on; o.oMax = !!o.oMax; o.oCross = o.oCross !== false;
+  for (const k of ["cx", "cy", "cz"]) o[k] = Number.isInteger(o[k]) ? o[k] : -1;
+  o.mode = ["mip", "glass", "depth"].includes(o.mode) ? o.mode : "mip";
   const cl = (x, a, b, def) => (Number.isFinite(+x) ? Math.max(a, Math.min(b, +x)) : def);
   o.thr = cl(o.thr, 0, .95, d.thr); o.thrFor = typeof o.thrFor === "string" ? o.thrFor : ""; o.den = cl(o.den, .02, 1, d.den); o.gain = cl(o.gain, .5, 4, d.gain);
   o.z = cl(o.z, 1, 8, 1); o.yaw = cl(o.yaw, -1e4, 1e4, 0); o.pitch = cl(o.pitch, -1.55, 1.55, 0);
@@ -1200,6 +1224,7 @@ in vec3 pos; uniform mat4 mvp; void main() { gl_Position = mvp * vec4(pos, 1.0);
 const LFS = `#version 300 es
 precision mediump float; uniform vec4 col; out vec4 o; void main() { o = col; }`;
 
+let volData = null, volProj = {}, volTexKey = "";
 let GL = null, volTex = null, volKey = "", volMeta = null, volLoading = "", volProg = null, lineProg = null, lineBuf = null;
 function glProgram(gl, vs, fs) {
   const mk = (t, src) => { const sh = gl.createShader(t); gl.shaderSource(sh, src); gl.compileShader(sh);
@@ -1228,17 +1253,28 @@ async function volLoad() {
     const vox = r.headers.get("X-Voxel-Um").split(",").map(Number);
     const data = new Uint8Array(await r.arrayBuffer());
     if (volLoading !== key) return;                   // a newer request took over
-    const gl = glInit();
-    if (!volTex) volTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_3D, volTex);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, shape[2], shape[1], shape[0], 0, gl.RED, gl.UNSIGNED_BYTE, data);
-    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
-      [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]])
-      gl.texParameteri(gl.TEXTURE_3D, k, v);
-    // The window puts the background noise mid-scale on a sparse stack, and a floor of a few
-    // percent then fills the whole box with it. So the floor starts at the stack's own 97th
-    // percentile — most voxels are background — unless one was set by hand on this unit.
+    // The bytes are kept: the XYZ views cut them here, and 3D puts them on the GPU only when it
+    // is actually shown (volDraw -> volUpload), so the orthogonal views never need WebGL.
+    volData = data; volProj = {};
+    volMetaFrom(r, shape, vox, data);
+    volKey = key; badge("stack loaded");
+  } catch (e) {
+    badge("3D: " + e.message, true); V.vol.on = false; V.vol.ortho = false; volShow();
+  } finally { if (volLoading === key) volLoading = ""; }
+  volDraw(); orthoDraw();
+}
+function volUpload() {             // the bytes are here from an XYZ view; 3D wants them on the GPU
+  if (!volData || !volMeta) return;
+  const gl = glInit(), [D, Hy, Wx] = volMeta.shape;
+  if (!volTex) volTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_3D, volTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, Wx, Hy, D, 0, gl.RED, gl.UNSIGNED_BYTE, volData);
+  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+    [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]])
+    gl.texParameteri(gl.TEXTURE_3D, k, v);
+  volTexKey = volKey;
+}
+function volMetaFrom(r, shape, vox, data) {
     const hist = new Uint32Array(256); for (let i = 0; i < data.length; i += 7) hist[data[i]]++;
     const total = Math.ceil(data.length / 7), pct = q => { let acc = 0;
       for (let k = 0; k < 256; k++) { acc += hist[k]; if (acc >= q * total) return Math.min(.95, k / 255); } return .95; };
@@ -1247,22 +1283,22 @@ async function volLoad() {
     // higher, at 99.7, and glass (where each voxel only adds a little) at 97.
     volMeta = { shape, vox, down: +(r.headers.get("X-Downsample") || 1), p97: pct(.97), p997: pct(.997) };
     if (V.vol.thrFor !== unit.path) { V.vol.thr = volAutoThr(); $("volThr").value = V.vol.thr; }
-    volKey = key; badge("stack in 3D");
-  } catch (e) {
-    badge("3D: " + e.message, true); V.vol.on = false; volShow();
-  } finally { if (volLoading === key) volLoading = ""; }
-  volDraw();
 }
 function volShow() {
-  const on = !!(V.vol.on && unit && unit.z_step_um);
+  const isStack = !!(unit && unit.z_step_um);
+  const ortho = !!(V.vol.ortho && isStack);
+  $("ortho").hidden = !ortho; $("orthoBtn").classList.toggle("on", ortho);
+  $("oMax").classList.toggle("on", V.vol.oMax); $("oCross").classList.toggle("on", V.vol.oCross);
+  const on = !!(V.vol.on && isStack);
   $("vol").hidden = !on; $("volBar").hidden = !on; $("volInfo").hidden = !on;
   $("volBtn").classList.toggle("on", on);
-  $("stageHint").hidden = on;
+  $("stageHint").hidden = on || ortho;
   ["volMip", "volGlass", "volDepth"].forEach(id => $(id).classList.toggle("on", "vol" + V.vol.mode[0].toUpperCase() + V.vol.mode.slice(1) === id));
   $("volThr").value = V.vol.thr; $("volDen").value = V.vol.den; $("volGain").value = V.vol.gain; $("volZ").value = V.vol.z;
   $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z;
   $("volDen").disabled = V.vol.mode !== "glass";
-  if (on) volLoad();
+  if (on || ortho) volLoad();
+  if (ortho) orthoDraw();
 }
 // column-major 4x4, as WebGL wants them
 const m4mul = (a, b) => { const o = new Float32Array(16);
@@ -1272,7 +1308,8 @@ const v3 = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot: (a, b)
   cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
   norm: a => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; } };
 function volDraw() {
-  if (!V.vol.on || !GL || !volMeta || !unit) return;
+  if (!V.vol.on || !volMeta || !unit) return;
+  if (volTexKey !== volKey) volUpload();
   const gl = GL, cv = $("vol"), dpr = window.devicePixelRatio || 1;
   const W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
@@ -1349,7 +1386,10 @@ $("vol").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagation(
 $("vol").addEventListener("dblclick", e => { e.stopPropagation(); volReset(); });
 function volReset() { Object.assign(V.vol, { yaw: 0, pitch: 0, dist: 1 }); volDraw(); saveView(); }
 $("volReset").onclick = volReset;
-$("volBtn").onclick = () => { V.vol.on = !V.vol.on; volShow(); volDraw(); saveView(); };
+$("volBtn").onclick = () => { V.vol.on = !V.vol.on; if (V.vol.on) V.vol.ortho = false; volShow(); volDraw(); saveView(); };
+$("orthoBtn").onclick = () => { V.vol.ortho = !V.vol.ortho; if (V.vol.ortho) V.vol.on = false; volShow(); saveView(); };
+$("volAxY").onclick = () => { Object.assign(V.vol, { yaw: 0, pitch: Math.PI / 2 - 0.02 }); volDraw(); saveView(); };
+$("volAxX").onclick = () => { Object.assign(V.vol, { yaw: Math.PI / 2, pitch: 0 }); volDraw(); saveView(); };
 for (const [id, mode] of [["volMip", "mip"], ["volGlass", "glass"], ["volDepth", "depth"]])
   $(id).onclick = () => { V.vol.mode = mode;
     if (volMeta && V.vol.thrFor !== unit.path) V.vol.thr = volAutoThr();   // a hand-set floor stays
@@ -1360,6 +1400,110 @@ $("volAuto").onclick = () => { if (!volMeta) return; V.vol.thr = volAutoThr(); V
 for (const [id, k] of [["volThr", "thr"], ["volDen", "den"], ["volGain", "gain"], ["volZ", "z"]])
   $(id).oninput = () => { V.vol[k] = +$(id).value; if (k === "thr") V.vol.thrFor = unit.path; if (k === "z") $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z; volDraw(); saveView(); };
 new ResizeObserver(() => volDraw()).observe($("stage"));
+
+/* ------------------------------------------------------------------------------------------
+   Orthogonal views of a stack: XY at the crosshair's depth, YZ at its x (depth running to the
+   right), XZ at its y (depth running down) — Fiji's arrangement. Cut from the same bytes the 3D
+   view uses, in the browser, so stepping through is instant. Each pane is drawn at the stack's
+   physical proportions: a 1 µm slice under 0.14 µm pixels is seven pixels tall, not one.
+   "max" turns each pane into the brightest along its own depth axis, i.e. three projections.
+   ------------------------------------------------------------------------------------------ */
+function orthoCross() {
+  const [D, Hy, Wx] = volMeta.shape, v = V.vol;
+  if (!(v.cx >= 0 && v.cx < Wx)) v.cx = Wx >> 1;
+  if (!(v.cy >= 0 && v.cy < Hy)) v.cy = Hy >> 1;
+  v.cz = Math.max(0, Math.min(D - 1, V.frame));
+  return [D, Hy, Wx];
+}
+function orthoPlane(axis) {                 // Uint8 image of one pane, and its size in voxels
+  const [D, Hy, Wx] = volMeta.shape, a = volData, v = V.vol, max = v.oMax;
+  const key = axis + (max ? "M" : v[{ xy: "cz", xz: "cy", yz: "cx" }[axis]]);
+  if (volProj[key]) return volProj[key];
+  let w, h, px;
+  if (axis === "xy") { w = Wx; h = Hy; px = new Uint8Array(w * h);
+    if (max) for (let z = 0; z < D; z++) { const o = z * Hy * Wx; for (let i = 0; i < w * h; i++) if (a[o + i] > px[i]) px[i] = a[o + i]; }
+    else px.set(a.subarray(v.cz * Hy * Wx, (v.cz + 1) * Hy * Wx)); }
+  else if (axis === "xz") { w = Wx; h = D; px = new Uint8Array(w * h);        // rows are depth
+    for (let z = 0; z < D; z++) for (let y = max ? 0 : v.cy; y < (max ? Hy : v.cy + 1); y++) {
+      const o = (z * Hy + y) * Wx; for (let x = 0; x < Wx; x++) if (a[o + x] > px[z * w + x]) px[z * w + x] = a[o + x]; } }
+  else { w = D; h = Hy; px = new Uint8Array(w * h);                           // columns are depth
+    for (let z = 0; z < D; z++) for (let y = 0; y < Hy; y++) { const o = (z * Hy + y) * Wx;
+      for (let x = max ? 0 : v.cx; x < (max ? Wx : v.cx + 1); x++) if (a[o + x] > px[y * w + z]) px[y * w + z] = a[o + x]; } }
+  const out = { w, h, px };
+  if (max) volProj[key] = out;               // projections do not change with the crosshair
+  return out;
+}
+let oGeom = null;
+function orthoDraw() {
+  if (!V.vol.ortho || !volData || !volMeta || !unit) return;
+  const [D, Hy, Wx] = orthoCross(), [vz, vy, vx] = volMeta.vox;
+  const st = $("stage"), Sw = st.clientWidth, Sh = st.clientHeight, gap = 24, pad = 8;   // gap fits a label
+  const Wp = Wx * vx, Hp = Hy * vy, Dp = D * vz;                   // µm
+  const s = Math.min((Sw - gap - 2 * pad) / (Wp + Dp), (Sh - gap - 2 * pad - 36) / (Hp + Dp));
+  const xy = { x: pad, y: pad + 36, w: Wp * s, h: Hp * s };
+  const yz = { x: xy.x + xy.w + gap, y: xy.y, w: Dp * s, h: xy.h };
+  const xz = { x: xy.x, y: xy.y + xy.h + gap, w: xy.w, h: Dp * s };
+  oGeom = { xy, yz, xz, D, Hy, Wx };
+  const v = V.vol, dz = unit.z_step_um;
+  for (const [axis, r] of [["xy", xy], ["yz", yz], ["xz", xz]]) {
+    const c = $("o" + axis.toUpperCase()), dpr = window.devicePixelRatio || 1;
+    Object.assign(c.style, { left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px" });
+    c.width = Math.max(1, Math.round(r.w * dpr)); c.height = Math.max(1, Math.round(r.h * dpr));
+    const pl = orthoPlane(axis), off = document.createElement("canvas");
+    off.width = pl.w; off.height = pl.h;
+    const og = off.getContext("2d"), im = og.createImageData(pl.w, pl.h);
+    for (let i = 0; i < pl.px.length; i++) { const q = pl.px[i]; im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = q; im.data[4 * i + 3] = 255; }
+    og.putImageData(im, 0, 0);
+    const g = c.getContext("2d");
+    g.imageSmoothingEnabled = axis !== "xy";        // depth is resampled ~7x; xy stays pixel-true
+    g.drawImage(off, 0, 0, c.width, c.height);
+    if (v.oCross) {                                  // where the other two cut this one
+      const fx = (v.cx + .5) / Wx, fy = (v.cy + .5) / Hy, fz = (v.cz + .5) / D;
+      const [hx, hy] = { xy: [fx, fy], yz: [fz, fy], xz: [fx, fz] }[axis];
+      g.strokeStyle = "rgba(78,163,221,.75)"; g.lineWidth = dpr; g.setLineDash([4 * dpr, 4 * dpr]);
+      g.beginPath(); g.moveTo(hx * c.width, 0); g.lineTo(hx * c.width, c.height);
+      g.moveTo(0, hy * c.height); g.lineTo(c.width, hy * c.height); g.stroke(); g.setLineDash([]);
+    }
+  }
+  const um = (i, n, step) => ((i - (n - 1) / 2) * step).toFixed(1);
+  const lab = (id, r, text) => Object.assign($(id), { textContent: text }).style.cssText = `left:${r.x + 4}px;top:${r.y - 18}px`;
+  lab("lXY", xy, v.oMax ? "XY · brightest over depth" : `XY · z ${v.cz} (${um(v.cz, D, dz)} µm)`);
+  lab("lYZ", yz, v.oMax ? "YZ · brightest over x" : `YZ · x ${v.cx}`);
+  lab("lXZ", xz, v.oMax ? "XZ · brightest over y" : `XZ · y ${v.cy}`);
+  $("oPos").textContent = `x ${v.cx} · y ${v.cy} · z ${v.cz}` + (volMeta.down > 1 ? ` · xy ÷${volMeta.down}` : "");
+  $("frameLbl").textContent = `slice ${v.cz} / ${D - 1} · ${um(v.cz, D, dz)} µm`;
+}
+function orthoHit(ev) {                      // which pane, and the voxel under the pointer
+  if (!oGeom) return null;
+  const sr = $("stage").getBoundingClientRect(), X = ev.clientX - sr.left, Y = ev.clientY - sr.top;
+  for (const axis of ["xy", "yz", "xz"]) { const r = oGeom[axis];
+    if (X >= r.x && X < r.x + r.w && Y >= r.y && Y < r.y + r.h) return { axis, fx: (X - r.x) / r.w, fy: (Y - r.y) / r.h }; }
+  return null;
+}
+let oDrag = false;
+function orthoSet(h) {
+  const { D, Hy, Wx } = oGeom, v = V.vol, cl = (f, n) => Math.max(0, Math.min(n - 1, Math.floor(f * n)));
+  if (h.axis === "xy") { v.cx = cl(h.fx, Wx); v.cy = cl(h.fy, Hy); }
+  else if (h.axis === "yz") { v.cy = cl(h.fy, Hy); V.frame = cl(h.fx, D); }
+  else { v.cx = cl(h.fx, Wx); V.frame = cl(h.fy, D); }
+  $("frame").value = V.frame; orthoDraw();
+}
+$("ortho").addEventListener("pointerdown", e => { e.stopPropagation(); e.preventDefault();
+  const h = orthoHit(e); if (!h) return; oDrag = true; $("ortho").setPointerCapture(e.pointerId); orthoSet(h); });
+$("ortho").addEventListener("pointermove", e => { e.stopPropagation(); if (!oDrag) return; const h = orthoHit(e); if (h) orthoSet(h); });
+const oEnd = e => { if (!oDrag) return; oDrag = false; try { $("ortho").releasePointerCapture(e.pointerId); } catch (_) {} saveView(); };
+$("ortho").addEventListener("pointerup", oEnd); $("ortho").addEventListener("pointercancel", oEnd);
+["mousedown", "mousemove", "mouseup", "click", "dblclick"].forEach(t => $("ortho").addEventListener(t, e => e.stopPropagation()));
+$("ortho").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagation();
+  const h = orthoHit(e); if (!h || !oGeom) return;
+  const d = e.deltaY > 0 ? 1 : -1, v = V.vol, { D, Hy, Wx } = oGeom;
+  if (h.axis === "xy") { V.frame = Math.max(0, Math.min(D - 1, V.frame + d)); $("frame").value = V.frame; }
+  else if (h.axis === "xz") v.cy = Math.max(0, Math.min(Hy - 1, v.cy + d));
+  else v.cx = Math.max(0, Math.min(Wx - 1, v.cx + d));
+  orthoDraw(); saveView(); }, { passive: false });
+$("oMax").onclick = () => { V.vol.oMax = !V.vol.oMax; volShow(); saveView(); };
+$("oCross").onclick = () => { V.vol.oCross = !V.vol.oCross; volShow(); saveView(); };
+new ResizeObserver(() => orthoDraw()).observe($("stage"));
 </script>
 </body>
 </html>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3 — 2026-09-25
+
+**A ceiling in the 3D view.** Beside the floor there is now a **ceiling**, and the window runs
+between the two, so dim structure stretches to the full range. Above the ceiling a voxel is
+**cut** — gone, so the brightest blobs stop hiding the axons around and behind them — or, with
+**clip**, held at white. A cut takes each blob's rim with it (everything within 1.5 µm of a
+voxel above the ceiling, at the stack's own voxel size): cutting only the brightest voxels left
+each blob as a hollow shell that the window stretched back to white. The cut is computed when
+the slider is let go; a ceiling of 1 is the picture as before.
+
 ## 0.3.2 — 2026-09-25
 
 **A z-stack can be looked at as a stack.** The viewer counts a stack's slices in microns rather

@@ -3,7 +3,7 @@ from .errors import MescIOError
 from .reader import Channel, MescError, MescFile, Unit
 from .values import ConversionError, ConversionWarning, from_reader_units, to_reader_units
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 __all__ = ["MescFile", "Unit", "Channel", "MescError", "MescIOError",
            "to_reader_units", "from_reader_units", "ConversionError", "ConversionWarning",
            "__version__"]

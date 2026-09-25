@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 — 2026-09-25
+
+**A z-stack can be looked at as a stack.** The viewer counts a stack's slices in microns rather
+than calling them frames in seconds, and offers **max** beside **mean**, since a bouton lives in
+a few slices of thirty and an average dilutes it. **3D** puts the whole stack on the GPU and
+lets you turn it: as a maximum-intensity projection, as **glass** (semi-transparent, each voxel
+adding a little light and hiding a little of what is behind it), or as **depth**, a MIP
+coloured by how deep its brightest voxel lies — an axon's colour says where it runs. The box is
+scaled by the voxel size, so a stack of 1 µm slices over 0.14 µm pixels is the slab it is, not
+a cube; depth can be stretched and says so. The floor starts at the stack's own percentile so
+background noise does not fill the box. **XYZ** cuts the stack three ways through one
+crosshair, Fiji's orthogonal views, with **max** turning each pane into a side projection.
+WebGL2 only, no library; the state is saved with the view.
 
 **Presets you can save.** `mesc-io preset save NAME` stores a set of registration settings
 (rigid or non-rigid, block edge, both shift caps, any Suite2p option) as a small JSON file in

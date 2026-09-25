@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mesc-io"
-version = "0.3.1"
+version = "0.3.2"
 description = "Read Femtonics .mesc two-photon recordings, in the units the native reader shows"
 readme = "README.md"
 requires-python = ">=3.9"

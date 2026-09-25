@@ -71,6 +71,8 @@ course along the bottom, raw or dF/F by our pipeline's method (`mesc_io.dff`, nu
 held against the pipeline's functions in the tests), stacked or overlaid, zoomed by dragging a box. ROIs belong to the
 unit they were drawn on and are saved as you go, beside the working directory, never beside
 the raw file; so is the view itself, so reopening the file puts you back where you were.
+A z-stack is shown in slices and microns, with a max projection, a **3D** view you can turn
+(MIP, semi-transparent, or coloured by depth) and **XYZ** orthogonal views through one crosshair.
 Layout and decisions: [docs/viewer_design.md](docs/viewer_design.md).
 
 To try it without a recording, make one:

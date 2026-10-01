@@ -145,7 +145,7 @@ def test_the_crameri_tables_are_whole_and_exact():
     (0.981354, 0.800406, 0.981267), i.e. #011959 … #facc fa in 8 bits. Its licence ships too."""
     import json
     import re
-    page = (Path(__file__).resolve().parents[1] / "src" / "mesc_io" / "viewer.html").read_text()
+    page = (Path(__file__).resolve().parents[1] / "src" / "mesc_io" / "viewer.html").read_text(encoding="utf-8")
     names = re.findall(r'^  (\w+): "([0-9a-f]+)",$', page, flags=re.M)
     tables = dict(names)
     seq = json.loads(re.search(r"CRAMERI_SEQ = (\[.*?\])", page).group(1).replace("'", '"'))
@@ -156,4 +156,4 @@ def test_the_crameri_tables_are_whole_and_exact():
     assert b[:6] == "%02x%02x%02x" % tuple(round(v * 255) for v in (0.005193, 0.098238, 0.349842))
     assert b[-6:] == "%02x%02x%02x" % tuple(round(v * 255) for v in (0.981354, 0.800406, 0.981267))
     lic = Path(__file__).resolve().parents[1] / "src" / "mesc_io" / "third_party" / "crameri_LICENSE.txt"
-    assert "Fabio Crameri" in lic.read_text()
+    assert "Fabio Crameri" in lic.read_text(encoding="utf-8")

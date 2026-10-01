@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The palette test read `viewer.html` without saying UTF-8, so on Windows (cp1252) it failed with
+  `UnicodeDecodeError` — the `v0.3.4` tag's CI run is red on Windows for that reason only; the
+  0.3.4 package itself is unaffected (tests do not ship). Fixed on `main` (`1befee7`); the next
+  release tag will be green.
+
 ## 0.3.4 — 2026-10-01
 
 **The recording in fixed limits, as it was seen on the rig.** Every frame, mean and thumbnail now

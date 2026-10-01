@@ -49,7 +49,7 @@ what makes a dim bouton visible while scrubbing.
 Double-click or a small ⤢ returns to the whole frame. Wheel zooms around the cursor, drag pans
 when zoomed. ROIs are drawn in image coordinates so they stay put under any zoom.
 
-*Contrast* (lo/hi percentiles) lives in instruments, folded away — set once per file, not once
+*Contrast* lives in instruments, folded away: by default a **fixed** window in reader units, from the file's own LUT and editable per unit and channel; **auto %** (lo/hi percentiles of each frame) is the alternative; a palette per channel and an **overlay** of all channels sit beside it — set once per file, not once
 a minute.
 
 **instruments**

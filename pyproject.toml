@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mesc-io"
-version = "0.3.3"
+version = "0.3.4"
 description = "Read Femtonics .mesc two-photon recordings, in the units the native reader shows"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -49,4 +49,4 @@ where = ["src"]
 # `mesc-io view` fails at the first request with a file-not-found — on someone else's machine,
 # not on the one it was built on.
 [tool.setuptools.package-data]
-mesc_io = ["viewer.html"]
+mesc_io = ["viewer.html", "third_party/crameri_LICENSE.txt"]

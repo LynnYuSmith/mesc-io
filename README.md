@@ -73,6 +73,17 @@ unit they were drawn on and are saved as you go, beside the working directory, n
 the raw file; so is the view itself, so reopening the file puts you back where you were.
 A z-stack is shown in slices and microns, with a max projection, a **3D** view you can turn
 (MIP, semi-transparent, or coloured by depth) and **XYZ** orthogonal views through one crosshair.
+
+The picture is drawn in **fixed limits**: by default the display window the recording was
+saved with on the rig (the file's own LUT, typically 0–2000 in reader units), the same for every
+frame, so a frame that is dimmer looks dimmer — bleaching, a change of laser power or a field
+drifting out of focus show while you scrub. Type other limits per unit and channel (they live in
+the view, never in the file; **file** brings the saved ones back), or switch to **auto %**, which
+stretches each frame on its own percentiles and shows shape rather than brightness. Each channel
+has a palette: its colour from the file, a single colour, or one of 25 of Fabio Crameri's
+perceptually uniform Scientific colour maps (batlow, oslo, lajolla, vik, roma, …). **Overlay**
+puts all channels in one picture, each through its own limits and colour.
+
 Layout and decisions: [docs/viewer_design.md](docs/viewer_design.md).
 
 To try it without a recording, make one:
@@ -101,3 +112,8 @@ F. Kamari, for the idea. Claude Code, for the debugging.
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+The viewer's colour maps include Fabio Crameri's Scientific colour maps (v8.0, MIT, © 2020 Fabio
+Crameri; [licence](src/mesc_io/third_party/crameri_LICENSE.txt)). If a figure made with them goes
+into a paper, cite: Crameri, F. (2018). *Scientific colour maps*. Zenodo.
+https://doi.org/10.5281/zenodo.1243862

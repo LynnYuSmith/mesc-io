@@ -15,7 +15,9 @@ itself — all from `mesc-io`, all read from the file's attributes rather than a
 
 Endpoints:
     GET  /api/file                          → units, rates, pixel sizes, comments, check findings
-    GET  /api/frame/{unit}/{ch}/{i}         → PNG of one frame       (?lo=&hi= percentile window,
+    GET  /api/frame/{unit}/{ch}/{i}         → PNG of one frame       (?vmin=&vmax= fixed window in
+                                              reader units — the viewer's default, from the file's
+                                              LUT — or ?lo=&hi= percentiles of the frame itself,
                                               ?n= average of n frames centred on i)
     GET  /api/mean/{unit}/{ch}              → PNG of the mean image  (?lo=&hi=)
     GET  /api/pixel/{unit}/{ch}?x=&y=&i=&n=  → one pixel's value in reader units (n frames averaged;
@@ -121,14 +123,21 @@ def _mask_of(roi: dict, h: int, w: int) -> np.ndarray:
     return mask
 
 
-def _png(img: np.ndarray, lo_pct: float, hi_pct: float) -> bytes:
-    """8-bit PNG of one frame, windowed on percentiles of ITS OWN values.
+def _png(img: np.ndarray, window) -> bytes:
+    """8-bit PNG of one frame through a display window.
 
-    Percentiles rather than min/max: a single hot pixel otherwise drives the whole frame black,
-    which is the usual reason a field "looks empty" in a viewer.
+    ``window`` is ``("fixed", lo, hi)`` — values in reader units, the same for every frame, so a
+    frame that is dimmer IS darker on screen (bleaching, a laser change, a field leaving focus)
+    — or ``("pct", lo_pct, hi_pct)``, stretched on percentiles of ITS OWN values: every frame
+    looks equally bright, which shows shape and hides brightness. Percentiles rather than
+    min/max there: a single hot pixel otherwise drives the whole frame black.
     """
     a = np.asarray(img, dtype=np.float32)
-    lo, hi = np.percentile(a, [lo_pct, hi_pct])
+    kind, p, q = window
+    if kind == "fixed":
+        lo, hi = float(p), float(q)
+    else:
+        lo, hi = np.percentile(a, [p, q])
     if hi <= lo:
         hi = lo + 1.0
     b = np.clip((a - lo) / (hi - lo), 0, 1)
@@ -596,6 +605,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "pixel_size_um": u.pixel_size_um, "pixel_size_y_um": u.pixel_size_y_um,
                 "z_step_um": u.z_step_um, "comment": u.comment,
                 "channels": [c.name for c in u.channels],
+                "luts": [list(c.lut) if c.lut else None for c in u.channels],
+                "colours": [c.colour for c in u.channels],
                 "stage_um": u.stage_um,
                 "stage_rel_um": u.stage_rel_um,
             } for u in f.units()]
@@ -606,7 +617,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _window(q):
-        return float(q.get("lo", ["1"])[0]), float(q.get("hi", ["99.5"])[0])
+        """``?vmin=&vmax=`` (reader units) -> a fixed window; otherwise ``?lo=&hi=`` percentiles."""
+        if "vmin" in q and "vmax" in q:
+            return ("fixed", float(q["vmin"][0]), float(q["vmax"][0]))
+        return ("pct", float(q.get("lo", ["1"])[0]), float(q.get("hi", ["99.5"])[0]))
 
     def _volume(self, unit, ch, q):
         """A z-stack, whole, as 8-bit voxels for the browser to render in 3D.
@@ -621,7 +635,7 @@ class _Handler(BaseHTTPRequestHandler):
         is neither small nor meaningful. Above ``MAX_VOLUME_VOXELS`` the frame is block-averaged
         in x and y by an integer factor, which is returned rather than hidden.
         """
-        lo_pct, hi_pct = self._window(q)
+        win = self._window(q)
         with self._file() as f:
             u = f.unit(unit)
             if not u.z_step_um:
@@ -637,8 +651,11 @@ class _Handler(BaseHTTPRequestHandler):
                                max_gb=None)[:, :hh, :ww]
                 vol[z0:z0 + len(block)] = block.reshape(
                     len(block), hh // k, k, ww // k, k).mean(axis=(2, 4))
-        sample = vol[:, ::max(1, vol.shape[1] // 128), ::max(1, vol.shape[2] // 128)]
-        lo, hi = np.percentile(sample, [lo_pct, hi_pct])
+        if win[0] == "fixed":
+            lo, hi = win[1], win[2]
+        else:
+            sample = vol[:, ::max(1, vol.shape[1] // 128), ::max(1, vol.shape[2] // 128)]
+            lo, hi = np.percentile(sample, [win[1], win[2]])
         if hi <= lo:
             hi = lo + 1.0
         body = (np.clip((vol - lo) / (hi - lo), 0, 1) * 255).astype(np.uint8).tobytes()
@@ -673,7 +690,7 @@ class _Handler(BaseHTTPRequestHandler):
             lo = max(0, hi - n)
             block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)
             img = block[0] if n == 1 else block.mean(axis=0)
-        self._send(_png(img, *self._window(q)), "image/png")
+        self._send(_png(img, self._window(q)), "image/png")
 
     def _pixel(self, unit, ch, q):
         """The value under the cursor, in reader units — of the frame window on screen, or of
@@ -723,7 +740,7 @@ class _Handler(BaseHTTPRequestHandler):
         k = max(1, int(np.ceil(max(h, w) / 96)))
         hh, ww = (h // k) * k, (w // k) * k
         small = img[:hh, :ww].reshape(hh // k, k, ww // k, k).mean(axis=(1, 3))
-        self._send(_png(small, *self._window(q)), "image/png")
+        self._send(_png(small, self._window(q)), "image/png")
 
     def _mean_image(self, unit, ch, mode="mean"):
         """The whole third axis collapsed into one picture — averaged, or its brightest.
@@ -750,7 +767,7 @@ class _Handler(BaseHTTPRequestHandler):
             img = self._cache.get(key)
         if img is None:
             img = self._mean_image(unit, ch, mode)
-        self._send(_png(img, *self._window(q)), "image/png")
+        self._send(_png(img, self._window(q)), "image/png")
 
     def _trace(self, unit, ch, q):
         """The time course of a small disc — click a bouton, see whether it does anything.

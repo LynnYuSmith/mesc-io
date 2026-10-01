@@ -137,3 +137,23 @@ def test_every_id_the_script_asks_for_exists_in_the_markup():
     asked = set(re.findall(r'\$\("([A-Za-z0-9_]+)"\)', script))
     missing = sorted(asked - ids)
     assert not missing, f"the script asks for ids the markup lacks: {missing}"
+
+
+def test_the_crameri_tables_are_whole_and_exact():
+    """Every Crameri map the menu offers has a full 256-step table in the page, and the tables are
+    the published values: batlow starts at (0.005193, 0.098238, 0.349842) and ends at
+    (0.981354, 0.800406, 0.981267), i.e. #011959 … #facc fa in 8 bits. Its licence ships too."""
+    import json
+    import re
+    page = (Path(__file__).resolve().parents[1] / "src" / "mesc_io" / "viewer.html").read_text()
+    names = re.findall(r'^  (\w+): "([0-9a-f]+)",$', page, flags=re.M)
+    tables = dict(names)
+    seq = json.loads(re.search(r"CRAMERI_SEQ = (\[.*?\])", page).group(1).replace("'", '"'))
+    div = json.loads(re.search(r"CRAMERI_DIV = (\[.*?\])", page).group(1).replace("'", '"'))
+    assert seq and div and set(seq + div) == set(tables)
+    assert all(len(h) == 256 * 6 for h in tables.values())
+    b = tables["batlow"]
+    assert b[:6] == "%02x%02x%02x" % tuple(round(v * 255) for v in (0.005193, 0.098238, 0.349842))
+    assert b[-6:] == "%02x%02x%02x" % tuple(round(v * 255) for v in (0.981354, 0.800406, 0.981267))
+    lic = Path(__file__).resolve().parents[1] / "src" / "mesc_io" / "third_party" / "crameri_LICENSE.txt"
+    assert "Fabio Crameri" in lic.read_text()

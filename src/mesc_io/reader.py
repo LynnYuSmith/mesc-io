@@ -22,7 +22,7 @@ import warnings
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -59,6 +59,13 @@ class Channel:
     #: Reading it "in reader units" then returns the stored integers unchanged, which is worth
     #: a warning: the −786 the reader removes is exactly what a missing attribute would keep.
     converted: bool = True
+    #: The display window the acquisition software saved for this channel
+    #: (``Channel_N_LUT_VecBounds``), in reader units: what the recording looked like on the rig.
+    #: None when the file carries no LUT.
+    lut: Optional[Tuple[float, float]] = None
+    #: The channel's display colour from the same LUT (``Channel_N_LUT_VecColors``, the top
+    #: colour as 0xRRGGBB), e.g. "#00ff00" for green. None when absent or black.
+    colour: Optional[str] = None
 
     @property
     def dataset(self) -> str:
@@ -116,6 +123,34 @@ class Unit:
 
 def _attr(attrs, name):
     return attrs[name] if name in attrs else None
+
+
+def _lut_bounds(value) -> Optional[Tuple[float, float]]:
+    """``[lo, …, hi]`` LUT breakpoints -> (lo, hi), or None when absent or not a usable window."""
+    if value is None:
+        return None
+    try:
+        v = np.asarray(value, dtype=float).ravel()
+    except (TypeError, ValueError):
+        return None
+    v = v[np.isfinite(v)]
+    if v.size < 2 or not v.max() > v.min():
+        return None
+    return float(v.min()), float(v.max())
+
+
+def _lut_colour(value) -> Optional[str]:
+    """``[…, 0xRRGGBB]`` LUT colours -> "#rrggbb" of the brightest end, or None."""
+    if value is None:
+        return None
+    try:
+        v = np.asarray(value).ravel()
+        top = int(v[-1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not 0 < top <= 0xFFFFFF:
+        return None
+    return f"#{top:06x}"
 
 
 def _float_or_none(value) -> Optional[float]:
@@ -279,7 +314,9 @@ class MescFile:
             channels.append(Channel(index=i, name=cn,
                                     offset=0.0 if off is None else off,
                                     scale=1.0 if sc is None else sc,
-                                    converted=off is not None and sc is not None))
+                                    converted=off is not None and sc is not None,
+                                    lut=_lut_bounds(_attr(a, f"{cn}_LUT_VecBounds")),
+                                    colour=_lut_colour(_attr(a, f"{cn}_LUT_VecColors"))))
         first = grp[chan_names[0]]
         n, h, w = (first.shape + (0, 0, 0))[:3]
         # The third axis is TIME in a recording and DEPTH in a z-stack, and the file says

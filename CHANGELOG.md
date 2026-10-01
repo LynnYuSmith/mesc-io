@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.4 — 2026-10-01
+
+**The recording in fixed limits, as it was seen on the rig.** Every frame, mean and thumbnail now
+opens through a **fixed window in reader units** — by default the window the recording was saved
+with (`Channel_N_LUT_VecBounds`, typically 0–2000) — so a dimmer frame IS darker: bleaching, a
+laser change or a field drifting out of focus show while scrubbing. Min and max can be typed per
+unit and channel; that lives in the view, never in the `.mesc`, and **file** brings the saved
+window back. The per-frame stretch is one click away as **auto %** (shape, not brightness).
+
+**Palettes.** Each channel shows in its own colour from the file (`Channel_N_LUT_VecColors`), in
+a single colour (grey, green, red, magenta, cyan, blue, yellow), or in one of 25 of **Fabio
+Crameri's Scientific colour maps** (v8.0: 20 sequential incl. batlow, batlowK, oslo, lajolla, and
+5 diverging incl. vik, roma, berlin) — perceptually uniform and readable with colour-vision
+deficiency. The tables are the published 256-step values, embedded by `tools/gen_crameri_luts.py`;
+MIT licence in `src/mesc_io/third_party/crameri_LICENSE.txt`. Cite: Crameri, F. (2018).
+Scientific colour maps. Zenodo. https://doi.org/10.5281/zenodo.1243862
+
+**Overlay** shows all channels at once, each through its own window and colour, added and
+clipped. The reader exposes the saved window and colour as `Channel.lut` and `Channel.colour`.
+Thumbnails that fail under the first burst of requests on a large file are asked for again.
+
 ## 0.3.3 — 2026-09-25
 
 **A ceiling in the 3D view.** Beside the floor there is now a **ceiling**, and the window runs

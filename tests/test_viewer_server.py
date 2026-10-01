@@ -46,6 +46,8 @@ def recording(tmp_path):
         u.create_dataset("Channel_0", data=data)
         u.attrs["Channel_0_Conversion_ConversionLinearOffset"] = OFFSET
         u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
+        # the display window saved on the rig, in reader units (MESc writes [0, 2000] by default)
+        u.attrs["Channel_0_LUT_VecBounds"] = np.array([0.0, 2000.0])
         u.attrs["ZAxisConversionConversionLinearScale"] = 16.0
         u.attrs["XAxisConversionConversionLinearScale"] = 0.5
         u.attrs["Comment"] = np.frombuffer(b"area1 135deg\0", dtype=np.uint8)
@@ -451,3 +453,65 @@ def test_a_big_stack_is_shrunk_in_xy_and_says_by_how_much(stack_server, monkeypa
     assert h["X-Volume-Shape"] == "5,3,4" and h["X-Downsample"] == "2"
     assert [float(v) for v in h["X-Voxel-Um"].split(",")] == [2.0, 0.5, 0.5]
     assert len(body) == 5 * 3 * 4
+
+
+# --- the fixed display window -------------------------------------------------------------
+
+def _decode_grey_png(body):
+    """The viewer's own PNGs: 8-bit grey, one IDAT, filter byte 0 on every row."""
+    import struct
+    import zlib
+    pos, idat = 8, b""
+    w = h = 0
+    while pos < len(body):
+        n, kind = struct.unpack(">I4s", body[pos:pos + 8])
+        chunk = body[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h = struct.unpack(">II", chunk[:8])
+        elif kind == b"IDAT":
+            idat += chunk
+        pos += 12 + n
+    raw = zlib.decompress(idat)
+    rows = [raw[y * (w + 1) + 1:(y + 1) * (w + 1)] for y in range(h)]
+    return np.array([list(r) for r in rows], dtype=np.uint8)
+
+
+def test_describe_carries_each_channels_saved_window(server):
+    d = get_json(server + "/api/file")
+    assert d["units"][0]["luts"] == [[0.0, 2000.0]]
+
+
+def test_a_fixed_window_shows_brightness_the_percentile_window_hides(server):
+    """Frame 0 and frame 9 differ by 9 counts everywhere. Stretched on their own percentiles
+    they look the same; through one fixed window the later frame is brighter, by exactly the
+    9 counts scaled into 0..255. This is the difference the fixed window exists to show."""
+    pct0 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/0?lo=0&hi=100")[0])
+    pct9 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/9?lo=0&hi=100")[0])
+    # reader units: 1000 + k - 786 = 214 + k, column k%8 + 500. Window 200..800.
+    fx0 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/0?vmin=200&vmax=800")[0])
+    fx9 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/9?vmin=200&vmax=800")[0])
+    background = lambda a, k: np.delete(a, k % 8, axis=1)
+    assert background(pct0, 0).mean() == background(pct9, 9).mean(), "percentiles should hide it"
+    assert background(fx0, 0).max() == int((214 - 200) / 600 * 255)
+    assert background(fx9, 9).max() == int((223 - 200) / 600 * 255)
+    assert background(fx9, 9).mean() > background(fx0, 0).mean()
+
+
+def test_a_fixed_window_clips_rather_than_rescales(server):
+    """Values above the window are white, below it black — never stretched back into range."""
+    img = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/0?vmin=0&vmax=300")[0])
+    assert img[:, 0].min() == 255          # the bright column, 714, is above 300
+    lo = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/0?vmin=900&vmax=1000")[0])
+    assert lo.max() == 0                   # everything is below 900
+
+
+def test_the_reader_reads_the_lut_and_tolerates_its_absence(recording, tmp_path):
+    with MescFile(recording) as f:
+        assert f.unit("MSession_0/MUnit_0").channels[0].lut == (0.0, 2000.0)
+    bare = tmp_path / "bare.mesc"
+    with h5py.File(bare, "w") as f:
+        u = f.create_group("MSession_0").create_group("MUnit_0")
+        u.create_dataset("Channel_0", data=np.zeros((2, 4, 4), dtype=np.uint16))
+        u.attrs["Channel_0_LUT_VecBounds"] = np.array([5.0, 5.0])   # not a window
+    with MescFile(bare) as f:
+        assert f.unit("MSession_0/MUnit_0").channels[0].lut is None

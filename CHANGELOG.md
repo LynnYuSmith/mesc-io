@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.8 — 2026-10-05
+
+**A steady picture while scrubbing.**
 
 - **auto % no longer flickers.** It used to stretch each frame on that frame's own percentiles,
   so the picture pumped while scrubbing: on a real 256 × 256 recording the per-frame upper

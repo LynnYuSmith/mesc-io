@@ -481,20 +481,33 @@ def test_describe_carries_each_channels_saved_window(server):
     assert d["units"][0]["luts"] == [[0.0, 2000.0]]
 
 
-def test_a_fixed_window_shows_brightness_the_percentile_window_hides(server):
-    """Frame 0 and frame 9 differ by 9 counts everywhere. Stretched on their own percentiles
-    they look the same; through one fixed window the later frame is brighter, by exactly the
-    9 counts scaled into 0..255. This is the difference the fixed window exists to show."""
+def test_a_fixed_window_shows_brightness_and_so_does_the_whole_unit_percentile_window(server):
+    """Frame 0 and frame 9 differ by 9 counts everywhere. Through one fixed window the later
+    frame is brighter, by exactly the 9 counts scaled into 0..255. The percentile window is now
+    the WHOLE unit's (one window for every frame), so it shows the same thing: the later frame is
+    brighter there too. Stretching each frame on its own percentiles made them look the same,
+    and made scrubbing flicker."""
     pct0 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/0?lo=0&hi=100")[0])
     pct9 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/9?lo=0&hi=100")[0])
     # reader units: 1000 + k - 786 = 214 + k, column k%8 + 500. Window 200..800.
     fx0 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/0?vmin=200&vmax=800")[0])
     fx9 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/9?vmin=200&vmax=800")[0])
     background = lambda a, k: np.delete(a, k % 8, axis=1)
-    assert background(pct0, 0).mean() == background(pct9, 9).mean(), "percentiles should hide it"
+    assert background(pct9, 9).mean() > background(pct0, 0).mean(), "one window for the unit: a brighter frame stays brighter"
     assert background(fx0, 0).max() == int((214 - 200) / 600 * 255)
     assert background(fx9, 9).max() == int((223 - 200) / 600 * 255)
     assert background(fx9, 9).mean() > background(fx0, 0).mean()
+
+
+def test_the_percentile_window_is_the_same_for_every_frame_of_a_unit(server):
+    """Scrubbing must not flicker: the same reader value maps to the same grey in every frame."""
+    a = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/3?lo=1&hi=99")[0])
+    b = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/3?lo=1&hi=99")[0])
+    assert (a == b).all()                                   # cached window, same picture
+    lo3 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/3?lo=1&hi=99")[0]).astype(int)
+    lo4 = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/4?lo=1&hi=99")[0]).astype(int)
+    # frame 4 is frame 3 plus one count everywhere: through one window it is a hair brighter, never darker
+    assert np.delete(lo4, 4 % 8, axis=1).mean() >= np.delete(lo3, 3 % 8, axis=1).mean()
 
 
 def test_a_fixed_window_clips_rather_than_rescales(server):

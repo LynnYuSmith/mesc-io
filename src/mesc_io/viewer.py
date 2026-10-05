@@ -17,7 +17,7 @@ Endpoints:
     GET  /api/file                          → units, rates, pixel sizes, comments, check findings
     GET  /api/frame/{unit}/{ch}/{i}         → PNG of one frame       (?vmin=&vmax= fixed window in
                                               reader units — the viewer's default, from the file's
-                                              LUT — or ?lo=&hi= percentiles of the frame itself,
+                                              LUT — or ?lo=&hi= percentiles of the whole unit,
                                               ?n= average of n frames centred on i)
     GET  /api/mean/{unit}/{ch}              → PNG of the mean image  (?lo=&hi=)
     GET  /api/pixel/{unit}/{ch}?x=&y=&i=&n=  → one pixel's value in reader units (n frames averaged;
@@ -691,7 +691,45 @@ class _Handler(BaseHTTPRequestHandler):
             lo = max(0, hi - n)
             block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)
             img = block[0] if n == 1 else block.mean(axis=0)
-        self._send(_png(img, self._window(q)), "image/png")
+        win = self._window(q)
+        if win[0] == "pct":                    # one stretch for the whole recording, not per frame
+            win = ("fixed", *self._unit_window(unit, ch, win[1], win[2], n))
+        self._send(_png(img, win), "image/png")
+
+    #: How many frames (or n-frame averages) the whole-recording percentile window is taken from.
+    PCT_SAMPLE = 64
+
+    def _unit_window(self, unit, ch, p_lo, p_hi, n=1):
+        """The percentile window of a whole recording, for frames shown one after another.
+
+        Stretching each frame on its own percentiles made the picture flicker while scrubbing:
+        a frame with a bright transient was dimmed to fit it, the next was brightened again,
+        so brightness on screen said nothing about brightness in the tissue. Instead the window
+        comes from ``PCT_SAMPLE`` frames spread evenly over the unit — averaged in groups of
+        ``n`` when the view averages, since a mean of n frames has less noise and so tighter
+        percentiles than a single one — and every frame is drawn through it. Cached per unit,
+        channel, percentiles and n.
+        """
+        key = (str(self.mesc_path), unit, ch, "pctwin", float(p_lo), float(p_hi), int(n))
+        with self._lock:
+            hit = self._cache.get(key)
+        if hit is not None:
+            return hit
+        with self._file() as f:
+            u = f.unit(unit)
+            k = max(1, min(self.PCT_SAMPLE, u.n_frames // max(1, n)))
+            starts = np.unique(np.linspace(0, max(0, u.n_frames - n), k).astype(int))
+            imgs = []
+            for s0 in starts:
+                blk = f.read(unit, channel=ch, frames=slice(s0, s0 + n), reader_units=True, max_gb=MAX_READ_GB)
+                im = blk.mean(axis=0) if n > 1 else blk[0]
+                imgs.append(np.asarray(im, np.float32)[::2, ::2])   # every other pixel: plenty for a percentile
+        lo, hi = (float(v) for v in np.percentile(np.stack(imgs), [p_lo, p_hi]))
+        if hi <= lo:
+            hi = lo + 1.0
+        with self._lock:
+            self._cache[key] = (lo, hi)
+        return lo, hi
 
     def _pixel(self, unit, ch, q):
         """The value under the cursor, in reader units — of the frame window on screen, or of

@@ -270,7 +270,7 @@
       <summary>contrast</summary>
       <div class="row">
         <button id="winFixed" title="the same window for every frame, in reader units — a dimmer frame IS darker. Starts at the window the recording was saved with on the rig (the file's LUT)">fixed</button>
-        <button id="winPct" title="every frame stretched on its own percentiles: shape, not brightness">auto %</button>
+        <button id="winPct" title="the whole recording stretched on its percentiles — one window for every frame, worked out once from frames spread over the unit, so scrubbing does not flicker">auto %</button>
       </div>
       <div id="fixedKnobs" class="row"><span>min</span><input type="number" id="vmin" step="10" style="width:64px">
         <span>max</span><input type="number" id="vmax" step="10" style="width:64px">
@@ -342,7 +342,7 @@ const $ = id => document.getElementById(id);
    session file and the screen cannot disagree about what is being looked at. */
 const V = {
   unit: null, ch: 0, frame: 0, avg: 1, proj: "mean", lo: 1, hi: 99.5,   // proj: "" | mean | max
-  win: "fixed",                             // fixed (one window in reader units) | pct (each frame on its own percentiles)
+  win: "fixed",                             // fixed (one window in reader units) | pct (the whole unit's percentiles, one window for all frames)
   fixBy: {},                                // "unit|ch" -> [min, max] typed here; never written to the .mesc
   cmapBy: {},                               // "unit|ch" -> palette name; "file" = the channel's own colour
   overlay: false,                           // all channels at once, each through its own window and colour, added

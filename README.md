@@ -79,7 +79,8 @@ saved with on the rig (the file's own LUT, typically 0–2000 in reader units), 
 frame, so a frame that is dimmer looks dimmer — bleaching, a change of laser power or a field
 drifting out of focus show while you scrub. Type other limits per unit and channel (they live in
 the view, never in the file; **file** brings the saved ones back), or switch to **auto %**, which
-stretches each frame on its own percentiles and shows shape rather than brightness. Each channel
+stretches the recording on percentiles of the whole unit — one window for every frame, so
+scrubbing does not flicker. Each channel
 has a palette: its colour from the file, a single colour, or one of 25 of Fabio Crameri's
 perceptually uniform Scientific colour maps (batlow, oslo, lajolla, vik, roma, …). **Overlay**
 puts all channels in one picture, each through its own limits and colour.

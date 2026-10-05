@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **auto % no longer flickers.** It used to stretch each frame on that frame's own percentiles,
+  so the picture pumped while scrubbing: on a real 256 × 256 recording the per-frame upper
+  limit swung between 676 and 841 reader units. Now the window comes from 64 frames spread
+  over the whole unit (averaged in groups of n when the view averages n frames). It is
+  worked out once, cached, and used for every frame. The mean grey changes 0.16 grey levels
+  from one frame to the next, against 1.44 before. The mean image and the thumbnails were
+  always one picture and are unchanged.
+
 ## 0.3.7 — 2026-10-05
 
 **The metadata MESc shows, in the viewer.**

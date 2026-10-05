@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.6 — 2026-10-05
+
+**Which way is up: the surface on top in 3D, and the image as MESc draws it.**
 
 - **3D: the surface is on top.** Femtonics records a stack from the surface down (slice 0 = the
   surface) and MESc draws the deepest slice at the top. Here depth is now the vertical axis of the

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **3D: the surface is on top.** Femtonics records a stack from the surface down (slice 0 = the
+  surface) and MESc draws the deepest slice at the top. Here depth is now the vertical axis of the
+  3D view with the surface up: it opens looking straight down from the surface, turns about the
+  depth axis like a turntable, and *side x* / *side y* show the depth running down. **deepest ↑
+  (MESc)** turns it round. A 3D view saved by an earlier version opens with a fresh camera (its
+  mode, floor and the rest are kept), since its angles meant something else.
+- **2D: ↕ MESc** shows the image upside down, the way MESc draws it (row 0 at the bottom). The
+  picture only: ROIs, coordinates, the pixel readout, the zoom box and every export stay in the
+  file's own rows, which are also what our pipeline and its report use (the report's "Flip V
+  (Femtonics view)" is the same display-only flip). The 3D view follows it.
+
 ## 0.3.5 — 2026-10-05
 
 **The 3D view, for working inside a stack.**

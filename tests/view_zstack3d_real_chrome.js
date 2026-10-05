@@ -67,7 +67,7 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
     return JSON.stringify({z:Math.floor(bi/(H*W)), y:Math.floor(bi/W)%H, x:bi%W});})()`));
   const spotAt = () => ev(`(()=>{const c=document.getElementById('vol'), r=c.getBoundingClientRect(), k=volCam(r.width/r.height);
     const [D,H,W]=volMeta.shape, s=${JSON.stringify(spot)};
-    const P=[((s.x+.5)/W*2-1)*k.ext[0], (1-2*(s.y+.5)/H)*k.ext[1], (1-2*(s.z+.5)/D)*k.ext[2]];
+    const P=[((s.x+.5)/W*2-1)*k.ext[0], (1-2*(s.z+.5)/D)*k.ext[1], (2*(s.y+.5)/H-1)*k.ext[2]];   // x, depth up, rows
     const d=v3.sub(P,k.eye), f=v3.dot(d,k.F);
     const nx=v3.dot(d,k.R)/(f*k.tanHalf*k.aspect), ny=v3.dot(d,k.U)/(f*k.tanHalf);
     return JSON.stringify({x:r.left+(nx+1)/2*r.width, y:r.top+(1-ny)/2*r.height});})()`).then(JSON.parse);
@@ -176,6 +176,20 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   if (Math.hypot(bA.x - bB.x, bA.y - bB.y) < 3 && Math.abs(bA.n - bB.n) < 20) fail("stepping the frame did not move its light: " + JSON.stringify([bA, bB]));
   console.log("  glass frame :", JSON.stringify({ f5: bA, f30: bB }));
 
+  // which end is up: from the side, the lit frame 0 (the surface) must sit at the TOP of the
+  // picture and the last frame at the bottom; "deepest up" turns that round, as MESc draws it
+  await ev("$('volAxY').click(); 'ok'"); await sleep(300);
+  const D_ = await ev("volMeta.shape[0]");
+  await setFrame(0); const u0 = await blue(); await setFrame(D_ - 1); const uL = await blue(); await shot("side_surface_up");
+  // readPixels counts rows from the BOTTOM, so the top of the picture is the larger y
+  if (!(u0.n > 20 && uL.n > 20 && u0.y > uL.y + 20)) fail("the surface is not on top in the side view: " + JSON.stringify([u0, uL]));
+  await ev("$('volDeep').click(); 'ok'"); await sleep(300);
+  await setFrame(0); const w0 = await blue(); await setFrame(D_ - 1); const wL = await blue(); await shot("side_deepest_up");
+  if (!(w0.y + 20 < wL.y)) fail("'deepest up' did not put the deepest frame on top: " + JSON.stringify([w0, wL]));
+  if (await ev("document.getElementById('volDeep').textContent") !== "deepest ↑ (MESc)") fail("the depth button does not say which end is up");
+  await ev("$('volDeep').click(); volReset(); 'ok'"); await sleep(300);
+  console.log("  which end up:", JSON.stringify({ surface_up: [Math.round(u0.y), Math.round(uL.y)], deepest_up: [Math.round(w0.y), Math.round(wL.y)] }));
+
   // the three orthogonal views, from the same bytes
   await click("#orthoBtn");
   if (await ev("document.getElementById('ortho').hidden")) fail("the XYZ views did not show");
@@ -207,9 +221,26 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
 
   // the view saves the 3D state and a reload brings it back
   await sleep(600);
+  // 2D "as MESc": the picture upside down, the file's rows untouched. A pixel's screen position
+  // flips, the image point under it maps back to the same row, and the picture really is mirrored
+  await ev("V.vol.on = false; volShow(); paint(); 'ok'"); await sleep(400);
+  const grab2d = () => ev(`(()=>{const c=document.getElementById('view'), g=c.getContext('2d'), m=mapping();
+    const y0=Math.round(m.sy(10.5)), x0=Math.round(m.ox+64.5*m.k); return JSON.stringify({y0, v:[...g.getImageData(x0,y0,1,1).data].slice(0,3),
+      top: m.sy(0), bottom: m.sy(unit.height)});})()`).then(JSON.parse);
+  const plain = await grab2d(); await click("#flipBtn"); const flipped = await grab2d(); await shot("flipped_2d");
+  const back10 = await ev(`(()=>{const r=$('stage').getBoundingClientRect(), m=mapping(); return imgPoint({clientX:r.left+m.ox+5, clientY:r.top+m.sy(10.5)})[1];})()`);
+  if (!(flipped.top > flipped.bottom) || !(plain.top < plain.bottom)) fail("the flip did not put row 0 at the bottom: " + JSON.stringify([plain, flipped]));
+  if (Math.abs(back10 - 10.5) > 1e-6) fail("under the flip, the screen does not map back to the file's row: " + back10);
+  const fullH = await ev("(()=>{const m=mapping(); return Math.abs(m.sy(unit.height)-m.sy(0));})()");
+  if (Math.abs(flipped.y0 - (plain.top + (fullH - 10.5 * fullH / 128))) > 2) fail("row 10 is not drawn where the flip puts it: " + JSON.stringify([plain, flipped]));
+  if (JSON.stringify(flipped.v) !== JSON.stringify(plain.v)) fail("the pixel drawn for row 10 changed under the flip: " + JSON.stringify([plain.v, flipped.v]));
+  await click("#flipBtn"); await ev("V.vol.on = true; volShow(); volDraw(); 'ok'"); await sleep(400);
+  console.log("  2D flip     :", JSON.stringify({ plain_row10_y: plain.y0, flipped_row10_y: flipped.y0, value: plain.v }));
+  await ev("V.vol.yaw = 0.7; V.vol.pitch = 0.4; volDraw(); saveView(); 'ok'"); await sleep(700);
+  const pre = JSON.parse(await ev("JSON.stringify(V.vol)"));
   await send("Page.reload"); await sleep(2600);
   const back = JSON.parse(await ev("JSON.stringify(V.vol)"));
-  if (!back.on || back.mode !== "glass" || Math.abs(back.yaw - ang.yaw) > 1e-6) fail("the 3D view was not restored: " + JSON.stringify(back));
+  if (!back.on || back.mode !== "glass" || Math.abs(back.yaw - pre.yaw) > 1e-6 || Math.abs(back.pitch - pre.pitch) > 1e-6) fail("the 3D view was not restored: " + JSON.stringify(back));
 
   console.log("  stack:", JSON.stringify(meta));
   console.log("  from above  :", JSON.stringify(top));

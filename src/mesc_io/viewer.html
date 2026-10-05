@@ -214,9 +214,10 @@
         <label title="how much a voxel hides what is behind it (glass only)">density <input type="range" id="volDen" min="0.02" max="1" step="0.01"></label>
         <label title="brightness">gain <input type="range" id="volGain" min="0.5" max="4" step="0.05"></label>
         <label title="stretch depth. ×1 is the true proportion; anything else exaggerates it and says so">z ×<input type="range" id="volZ" min="1" max="8" step="0.5"><span id="volZv"></span></label>
-        <button id="volReset" title="look straight down the stack again (double-click does the same)">reset</button>
+        <button id="volReset" title="look straight down the stack again, from the surface (double-click does the same)">reset</button>
         <button id="volAxY" title="look along y: the stack from its side, depth running down">side y</button>
-        <button id="volAxX" title="look along x: the stack from its other side">side x</button>
+        <button id="volAxX" title="look along x: the stack from its other side, depth running down">side x</button>
+        <button id="volDeep" title="which end of the stack is up. Femtonics records from the surface down (slice 0 = surface) and MESc draws the deepest slice at the top; here the surface is on top unless this is on">surface ↑</button>
       </div>
       <div id="volInfo" hidden></div>
       <div id="ortho" hidden>
@@ -249,6 +250,7 @@
       <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button>
       <button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button>
       <button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button>
+      <button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button>
       <button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
     </div>
     <div class="instr" style="margin-top:6px">
@@ -401,12 +403,13 @@ async function boot() {
     im.onerror = () => { if (++tries > 3) return; setTimeout(() => { im.src = src0 + "&retry=" + tries; }, 800 * tries); };
   });
   const saved = (await (await fetch("/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW","vol"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW","vol","flipY"]));
   V.vol = volState(V.vol);
   if (V.win !== "pct") V.win = "fixed";
   if (!V.fixBy || typeof V.fixBy !== "object" || Array.isArray(V.fixBy)) V.fixBy = {};
   if (!V.cmapBy || typeof V.cmapBy !== "object" || Array.isArray(V.cmapBy)) V.cmapBy = {};
   V.overlay = V.overlay === true;
+  V.flipY = V.flipY === true;
   if (!V.yFixedBy || typeof V.yFixedBy !== "object") V.yFixedBy = { raw: null, dff: null };
   // A session saved before 0.2.2 carries `mean: true|false`, which is now `proj` with a third
   // state. Reading it keeps someone's open view open across the upgrade instead of dropping
@@ -422,7 +425,7 @@ const pickKeys = (o, ks) => Object.fromEntries(ks.filter(k => o[k] !== undefined
 
 function applyStatic() {                 // controls that reflect V without a unit
   $("lo").value = V.lo; $("hi").value = V.hi; $("loVal").textContent = V.lo + " %"; $("hiVal").textContent = V.hi + " %";
-  $("avgN").value = V.avg;
+  $("avgN").value = V.avg; $("flipBtn").classList.toggle("on", !!V.flipY);
   $("meanBtn").classList.toggle("on", V.proj === "mean");
   $("maxBtn").classList.toggle("on", V.proj === "max");
   $("modeStack").classList.toggle("on", V.traceMode === "stack");
@@ -663,23 +666,31 @@ function draw() {
 }
 /* The canvas is the stage's size; the zoom rectangle (image px) maps onto it. ROIs are drawn
    in image coordinates through the same mapping, so they stay put under any zoom. */
+// Image -> screen. With flipY the picture is drawn upside down, as MESc draws it (row 0 at the
+// bottom); every image coordinate still means the file's own row, so ROIs, the zoom box, the
+// pixel readout and the exports are untouched — only sy() and imgPoint() know about the flip.
 function mapping() {
   const s = $("stage"), W = s.clientWidth, H = s.clientHeight;
   const z = V.zoom.w ? V.zoom : { x: 0, y: 0, w: unit.width, h: unit.height };
-  const k = Math.min(W / z.w, H / z.h);
-  const ox = (W - z.w * k) / 2 - z.x * k, oy = (H - z.h * k) / 2 - z.y * k;
-  return { k, ox, oy, W, H };
+  const k = Math.min(W / z.w, H / z.h), fy = !!V.flipY, uh = unit.height;
+  const ox = (W - z.w * k) / 2 - z.x * k;
+  const oy = (H - z.h * k) / 2 - (fy ? uh - z.y - z.h : z.y) * k;   // the top of the picture on screen
+  const sy = y => oy + (fy ? uh - y : y) * k;
+  return { k, ox, oy, W, H, fy, sy };
 }
 function paint() {
   if (!unit) return;
   const c = $("view"), g = c.getContext("2d"), m = mapping();
   c.width = m.W; c.height = m.H;
   g.fillStyle = "#000"; g.fillRect(0, 0, m.W, m.H);
-  if (imgEl) { g.imageSmoothingEnabled = false; g.drawImage(imgEl, m.ox, m.oy, unit.width * m.k, unit.height * m.k); }
+  if (imgEl) { g.imageSmoothingEnabled = false;
+    if (m.fy) { g.save(); g.setTransform(1, 0, 0, -1, 0, 2 * m.oy + unit.height * m.k); }
+    g.drawImage(imgEl, m.ox, m.oy, unit.width * m.k, unit.height * m.k);
+    if (m.fy) g.restore(); }
   overlay(g, m);
 }
 function overlay(g, m) {
-  const P = ([x, y]) => [m.ox + (x + .5) * m.k, m.oy + (y + .5) * m.k];
+  const P = ([x, y]) => [m.ox + (x + .5) * m.k, m.sy(y + .5)];
   g.lineWidth = 1.5;
   ROIS.forEach((r, i) => {
     g.strokeStyle = colour(i); g.beginPath();
@@ -703,7 +714,8 @@ function overlay(g, m) {
 }
 function imgPoint(ev) {
   const r = $("stage").getBoundingClientRect(), m = mapping();
-  return [(ev.clientX - r.left - m.ox) / m.k, (ev.clientY - r.top - m.oy) / m.k];
+  const y = (ev.clientY - r.top - m.oy) / m.k;
+  return [(ev.clientX - r.left - m.ox) / m.k, m.fy ? unit.height - y : y];
 }
 new ResizeObserver(() => { paint(); plotTraces(); }).observe($("stage"));
 
@@ -913,6 +925,7 @@ function setAvg(n) {
 }
 $("avgN").onchange = () => setAvg($("avgN").value);
 $("avgN").onkeydown = e => { if (e.key === "Enter") { setAvg($("avgN").value); $("avgN").blur(); } e.stopPropagation(); };
+$("flipBtn").onclick = () => { V.flipY = !V.flipY; $("flipBtn").classList.toggle("on", V.flipY); paint(); volDraw(); saveView(); };
 $("ovBtn").onclick = () => { V.overlay = !V.overlay; showWin(); draw(); saveView(); };
 $("cmap").onchange = () => { if (!unit) return; V.cmapBy[`${unit.path}|${V.ch}`] = $("cmap").value; draw(); saveView(); };
 $("winFixed").onclick = () => { V.win = "fixed"; showWin(); draw(); saveView(); };
@@ -1358,17 +1371,21 @@ boot();
 // how close the wheel may go: well inside the box, for a single bouton. A function, as the saved
 // view is restored (volState) before this part of the script has run.
 function volDmin() { return .03; }
+function volTop() { return Math.PI / 2 - 0.02; }   // looking straight down the stack (not exactly: a pole has no "up")
 function volState(v) {
   const d = { on: false, ortho: false, oMax: false, oCross: true, cx: -1, cy: -1, cz: -1,
-              mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: 0, dist: 1, tx: 0, ty: 0, tz: 0 };
+              mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0, deep: false, axes: 2 };
   if (!v || typeof v !== "object") return d;
-  const o = { ...d, ...v };
-  o.on = !!o.on; o.ortho = !!o.ortho && !o.on; o.oMax = !!o.oMax; o.oCross = o.oCross !== false;
+  // Before 0.3.6 the camera's up was the image's y; now it is depth. A view saved then would open
+  // on its side, so its camera starts afresh (its mode, floor and the rest are kept).
+  if (v.axes !== 2) v = Object.fromEntries(Object.entries(v).filter(([k]) => !["yaw", "pitch", "dist", "tx", "ty", "tz"].includes(k)));
+  const o = { ...d, ...v, axes: 2 };
+  o.on = !!o.on; o.deep = !!o.deep; o.ortho = !!o.ortho && !o.on; o.oMax = !!o.oMax; o.oCross = o.oCross !== false;
   for (const k of ["cx", "cy", "cz"]) o[k] = Number.isInteger(o[k]) ? o[k] : -1;
   o.mode = ["mip", "glass", "depth"].includes(o.mode) ? o.mode : "mip";
   const cl = (x, a, b, def) => (Number.isFinite(+x) ? Math.max(a, Math.min(b, +x)) : def);
   o.thr = cl(o.thr, 0, .95, d.thr); o.ceil = cl(o.ceil, .05, 1, 1); o.ceilSet = cl(o.ceilSet, .05, 1, o.ceil); o.cut = o.cut !== false; o.thrFor = typeof o.thrFor === "string" ? o.thrFor : ""; o.den = cl(o.den, .02, 1, d.den); o.gain = cl(o.gain, .5, 4, d.gain);
-  o.z = cl(o.z, 1, 8, 1); o.yaw = cl(o.yaw, -1e4, 1e4, 0); o.pitch = cl(o.pitch, -1.55, 1.55, 0);
+  o.z = cl(o.z, 1, 8, 1); o.yaw = cl(o.yaw, -1e4, 1e4, 0); o.pitch = cl(o.pitch, -1.5508, 1.5508, volTop());
   o.dist = cl(o.dist, volDmin(), 4, 1);
   for (const k of ["tx", "ty", "tz"]) o[k] = cl(o[k], -1, 1, 0);   // the point it turns about, inside the box
   return o;
@@ -1382,7 +1399,7 @@ void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2
 const FS = `#version 300 es
 precision highp float; precision highp sampler3D;
 uniform sampler3D vol; uniform vec3 ext, camPos, camR, camU, camF;
-uniform float tanHalf, aspect, thr, gain, den, dt, ceil_, slz, slw; uniform int mode, cut;
+uniform float tanHalf, aspect, thr, gain, den, dt, ceil_, slz, slw; uniform int mode, cut, deep, fy;
 in vec2 ndc; out vec4 o;
 vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
 void main() {
@@ -1398,7 +1415,9 @@ void main() {
     float t = ta + (float(i) + jit) * dt;
     if (t > tb) break;
     vec3 p = camPos + rd * t;
-    vec3 uvw = vec3((p.x / ext.x + 1.0) * 0.5, 1.0 - (p.y / ext.y + 1.0) * 0.5, 1.0 - (p.z / ext.z + 1.0) * 0.5);
+    // the box: x across, DEPTH up (world y; the surface, slice 0, at the top), the image's rows along z
+    float ry = (p.z / ext.z + 1.0) * 0.5, dz = (p.y / ext.y + 1.0) * 0.5;
+    vec3 uvw = vec3((p.x / ext.x + 1.0) * 0.5, fy == 1 ? 1.0 - ry : ry, deep == 1 ? dz : 1.0 - dz);
     float v = texture(vol, uvw).r;
     if (v > ceil_) { if (cut == 1) continue; v = ceil_; }   // above the ceiling: gone, or held
     if (mode == 1) {
@@ -1537,6 +1556,7 @@ function volShow() {
   $("stageHint").hidden = on || ortho;
   ["volMip", "volGlass", "volDepth"].forEach(id => $(id).classList.toggle("on", "vol" + V.vol.mode[0].toUpperCase() + V.vol.mode.slice(1) === id));
   $("volThr").value = V.vol.thr; $("volCeil").value = V.vol.ceil; volNums();
+  $("volDeep").textContent = V.vol.deep ? "deepest ↑ (MESc)" : "surface ↑"; $("volDeep").classList.toggle("on", V.vol.deep);
   $("volCut").textContent = V.vol.cut ? "cut" : "clip"; $("volCut").classList.toggle("on", V.vol.cut);
   $("volDen").value = V.vol.den; $("volGain").value = V.vol.gain; $("volZ").value = V.vol.z;
   $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z;
@@ -1556,7 +1576,7 @@ const v3 = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot: (a, b)
 // same piece of tissue when the depth is stretched or the window resized.
 function volCam(aspect) {
   const [D, Hy, Wx] = volMeta.shape, [vz, vy, vx] = volMeta.vox;
-  const phys = [Wx * vx, Hy * vy, D * vz * V.vol.z], big = Math.max(...phys);
+  const phys = [Wx * vx, D * vz * V.vol.z, Hy * vy], big = Math.max(...phys);   // x, depth (up), rows
   const ext = phys.map(p => p / big);
   const tanHalf = Math.tan(15 * Math.PI / 180);
   const dist = (1.35 / tanHalf) * Math.max(1, 1 / aspect) * V.vol.dist;
@@ -1591,6 +1611,7 @@ function volDraw() {
   gl.uniform1f(u("ceil_"), ceil); gl.uniform1i(u("cut"), V.vol.cut ? 1 : 0);
   gl.uniform1f(u("dt"), 1.0 / Math.max(Wx, Hy, D * V.vol.z * vz / Math.min(vx, vy)));
   gl.uniform1i(u("mode"), { mip: 0, glass: 1, depth: 2 }[V.vol.mode]);
+  gl.uniform1i(u("deep"), V.vol.deep ? 1 : 0); gl.uniform1i(u("fy"), V.flipY ? 1 : 0);
   gl.uniform1f(u("slz"), (V.frame + .5) / D); gl.uniform1f(u("slw"), V.proj ? 0 : .5 / D);
   gl.disable(gl.DEPTH_TEST); gl.drawArrays(gl.TRIANGLES, 0, 3);
   // the box, and the current slice as a frame inside it: the slider still means something
@@ -1604,8 +1625,8 @@ function volDraw() {
   for (const a of [-1, 1]) for (const b of [-1, 1]) {
     edges.push(...c(-1, a, b), ...c(1, a, b), ...c(a, -1, b), ...c(a, 1, b), ...c(a, b, -1), ...c(a, b, 1));
   }
-  const zs = 1 - 2 * (V.frame + .5) / D;
-  const slice = [...c(-1, -1, zs), ...c(1, -1, zs), ...c(1, -1, zs), ...c(1, 1, zs), ...c(1, 1, zs), ...c(-1, 1, zs), ...c(-1, 1, zs), ...c(-1, -1, zs)];
+  const ys = (V.vol.deep ? -1 : 1) * (1 - 2 * (V.frame + .5) / D);      // the frame's height in the box
+  const slice = [...c(-1, ys, -1), ...c(1, ys, -1), ...c(1, ys, -1), ...c(1, ys, 1), ...c(1, ys, 1), ...c(-1, ys, 1), ...c(-1, ys, 1), ...c(-1, ys, -1)];
   gl.useProgram(lineProg);
   gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
@@ -1620,7 +1641,7 @@ function volDraw() {
   const tz = D * vz;
   $("volInfo").innerHTML = `<b>${(Wx * vx).toFixed(0)} × ${(Hy * vy).toFixed(0)} × ${tz.toFixed(0)} µm</b>`
     + (V.vol.z !== 1 ? `  · depth drawn ×${V.vol.z}` : "") + (volMeta.down > 1 ? `  · xy ÷${volMeta.down} to fit` : "")
-    + `\nslice 0 faces you at the start` + (V.vol.mode === "depth" ? " · red = slice 0 → blue = the last" : "")
+    + (V.vol.deep ? `\nthe deepest slice on top, as MESc` : `\nthe surface (slice 0) on top`) + (V.vol.mode === "depth" ? " · red = slice 0 → blue = the last" : "")
     + `\ndrag turns · shift- or right-drag moves · wheel zooms where the cursor is · double-click resets`;
 }
 // turning and zooming
@@ -1666,14 +1687,15 @@ function volPick(c, rd) {
   }
   ta = Math.max(ta, 0);
   if (!(ta < tb) || !volData) return null;
-  const step = Math.min(...e.map((x, i) => 2 * x / [Wx, Hy, D][i])) * .5;
+  const step = Math.min(...e.map((x, i) => 2 * x / [Wx, D, Hy][i])) * .5;
   const floor = V.vol.thr * 255, ceil = Math.max(V.vol.ceil, V.vol.thr + .01) * 255;
   let best = floor, bt = -1;
   for (let t = ta; t <= tb; t += step) {
     const p = [o[0] + rd[0] * t, o[1] + rd[1] * t, o[2] + rd[2] * t];
-    const ix = Math.min(Wx - 1, Math.floor((p[0] / e[0] + 1) / 2 * Wx));
-    const iy = Math.min(Hy - 1, Math.floor((1 - (p[1] / e[1] + 1) / 2) * Hy));
-    const iz = Math.min(D - 1, Math.floor((1 - (p[2] / e[2] + 1) / 2) * D));
+    const ix = Math.max(0, Math.min(Wx - 1, Math.floor((p[0] / e[0] + 1) / 2 * Wx)));
+    const ry = (p[2] / e[2] + 1) / 2, dz = (p[1] / e[1] + 1) / 2;
+    const iy = Math.max(0, Math.min(Hy - 1, Math.floor((V.flipY ? 1 - ry : ry) * Hy)));
+    const iz = Math.max(0, Math.min(D - 1, Math.floor((V.vol.deep ? dz : 1 - dz) * D)));
     const v = volData[(iz * Hy + iy) * Wx + ix];
     if (v > best && !(V.vol.cut && v > ceil)) { best = v; bt = t; }
   }
@@ -1689,12 +1711,13 @@ $("vol").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagation(
   volSetTarget([0, 1, 2].map(i => P[i] + s * (c.tgt[i] - P[i])), c.ext);
   V.vol.dist = nd; volDraw(); saveView(); }, { passive: false });
 $("vol").addEventListener("dblclick", e => { e.stopPropagation(); volReset(); });
-function volReset() { Object.assign(V.vol, { yaw: 0, pitch: 0, dist: 1, tx: 0, ty: 0, tz: 0 }); volDraw(); saveView(); }
+function volReset() { Object.assign(V.vol, { yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0 }); volDraw(); saveView(); }
 $("volReset").onclick = volReset;
 $("volBtn").onclick = () => { V.vol.on = !V.vol.on; if (V.vol.on) V.vol.ortho = false; volShow(); volDraw(); saveView(); };
 $("orthoBtn").onclick = () => { V.vol.ortho = !V.vol.ortho; if (V.vol.ortho) V.vol.on = false; volShow(); saveView(); };
-$("volAxY").onclick = () => { Object.assign(V.vol, { yaw: 0, pitch: Math.PI / 2 - 0.02 }); volDraw(); saveView(); };
+$("volAxY").onclick = () => { Object.assign(V.vol, { yaw: 0, pitch: 0 }); volDraw(); saveView(); };
 $("volAxX").onclick = () => { Object.assign(V.vol, { yaw: Math.PI / 2, pitch: 0 }); volDraw(); saveView(); };
+$("volDeep").onclick = () => { V.vol.deep = !V.vol.deep; volShow(); volDraw(); saveView(); };
 for (const [id, mode] of [["volMip", "mip"], ["volGlass", "glass"], ["volDepth", "depth"]])
   $(id).onclick = () => { V.vol.mode = mode;
     if (volMeta && V.vol.thrFor !== unit.path) V.vol.thr = volAutoThr();   // a hand-set floor stays

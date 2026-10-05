@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **3D: the wheel zooms where the cursor is.** The ray under the cursor is marched through the
+  stack and the brightest voxel above the floor is the point zoomed into (the plane through the
+  turning point when the ray finds nothing); camera and turning point both close in on it, so it
+  stays under the cursor (0.8 px drift over twelve wheel steps in the browser test) and the next
+  turn is about it. Shift- or right-drag moves the view; reset and double-click bring the centre
+  back. The wheel can now go much closer (to 0.03 of the starting distance) for a single bouton.
+- **3D: floor and ceiling can be typed** in the recording's own units, next to their sliders. The
+  number is mapped into the stack's window (the bytes on the GPU span it); one outside the window
+  is held at its edge and shown there. Slider and number follow each other.
+- **3D glass: the current frame lights up.** Its voxels turn blue and a little more solid inside
+  the glass, and its outline is drawn bright, so stepping through the stack shows which piece of
+  the object each frame is. The outline is drawn whenever a single frame is shown.
+
 - The palette test read `viewer.html` without saying UTF-8, so on Windows (cp1252) it failed with
   `UnicodeDecodeError` — the `v0.3.4` tag's CI run is red on Windows for that reason only; the
   0.3.4 package itself is unaffected (tests do not ship). Fixed on `main` (`1befee7`); the next

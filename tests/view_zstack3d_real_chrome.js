@@ -58,6 +58,65 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   await sleep(400);
   const top = await look();
   if (top.peak < 100) fail("the first 3D picture is black: " + JSON.stringify(top));
+
+  // the wheel zooms where the cursor is. Put the cursor on a known voxel of the stack (the
+  // brightest of the synthetic file's bouton, found in the bytes), wheel in, and that voxel must
+  // stay under the cursor — reprojected through the new camera — while it grows on screen
+  const spot = JSON.parse(await ev(`(()=>{const [D,H,W]=volMeta.shape; let b=-1,bi=0;
+    for(let i=0;i<volData.length;i++) if(volData[i]>b){b=volData[i];bi=i;}
+    return JSON.stringify({z:Math.floor(bi/(H*W)), y:Math.floor(bi/W)%H, x:bi%W});})()`));
+  const spotAt = () => ev(`(()=>{const c=document.getElementById('vol'), r=c.getBoundingClientRect(), k=volCam(r.width/r.height);
+    const [D,H,W]=volMeta.shape, s=${JSON.stringify(spot)};
+    const P=[((s.x+.5)/W*2-1)*k.ext[0], (1-2*(s.y+.5)/H)*k.ext[1], (1-2*(s.z+.5)/D)*k.ext[2]];
+    const d=v3.sub(P,k.eye), f=v3.dot(d,k.F);
+    const nx=v3.dot(d,k.R)/(f*k.tanHalf*k.aspect), ny=v3.dot(d,k.U)/(f*k.tanHalf);
+    return JSON.stringify({x:r.left+(nx+1)/2*r.width, y:r.top+(1-ny)/2*r.height});})()`).then(JSON.parse);
+  const litNear = q => ev(`(()=>{const c=document.getElementById('vol'), g=c.getContext('webgl2'), r=c.getBoundingClientRect();
+    const sx=c.width/r.width, x=Math.round((${q.x}-r.left)*sx), y=c.height-1-Math.round((${q.y}-r.top)*sx), R=Math.round(60*sx);
+    const p=new Uint8Array(4*(2*R)*(2*R)); g.readPixels(x-R,y-R,2*R,2*R,g.RGBA,g.UNSIGNED_BYTE,p);
+    let lit=0; for(let i=0;i<p.length;i+=4) if(p[i]>200) lit++;
+    const q1=new Uint8Array(4); g.readPixels(x,y,1,1,g.RGBA,g.UNSIGNED_BYTE,q1); return JSON.stringify({lit, at:q1[0]});})()`).then(JSON.parse);
+  const s0 = await spotAt(), l0 = await litNear(s0);
+  for (let k = 0; k < 12; k++) {
+    await send("Input.dispatchMouseEvent",{type:"mouseWheel",x:s0.x,y:s0.y,deltaX:0,deltaY:-120}); await sleep(30); }
+  await sleep(400);
+  const z = JSON.parse(await ev("JSON.stringify(V.vol)")), s1 = await spotAt(), l1 = await litNear(s0);
+  await shot("zoomed_at_cursor");
+  const drift = Math.hypot(s1.x - s0.x, s1.y - s0.y);
+  if (!(z.dist < .25)) fail("the wheel did not zoom in: " + z.dist);
+  if (drift > 4) fail(`the voxel under the cursor moved ${drift.toFixed(1)} px while zooming`);
+  if (l1.at < 200) fail("the bouton is not under the cursor after zooming: " + JSON.stringify(l1));
+  if (!(l1.lit > 2 * l0.lit)) fail(`the bouton did not grow on screen: ${l0.lit} -> ${l1.lit}`);
+  if (Math.hypot(z.tx, z.ty) < .2) fail("the camera still turns about the centre, not the zoomed spot: " + JSON.stringify(z));
+  const b0 = s0;
+  // shift-drag moves the target; a reset brings everything back
+  const tx0 = z.tx;
+  await send("Input.dispatchMouseEvent",{type:"mousePressed",x:b0.x,y:b0.y,button:"left",clickCount:1,modifiers:8});
+  await send("Input.dispatchMouseEvent",{type:"mouseMoved",x:b0.x+80,y:b0.y,button:"left",modifiers:8});
+  await send("Input.dispatchMouseEvent",{type:"mouseReleased",x:b0.x+80,y:b0.y,button:"left",clickCount:1,modifiers:8});
+  await sleep(300);
+  const panned = JSON.parse(await ev("JSON.stringify(V.vol)"));
+  if (!(panned.tx < tx0) || Math.abs(panned.yaw) > 1e-9) fail("shift-drag did not move the view (or turned it): " + JSON.stringify(panned));
+  await ev("volReset(); 'ok'"); await sleep(300);
+  if ((await look()).sig !== top.sig) fail("reset did not bring back the first picture");
+  console.log("  zoom@cursor :", JSON.stringify({ spot, dist: +z.dist.toFixed(3), tx: +z.tx.toFixed(3), ty: +z.ty.toFixed(3), drift_px: +drift.toFixed(2), lit: [l0.lit, l1.lit], pan_tx: +panned.tx.toFixed(3) }));
+
+  // floor and ceiling typed as numbers, in the recording's units
+  const win = JSON.parse(await ev("JSON.stringify(volMeta.win)"));
+  const typeNum = async (id, x) => { await ev(`(()=>{const e=document.getElementById('${id}'); e.focus(); e.value='${x}'; e.dispatchEvent(new Event('change')); return 'ok';})()`); await sleep(300); };
+  const fl = win[0] + .4 * (win[1] - win[0]);
+  await typeNum("volThrN", fl);
+  if (Math.abs(await ev("V.vol.thr") - .4) > 1e-6) fail(`a typed floor of ${fl} did not land at 0.4 of the window ${win}`);
+  if (Math.abs(await ev("+document.getElementById('volThr').value") - .4) > .006) fail("the floor slider did not follow the typed number");
+  await typeNum("volCeilN", win[1] + 1e6);
+  if (await ev("V.vol.ceil") !== 1 || Math.abs(await ev("+document.getElementById('volCeilN').value") - win[1]) > 1e-3 * Math.abs(win[1]))
+    fail("a ceiling above the window was not held at its top, and shown there");
+  const thrN = await ev("+document.getElementById('volThrN').value");
+  await ev("$('volThr').value = 0.6; $('volThr').oninput(); 'ok'");
+  if (Math.abs(await ev("+document.getElementById('volThrN').value") - (win[0] + .6 * (win[1] - win[0]))) > 1e-3 * Math.abs(win[1] - win[0]) + 1e-3)
+    fail("the floor's number did not follow the slider");
+  await ev("$('volAuto').click(); 'ok'"); await sleep(200);
+  console.log("  numbers     :", JSON.stringify({ win, floor_typed: fl, floor_shown: thrN }));
   if (Math.abs(await ev("V.vol.yaw")) > 1e-9) fail("the start was not from above");
   await shot("mip_top");
 
@@ -106,6 +165,16 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   await click("#volGlass"); const glass = await look(); await shot("glass_turned");
   if (glass.peak < 60) fail("glass shows nothing: " + JSON.stringify(glass));
   if (await ev("document.getElementById('volDen').disabled")) fail("density is disabled in glass");
+  // in glass, the current frame lights up blue inside the object, and stepping the frame moves it
+  const blue = () => ev(`(()=>{const c=document.getElementById('vol'), g=c.getContext('webgl2');
+    const p=new Uint8Array(c.width*c.height*4); g.readPixels(0,0,c.width,c.height,g.RGBA,g.UNSIGNED_BYTE,p);
+    let n=0, sx=0, sy=0; for(let i=0;i<p.length;i+=4) if(p[i+2]>p[i+1]+25 && p[i+2]>90){n++; const k=i/4; sx+=k%c.width; sy+=Math.floor(k/c.width);}
+    return JSON.stringify({n, x:n?sx/n:0, y:n?sy/n:0});})()`).then(JSON.parse);
+  const setFrame = async f => { await ev(`$('frame').value=${f}; $('frame').oninput(); 'ok'`); await sleep(300); };
+  await setFrame(5); const bA = await blue(); await setFrame(30); const bB = await blue(); await shot("glass_frame30");
+  if (bA.n < 50 || bB.n < 50) fail("the current frame is not lit in glass: " + JSON.stringify([bA, bB]));
+  if (Math.hypot(bA.x - bB.x, bA.y - bB.y) < 3 && Math.abs(bA.n - bB.n) < 20) fail("stepping the frame did not move its light: " + JSON.stringify([bA, bB]));
+  console.log("  glass frame :", JSON.stringify({ f5: bA, f30: bB }));
 
   // the three orthogonal views, from the same bytes
   await click("#orthoBtn");

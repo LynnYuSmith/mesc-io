@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.5 — 2026-10-05
+
+**The 3D view, for working inside a stack.**
 
 - **3D: the wheel zooms where the cursor is.** The ray under the cursor is marched through the
   stack and the brightest voxel above the floor is the point zoomed into (the plane through the
@@ -15,10 +17,9 @@
   the glass, and its outline is drawn bright, so stepping through the stack shows which piece of
   the object each frame is. The outline is drawn whenever a single frame is shown.
 
-- The palette test read `viewer.html` without saying UTF-8, so on Windows (cp1252) it failed with
-  `UnicodeDecodeError` — the `v0.3.4` tag's CI run is red on Windows for that reason only; the
-  0.3.4 package itself is unaffected (tests do not ship). Fixed on `main` (`1befee7`); the next
-  release tag will be green.
+- Tests: the palette test read `viewer.html` without saying UTF-8, so on Windows (cp1252) it
+  failed with `UnicodeDecodeError` — the `v0.3.4` tag's CI run is red on Windows for that reason
+  only; the 0.3.4 package itself is unaffected (tests do not ship). Fixed here.
 
 ## 0.3.4 — 2026-10-01
 

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.7 — 2026-10-05
+
+**The metadata MESc shows, in the viewer.**
 
 - **Metadata: the unit as MESc shows it.** The quick metadata panel now lists, under *as MESc
   shows it*, every row of MESc's own information panel in its order: item type, date (to the

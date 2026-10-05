@@ -44,7 +44,11 @@ def _text(value) -> str:
     if isinstance(value, (bytes, bytearray)):
         return value.decode("utf-8", "replace").rstrip("\x00").strip()
     if isinstance(value, np.ndarray):
+        if value.dtype.kind in "SUO":                  # an array of strings (TypeDebugString is one)
+            return " ".join(_text(v) for v in value.ravel()).strip()
         return "".join(chr(int(c)) for c in value.ravel() if int(c)).strip()
+    if isinstance(value, np.bytes_):
+        return bytes(value).decode("utf-8", "replace").rstrip("\x00").strip()
     return str(value).strip()
 
 
@@ -105,6 +109,10 @@ class Unit:
     #: the one the comments' ``x-180 y120 z-20 from a1`` refer to. The zero is set by hand on the
     #: rig, per axis, at any time — so it is only comparable within one zero-setting.
     stage_rel_um: Optional[Dict[str, float]] = None
+    #: The unit as MESc's own information panel lists it, label by label and in its order
+    #: (Item type, Date, Creator … Frame rate, Duration), each value worked out from the
+    #: attributes the panel reads. ``()`` when the unit carries none of them.
+    info: Tuple[Tuple[str, str], ...] = ()
 
     @property
     def shape(self):
@@ -342,7 +350,8 @@ class MescFile:
                                      else None),
                     comment=_text(_attr(a, "Comment")), channels=channels,
                     stage_um=_stage_position(a),
-                    stage_rel_um=_stage_position(a, "AttributeRelativePosition", "Slow"))
+                    stage_rel_um=_stage_position(a, "AttributeRelativePosition", "Slow"),
+                    info=_mesc_info(grp, chan_names, z_step))
 
 
 #: ``ZAxisGeomRole``: 0 is the time axis of a recording, 3 the depth axis of a z-stack.
@@ -365,6 +374,138 @@ def _z_axis_is_time(attrs) -> bool:
     if "m" == name.replace("µ", "").replace("u", "").strip():
         return False
     return True
+
+
+def _num_text(v: float, digits: int = 6) -> str:
+    """A number as MESc prints it: up to ``digits`` significant figures, no trailing zeros, no -0."""
+    t = f"{v:.{digits}g}"
+    if "e" in t:
+        t = f"{v:.{max(0, digits - 1)}f}".rstrip("0").rstrip(".")
+    return "0" if t in ("-0", "0", "") else t
+
+
+def _vec(attrs, name, n=3):
+    v = _attr(attrs, name)
+    try:
+        a = np.asarray(v, dtype=float).ravel()
+        return a if a.size >= n and np.all(np.isfinite(a[:n])) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _euler_zxy_deg(q) -> Tuple[float, float, float]:
+    """``GeomTransRot`` (a quaternion, x y z w) as MESc's "Rotation (ZX'Y" Euler angles)": the
+    intrinsic z, then x', then y'' angles of R = Rz(a)·Rx(b)·Ry(c), in degrees."""
+    x, y, z, w = (float(c) for c in q[:4])
+    n = (x * x + y * y + z * z + w * w) ** .5 or 1.0
+    x, y, z, w = x / n, y / n, z / n, w / n
+    r01 = 2 * (x * y - z * w); r11 = 1 - 2 * (x * x + z * z); r21 = 2 * (y * z + x * w)
+    r20 = 2 * (x * z - y * w); r22 = 1 - 2 * (x * x + y * y)
+    b = np.degrees(np.arcsin(max(-1.0, min(1.0, r21))))
+    a = np.degrees(np.arctan2(-r01, r11)); c = np.degrees(np.arctan2(-r20, r22))
+    return tuple(0.0 if abs(t) < 5e-7 else float(t) for t in (a, b, c))
+
+
+def _gib(nbytes: int) -> str:
+    for unit, k in (("GiB", 2 ** 30), ("MiB", 2 ** 20), ("KiB", 2 ** 10)):
+        if nbytes >= k:
+            return f"{nbytes / k:.1f} {unit}"
+    return f"{nbytes} B"
+
+
+def _duration_text(s: float) -> str:
+    """"1 min 20 s" — MESc's way, rounded to the second."""
+    s = int(round(s))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    parts = ([f"{h} h"] if h else []) + ([f"{m} min"] if m else []) + ([f"{sec} s"] if sec or not (h or m) else [])
+    return " ".join(parts)
+
+
+def _mesc_info(grp, chan_names, z_step) -> Tuple[Tuple[str, str], ...]:
+    """The rows of MESc's information panel for one unit, from the attributes behind them.
+
+    Every value is worked out, not copied from a cache of the panel (there is none in the file):
+    the centroid is ``GeomTransTransl`` plus the middle of the field along x and y (each axis's
+    conversion offset + its middle pixel centre), "from the zero level" is that minus
+    ``LabelingOriginTransl``, the rotation is the ``GeomTransRot`` quaternion as Z-X'-Y'' Euler
+    angles, the size is the channels' bytes on disk. Compared with a photo of the panel on the rig
+    (2026-10-05, a 256 × 256 × 4953 time series of the same setup): type, creator, revision,
+    profile, user, host, setup, signals, measurement type, dimensions, channels, size, bits, pixel
+    size, scanning area, x/y centroid, rotation, frame rate and duration agree in value and form.
+    The z centroid could not be compared (that unit is not in the files here), and neither could
+    any row of a z-stack: its centroid is given at the stage's z, as for a recording, and its
+    "Measurement type", "Slice step" and "Depth" are this reader's words, not MESc's.
+    Anything the file does not carry is left out rather than guessed.
+    """
+    a = grp.attrs
+    rows: List[Tuple[str, str]] = []
+    add = lambda k, v: rows.append((k, v)) if v not in (None, "") else None
+    t = _text(_attr(a, "TypeDebugString"))
+    add("Item type", "Measurement" if t == "MImage3D" else t)
+    sec, ns = _float_or_none(_attr(a, "MeasurementDatePosix")), _float_or_none(_attr(a, "MeasurementDateNanoSecs"))
+    if sec:
+        import datetime as _dt
+        d = _dt.datetime.fromtimestamp(sec + (ns or 0) / 1e9)          # local time, as the rig shows it
+        add("Date", d.strftime("%Y-%m-%d %H:%M:%S.") + f"{d.microsecond // 1000:03d}")
+    add("Creator", _text(_attr(a, "CreatingMEScVersion")))
+    rev = _float_or_none(_attr(a, "CreatingMEScRevision"))
+    add("Creator revision", f"{int(rev)}" if rev is not None else None)
+    add("Profile name", _text(_attr(a, "ExperimenterProfilename")))
+    add("User name", _text(_attr(a, "ExperimenterUsername")))
+    add("Host name", _text(_attr(a, "ExperimenterHostname")))
+    add("Setup name", _text(_attr(a, "ExperimenterSetupID")))
+    curves = [_text(_attr(grp[c].attrs, "Name")) for c in sorted(k for k in grp if k.startswith("Curve_"))]
+    add("Recorded I/O signals", ", ".join(c for c in curves if c))
+    xml = _attr(a, "MeasurementParamsXML")
+    if isinstance(xml, np.ndarray):
+        xml = xml.ravel()[0] if xml.dtype.kind == "O" else bytes(int(c) for c in xml.ravel() if 0 < int(c) < 256)
+    task = ""
+    if isinstance(xml, (bytes, bytearray)):
+        import re as _re
+        m = _re.search(rb'<Task Type="([^"]*)"', bytes(xml))
+        task = m.group(1).decode("latin-1") if m else ""
+    kind = "Resonant" if "Resonant" in task else ("Galvo" if "Galvo" in task else "")
+    add("Measurement type", (f"{kind} XY scan " if kind else "XY scan ") + ("z-stack" if z_step else "time series"))
+    xd, yd, zd = (_float_or_none(_attr(a, k)) for k in ("XDim", "YDim", "ZDim"))
+    if xd and yd and zd:
+        add("Dimensions", f"{int(xd)} × {int(yd)} × {int(zd)}")
+    names = [_text(_attr(a, f"{c}_Name")) or c for c in chan_names]
+    add("Channels", ", ".join(names))
+    dsets = [grp[c] for c in chan_names]
+    add("Size", _gib(sum(int(d.size) * d.dtype.itemsize for d in dsets)))
+    add("Bits per sample", f"{dsets[0].dtype.itemsize * 8}" if dsets else None)
+    px, py = (_float_or_none(_attr(a, f"{ax}AxisConversionConversionLinearScale")) for ax in "XY")
+    if px and py:
+        add("Pixel size", f"{_num_text(px)} µm × {_num_text(py)} µm")
+        if xd and yd:
+            add("Scanning area", f"{_num_text(px * xd)} µm × {_num_text(py * yd)} µm")
+    tr = _vec(a, "GeomTransTransl")
+    if tr is not None:
+        ox, oy = (_float_or_none(_attr(a, f"{ax}AxisConversionConversionLinearOffset")) for ax in "XY")
+        # the middle of the field is the middle PIXEL CENTRE: offset + (n-1)/2 steps (MESc: x = 0 for
+        # an offset of -57.2625 on 256 px of 0.449118 µm, which (n-1)/2 gives and n/2 misses by 0.22)
+        cx = tr[0] + (ox + px * (xd - 1) / 2 if ox is not None and px and xd else 0)
+        cy = tr[1] + (oy + py * (yd - 1) / 2 if oy is not None and py and yd else 0)
+        c = (cx, cy, tr[2])
+        fmt = lambda v: _num_text(v, 6)                  # MESc: six significant figures, "-26967", "-20.24"
+        add("Centroid in absolute coordinates", ", ".join(f"{k} = {fmt(v)} µm" for k, v in zip("xyz", c)))
+        lo = _vec(a, "LabelingOriginTransl")
+        if lo is not None:
+            add("Centroid from the zero level", ", ".join(f"{k} = {fmt(v - o)} µm" for k, v, o in zip("xyz", c, lo)))
+    q = _vec(a, "GeomTransRot", 4)
+    if q is not None:
+        add("Rotation (ZX'Y\" Euler angles)", ", ".join(f"{_num_text(round(t, 4))}°" for t in _euler_zxy_deg(q)))
+    zs = _float_or_none(_attr(a, "ZAxisConversionConversionLinearScale"))
+    if zs and not z_step:
+        add("Frame rate", f"{_num_text(1000.0 / zs)} Hz")
+        if zd:
+            add("Duration", _duration_text(zd * zs / 1000.0))
+    elif z_step:
+        add("Slice step", f"{_num_text(z_step)} µm")
+        if zd:
+            add("Depth", f"{_num_text(z_step * zd)} µm")
+    return tuple(rows)
 
 
 def _stage_position(attrs, attribute: str = "AttributePosition", prefix: str = "Virt") -> Optional[Dict[str, float]]:

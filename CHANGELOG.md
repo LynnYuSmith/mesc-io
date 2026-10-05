@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Metadata: the unit as MESc shows it.** The quick metadata panel now lists, under *as MESc
+  shows it*, every row of MESc's own information panel in its order: item type, date (to the
+  millisecond, local time), creator and revision, profile, user, host, setup, recorded I/O
+  signals, measurement type, dimensions, channels, size on disk, bits per sample, pixel size,
+  scanning area, the centroid in absolute coordinates and from the zero level, the rotation as
+  Z-X'-Y'' Euler angles, frame rate and duration. Each is worked out from the attributes behind
+  it (`Unit.info` in the reader), and compared with a photo of the panel on the rig: the centroid
+  is the middle pixel *centre* (`offset + (n-1)/2` steps), which is how MESc gets x = 0. For a
+  z-stack the panel gives slice step and depth instead of a rate; those two rows, its
+  measurement-type wording and its z centroid have not been compared with MESc yet.
+- Reader: a text attribute stored as an array of byte strings (`TypeDebugString`) no longer
+  raises — it is read as text.
+
 ## 0.3.6 — 2026-10-05
 
 **Which way is up: the surface on top in 3D, and the image as MESc draws it.**

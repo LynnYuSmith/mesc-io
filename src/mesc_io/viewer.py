@@ -609,6 +609,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "colours": [c.colour for c in u.channels],
                 "stage_um": u.stage_um,
                 "stage_rel_um": u.stage_rel_um,
+                "info": [list(r) for r in u.info],
             } for u in f.units()]
         rep = mesc_check(self.mesc_path)
         return {"file": self.mesc_path.name, "path": str(self.mesc_path), "units": units,

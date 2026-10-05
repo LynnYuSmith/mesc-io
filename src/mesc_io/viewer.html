@@ -79,6 +79,8 @@
   #allMetaBody td:last-child { font-family:ui-monospace,monospace; word-break:break-word }
   #meta td { padding:3px 12px; vertical-align:top }
   #meta td:first-child { color:var(--muted); width:74px; white-space:nowrap }
+  #meta tr.sec td { color:var(--ink); font-weight:600; padding-top:9px; border-top:1px solid var(--line) }
+  #meta tr.sec ~ tr td:first-child { white-space:normal; width:46%; line-height:1.25 }   /* MESc's long labels wrap */
   .finding { margin:6px 12px; padding:6px 8px; border-radius:4px; font-size:11px;
              background:var(--panel-2); border-left:3px solid var(--warn) }
   .finding.error { border-left-color:var(--bad) }
@@ -464,7 +466,18 @@ function pick(i, restoring) {
   $("frame").max = unit.frames - 1; $("frame").value = V.frame;
   showWin();
   const st = unit.stage_um, rel = unit.stage_rel_um;
-  $("metaTable").innerHTML = [
+  // MESc's own information panel, row for row, when the file carries it; the stage rows above it
+  // are the XML's (VirtX…, and SlowX… from the zero set on the rig), which MESc does not list
+  const info = Array.isArray(unit.info) ? unit.info : [];
+  if (info.length) $("metaTable").innerHTML = [
+    ["unit", unit.path],
+    ["comment", esc(unit.comment) || "—"],
+    ["stage", st ? `x ${fmt(st.x)} · y ${fmt(st.y)} · z ${fmt(st.z)} µm` : "not in file"],
+    ["from zero", rel ? `x ${fmt(rel.x)} · y ${fmt(rel.y)} · z ${fmt(rel.z)} µm` : "not in file"],
+  ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")
+    + `<tr class="sec"><td colspan="2">as MESc shows it</td></tr>`
+    + info.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("");
+  else $("metaTable").innerHTML = [
     ["unit", unit.path],
     ["stage", st ? `x ${fmt(st.x)} · y ${fmt(st.y)} · z ${fmt(st.z)} µm` : "not in file"],
     ["from zero", rel ? `x ${fmt(rel.x)} · y ${fmt(rel.y)} · z ${fmt(rel.z)} µm` : "not in file"],

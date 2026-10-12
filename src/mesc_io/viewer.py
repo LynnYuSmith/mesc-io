@@ -881,12 +881,26 @@ def open_private(url: str) -> str:
     return "default browser (NOT private)"
 
 
+STATE_DIR = Path.home() / "mesc-viewer"
+
+
+def default_rois_path(mesc_path: Path) -> Path:
+    """Where a recording's ROI set and view live when --rois is not given: one folder in the
+    home directory, not beside the recording (raw data is not ours to add files to, and its
+    disk is often read-only or simply not ours) and not the working directory (launched from
+    home, every recording left two files in its root). A set already in the working directory,
+    where versions up to 0.3.8 wrote it, is still used, so nothing drawn there is lost."""
+    name = f"{Path(mesc_path).stem}_rois.json"
+    old = Path.cwd() / name
+    if old.exists() and not (STATE_DIR / name).exists():
+        return old
+    return STATE_DIR / name
+
+
 def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
           rois_path: Path = None) -> None:
     _Handler.mesc_path = Path(mesc_path)
-    # Beside the working directory, not beside the recording: raw data is not ours to add
-    # files to, and the disk it lives on is often read-only or simply not ours.
-    _Handler.rois_path = Path(rois_path) if rois_path else Path.cwd() / f"{Path(mesc_path).stem}_rois.json"
+    _Handler.rois_path = Path(rois_path) if rois_path else default_rois_path(mesc_path)
     with MescFile(mesc_path) as f:                       # fail here, not in the browser
         n = len(f.units())
     # Threaded, and it matters: on a 30-unit recording the page asks for 30 thumbnails at once
@@ -915,7 +929,7 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8020)
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--rois", type=Path, default=None,
-                    help="where the ROI set lives (default: ./<name>_rois.json)")
+                    help="where the ROI set lives (default: ~/mesc-viewer/<name>_rois.json)")
     a = ap.parse_args()
     if not a.mesc.exists():
         print(f"  not found: {a.mesc}")

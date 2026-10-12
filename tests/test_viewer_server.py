@@ -528,3 +528,14 @@ def test_the_reader_reads_the_lut_and_tolerates_its_absence(recording, tmp_path)
         u.attrs["Channel_0_LUT_VecBounds"] = np.array([5.0, 5.0])   # not a window
     with MescFile(bare) as f:
         assert f.unit("MSession_0/MUnit_0").channels[0].lut is None
+
+
+def test_default_state_lives_in_one_home_folder(tmp_path, monkeypatch):
+    from mesc_io import viewer
+    monkeypatch.setattr(viewer, "STATE_DIR", tmp_path / "state")
+    monkeypatch.chdir(tmp_path)
+    assert viewer.default_rois_path(Path("/x/rec.mesc")) == tmp_path / "state" / "rec_rois.json"
+    (tmp_path / "rec_rois.json").write_text("{}")             # a set left by 0.3.8 in the cwd
+    assert viewer.default_rois_path(Path("/x/rec.mesc")) == tmp_path / "rec_rois.json"
+    (tmp_path / "state").mkdir(); (tmp_path / "state" / "rec_rois.json").write_text("{}")
+    assert viewer.default_rois_path(Path("/x/rec.mesc")) == tmp_path / "state" / "rec_rois.json"

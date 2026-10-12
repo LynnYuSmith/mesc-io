@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.9 — 2026-10-12
+
+**One folder for what you drew.**
+
+- **ROI sets and views live in `~/mesc-viewer/`.** The viewer used to save a recording's
+  `<name>_rois.json` and `<name>_view.json` in the working directory, so launched from home it
+  left two files in its root for every recording it ever opened. Now they go to one folder,
+  `~/mesc-viewer/`, whatever directory the viewer is started from (`--rois` still puts a set
+  anywhere). A set already in the working directory, where 0.3.8 and earlier wrote it, is still
+  found and used, so nothing drawn before is lost; move it into `~/mesc-viewer/` to make it the
+  one copy.
+
 ## 0.3.8 — 2026-10-05
 
 **A steady picture while scrubbing.**

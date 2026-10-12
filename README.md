@@ -69,7 +69,7 @@ the middle — scrub it, average a window of N frames, zoom into a place by drag
 ROIs on the right (spot, rectangle, polygon; drag to move, type a size); every ROI's time
 course along the bottom, raw or dF/F by our pipeline's method (`mesc_io.dff`, numpy only,
 held against the pipeline's functions in the tests), stacked or overlaid, zoomed by dragging a box. ROIs belong to the
-unit they were drawn on and are saved as you go, beside the working directory, never beside
+unit they were drawn on and are saved as you go, in one folder, `~/mesc-viewer/`, never beside
 the raw file; so is the view itself, so reopening the file puts you back where you were.
 A z-stack is shown in slices and microns, with a max projection, a **3D** view you can turn
 (MIP, semi-transparent, or coloured by depth) and **XYZ** orthogonal views through one crosshair.

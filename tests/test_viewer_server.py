@@ -539,3 +539,29 @@ def test_default_state_lives_in_one_home_folder(tmp_path, monkeypatch):
     assert viewer.default_rois_path(Path("/x/rec.mesc")) == tmp_path / "rec_rois.json"
     (tmp_path / "state").mkdir(); (tmp_path / "state" / "rec_rois.json").write_text("{}")
     assert viewer.default_rois_path(Path("/x/rec.mesc")) == tmp_path / "state" / "rec_rois.json"
+
+
+def test_private_window_on_windows(tmp_path, monkeypatch):
+    """Windows browsers are not on PATH: found where their installers put them, opened private."""
+    from mesc_io import viewer
+    calls = []
+    monkeypatch.setattr(viewer.sys, "platform", "win32")
+    monkeypatch.setattr(viewer.subprocess, "Popen", lambda argv, **k: calls.append(argv))
+    monkeypatch.setattr(viewer.webbrowser, "open", lambda url: calls.append(["default", url]))
+    for k in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
+        monkeypatch.delenv(k, raising=False)
+    edge = tmp_path / "pf86" / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+    edge.parent.mkdir(parents=True)
+    edge.write_text("")
+    monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "pf86"))
+    assert viewer.open_private("http://x/") == "Edge, private window"
+    assert calls[-1][1] == "--inprivate"
+    chrome = tmp_path / "local" / "Google" / "Chrome" / "Application" / "chrome.exe"
+    chrome.parent.mkdir(parents=True)
+    chrome.write_text("")
+    monkeypatch.setenv("LocalAppData", str(tmp_path / "local"))
+    assert viewer.open_private("http://x/") == "Chrome, private window"
+    assert calls[-1][1] == "--incognito"
+    monkeypatch.delenv("LocalAppData")
+    monkeypatch.delenv("ProgramFiles(x86)")
+    assert "NOT private" in viewer.open_private("http://x/")

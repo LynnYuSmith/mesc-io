@@ -55,6 +55,7 @@ import argparse
 import base64
 import io
 import json
+import os
 import sys
 import subprocess
 import threading
@@ -869,6 +870,26 @@ def open_private(url: str) -> str:
         # opening a normal Safari window while claiming privacy would be the worst outcome.
         webbrowser.open(url)
         return "default browser (no Chrome/Firefox/Edge found — NOT private)"
+    if sys.platform.startswith("win"):
+        # Windows: the browsers are not on PATH; look where their installers put them.
+        env = os.environ
+        for base, rel, flag, label in (
+                ("ProgramFiles", ("Google", "Chrome", "Application", "chrome.exe"), "--incognito", "Chrome"),
+                ("ProgramFiles(x86)", ("Google", "Chrome", "Application", "chrome.exe"), "--incognito", "Chrome"),
+                ("LocalAppData", ("Google", "Chrome", "Application", "chrome.exe"), "--incognito", "Chrome"),
+                ("ProgramFiles(x86)", ("Microsoft", "Edge", "Application", "msedge.exe"), "--inprivate", "Edge"),
+                ("ProgramFiles", ("Microsoft", "Edge", "Application", "msedge.exe"), "--inprivate", "Edge"),
+                ("ProgramFiles", ("Mozilla Firefox", "firefox.exe"), "-private-window", "Firefox")):
+            exe = Path(env.get(base, ""), *rel)
+            if env.get(base) and exe.is_file():
+                try:
+                    subprocess.Popen([str(exe), flag, url],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return f"{label}, private window"
+                except OSError:
+                    continue
+        webbrowser.open(url)
+        return "default browser (no Chrome/Edge/Firefox found — NOT private)"
     for exe, flag in (("google-chrome", "--incognito"), ("chromium", "--incognito"),
                       ("firefox", "-private-window")):
         try:

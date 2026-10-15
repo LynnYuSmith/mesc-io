@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.10 — 2026-10-15
+
+**A private window on Windows too.**
+
+- **The viewer opens in a private window on Windows.** Chrome and Edge are not on PATH there, so
+  the viewer looked for them by name, found nothing and fell back to an ordinary window of the
+  default browser, which keeps history and cached pages. It now looks where their installers put
+  them (Program Files, Program Files (x86), the user's AppData) and opens Chrome with
+  `--incognito`, Edge with `--inprivate` or Firefox with `-private-window`. If none is there, it
+  still says plainly that the window is NOT private.
+
 ## 0.3.9 — 2026-10-12
 
 **One folder for what you drew.**

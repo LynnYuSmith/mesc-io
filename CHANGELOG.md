@@ -20,6 +20,21 @@
   point follows the cursor until it is placed; a third click starts a new ruler; Esc clears it.
   It is not an ROI: nothing is saved or exported, and it works the same in the flipped MESc view.
 
+## 0.3.14 — 2026-10-27
+
+**Panes that fit the window.** Found by clicking through the viewer (by hand and with a scripted
+monkey in a real Chrome) before 0.4.
+
+- **The tools no longer get cut off.** The sizes of the traces pane, the metadata pane and the tools
+  column were limited only while a splitter was dragged; a size saved on a bigger screen, a window made
+  smaller, or one pane grown after another pushed panes off the window — the tools cut off with no
+  scrollbar, the metadata below its column, at worst the traces pane over the unit list and the image
+  squeezed to nothing. Saved sizes are now capped by the window as it is: the image keeps at least
+  240 × 200 px, the metadata pane gives way to the unit list, and the tools column scrolls. Checked from
+  1440 × 900 down to 900 × 600, with every pane at its default and at its maximum
+  (`tests/view_layout_real_chrome.js`).
+- **The 3D ceiling slider no longer throws** when it is moved on a file with no stack loaded.
+
 ## 0.3.13 — 2026-10-27
 
 **Motion correction on an 8 GB laptop, and a page that keeps up.**

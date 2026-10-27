@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+**Faster on old laptops.** Our first user's five-year-old Mac took 15–20 minutes for the traces.
+
+- **Traces are about 5× faster** — 15.9 s → 3.0 s for 40 ROIs over 3,715 frames of 512² on a current
+  laptop, with the same numbers. Three changes, each checked against the old result:
+  - **Reading:** MESc stores one gzip chunk per frame. Those chunks are now read as stored bytes (under
+    h5py's own lock — HDF5 is not thread-safe and the viewer serves several requests at once) and
+    inflated in a few threads; h5py's own path spent most of its time outside zlib. A whole unit reads
+    3.5× faster, byte-identical; any other layout goes through h5py as before, and a corrupt or
+    unwritten chunk gets h5py's own error or fill value.
+  - **The ROI pass:** done on the stored integers and converted at the end (the conversion is linear),
+    with all ROIs gathered at once instead of each one scanning the whole frame. 2× faster; the traces
+    differ by at most 1e-13.
+  - **The dF/F baseline:** at the ends of the rolling window (most of a short unit, for a 60-s window)
+    the quantiles came from one np.quantile call per frame — 74,000 calls for 40 ROIs. One sorted
+    window is now moved a point at a time instead. Bit-identical, 4× faster.
+- **3D keeps up on a weak GPU.** While the stack is turned, moved or zoomed it is drawn at half the CSS
+  pixels with rays stepped twice as far, and ~180 ms after the hand stops at full quality again.
+
 ## 0.3.11 — 2026-10-27
 
 **Two channels at once in 3D, in two colours.**

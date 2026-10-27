@@ -18,16 +18,96 @@ Read-only. Nothing here modifies a file.
 """
 from __future__ import annotations
 
+import os
 import warnings
 import xml.etree.ElementTree as ET
+import zlib
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
 import h5py
 import numpy as np
+from h5py._objects import phil as _phil
 
 from .errors import MescIOError
+
+_THREADS = max(1, min(8, (os.cpu_count() or 2)))
+
+
+def _per_frame_gzip(ds) -> bool:
+    """MESc's own layout: one chunk per frame, deflate and nothing else. Only then are the
+    chunks read raw and inflated here; anything else goes through h5py untouched."""
+    try:
+        return (ds.chunks is not None and ds.ndim == 3 and ds.chunks == (1,) + ds.shape[1:]
+                and ds.compression == "gzip" and not ds.shuffle and not ds.fletcher32
+                and ds.scaleoffset is None and ds.dtype.byteorder in ("=", "<", "|"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _frames(ds, idx) -> np.ndarray:
+    """``ds[idx]`` for a list of frame indices — fast for MESc's one-chunk-per-frame gzip.
+
+    h5py's own path spends most of its time outside zlib (5 s for 3,715 frames of 512² where
+    the inflating is 2.6 s). Here each frame's chunk is read as stored bytes and inflated in a
+    few threads — zlib lets go of the GIL — so the same frames come in under a second on a
+    current laptop, byte-identical. A chunk that is not there (never written) or does not
+    inflate falls back to h5py for that frame, so its error, or its fill value, is h5py's.
+    """
+    idx = list(idx)
+    out = np.empty((len(idx),) + ds.shape[1:], dtype=ds.dtype)
+    if not idx:
+        return out
+    n_bytes = int(np.prod(ds.shape[1:])) * ds.dtype.itemsize
+
+    # the stored bytes are read one after another — HDF5 itself must never be entered from two
+    # threads (it crashes) — and only the inflating, which is pure zlib, is spread over threads
+    # h5py's own global lock: HDF5 is not thread-safe, and the viewer serves requests from
+    # several threads — without it two requests reading raw chunks at once segfaulted inside
+    # libhdf5 (7 crashes on 27 Oct 2026, the first day this path ran under the viewer)
+    raws = []
+    with _phil:
+        for i in idx:
+            try:
+                raws.append(ds.id.read_direct_chunk((i,) + (0,) * (ds.ndim - 1))[1])
+            except Exception:  # noqa: BLE001 — an unwritten chunk: h5py answers for it below
+                raws.append(None)
+
+    def one(k):
+        if raws[k] is None:
+            return k
+        try:
+            buf = zlib.decompress(raws[k])
+            if len(buf) != n_bytes:
+                return k
+            out[k] = np.frombuffer(buf, dtype=ds.dtype).reshape(ds.shape[1:])
+            return None
+        except zlib.error:
+            return k
+    with ThreadPoolExecutor(_THREADS) as ex:
+        bad = [k for k in ex.map(one, range(len(idx))) if k is not None]
+    for k in bad:                        # h5py's answer — or h5py's error — for these frames
+        out[k] = ds[idx[k]]
+    return out
+
+
+def _read(ds, frames):
+    """``ds[frames]`` (frames None, a slice, or indices), by the fast path when the layout allows."""
+    if not _per_frame_gzip(ds):
+        return ds[:] if frames is None else ds[frames]
+    n = ds.shape[0]
+    if frames is None:
+        return _frames(ds, range(n))
+    if isinstance(frames, slice):
+        return _frames(ds, range(n)[frames])
+    if isinstance(frames, (int, np.integer)):
+        return _frames(ds, [range(n)[frames]])[0]
+    arr = np.asarray(frames)
+    if arr.dtype == bool:
+        return _frames(ds, np.flatnonzero(arr))
+    return _frames(ds, [range(n)[int(i)] for i in arr.ravel()])
 from .values import ConversionWarning, to_reader_units
 
 __all__ = ["MescFile", "Unit", "Channel", "MescError"]
@@ -252,7 +332,7 @@ class MescFile:
         ds = self._f[f"{u.path}/{ch.dataset}"]
         if max_gb is not None:
             self._check_size(ds, frames, reader_units, max_gb, f"{u.path}/{ch.name}")
-        block = ds[:] if frames is None else ds[frames]
+        block = _read(ds, frames)
         if not reader_units:
             return block
         self._warn_unconverted(u, ch)
@@ -273,7 +353,7 @@ class MescFile:
         if reader_units:
             self._warn_unconverted(u, ch)
         for start in range(0, ds.shape[0], block):
-            chunk = ds[start:start + block]
+            chunk = _read(ds, slice(start, start + block))
             yield (to_reader_units(chunk, offset=ch.offset, scale=ch.scale)
                    if reader_units else chunk)
 

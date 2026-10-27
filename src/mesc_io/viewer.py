@@ -128,6 +128,34 @@ def _mask_of(roi: dict, h: int, w: int) -> np.ndarray:
     return mask
 
 
+def _mask_means(f, unit: str, ch: int, masks, block: int = 200) -> np.ndarray:
+    """The mean of every mask in every frame, in reader units — ``(n_masks, n_frames)``.
+
+    Done on the stored integers and converted afterwards: the conversion is linear, so the
+    mean of the converted pixels is the converted mean, and a float64 copy of every whole frame
+    (a quarter of a gigabyte per 100 frames at 512²) is never made. All masks are gathered in
+    one ``take`` of their pixels and summed with ``reduceat``, instead of each mask scanning
+    the whole frame: on a five-year-old Mac the traces took 15–20 minutes (the first user's
+    report, 27 Oct 2026), and this pass was most of it.
+    """
+    idx = [np.flatnonzero(m.ravel()) for m in masks]
+    sizes = np.array([len(i) for i in idx])
+    if (sizes == 0).any():
+        raise ValueError("an ROI covers no pixel")
+    flat_idx = np.concatenate(idx)
+    starts = np.concatenate([[0], np.cumsum(sizes)[:-1]])
+    u = f.unit(unit)
+    c = u.channels[ch]
+    if not c.converted:
+        f._warn_unconverted(u, c)
+    out = []
+    for raw in f.iter_frames(unit, channel=ch, block=block, reader_units=False):
+        g = raw.reshape(len(raw), -1).take(flat_idx, axis=1).astype(np.float64)
+        out.append(np.add.reduceat(g, starts, axis=1) / sizes)
+    means = np.concatenate(out, axis=0).T
+    return means * float(c.scale) + float(c.offset)
+
+
 def _png(img: np.ndarray, window) -> bytes:
     """8-bit PNG of one frame through a display window.
 
@@ -423,14 +451,7 @@ class _Handler(BaseHTTPRequestHandler):
             y0, x0, y1, x1 = darkest_patch(mean_img, params.bg_patch)
             patch = np.zeros((u.height, u.width), bool); patch[y0:y1, x0:x1] = True
             masks.append(patch)
-            acc = [[] for _ in masks]
-            # block 100, not 500: 500 × 512² × 8 B was a gigabyte of float64 per block on
-            # the request thread
-            for block in f.iter_frames(unit, channel=ch, block=100, reader_units=True):
-                flat = block.reshape(len(block), -1)
-                for k, m in enumerate(masks):
-                    acc[k].append(flat[:, m.ravel()].mean(axis=1))
-            traces = [np.concatenate(a) for a in acc]
+            traces = list(_mask_means(f, unit, ch, masks))
         bg_trace = traces.pop()
         fs = u.frame_rate_hz
         # No rate, no dF/F: the baseline window is in seconds, and a guessed 30 Hz would turn

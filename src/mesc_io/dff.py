@@ -111,6 +111,46 @@ def poly_baseline(y: np.ndarray, deg: int, max_it: int = 100, tol: float = 1e-3)
     return base
 
 
+def _quantile_of_sorted(a: list, q: float) -> float:
+    """numpy's default (``linear``) quantile of an already sorted list, to the last bit: the same
+    virtual index and the same two-sided interpolation numpy's ``_lerp`` uses."""
+    n = len(a)
+    v = q * (n - 1)
+    lo = int(np.floor(v))
+    hi = min(lo + 1, n - 1)
+    t = v - lo
+    x, y = a[lo], a[hi]
+    d = y - x
+    return y - d * (1 - t) if t >= 0.5 else x + d * t
+
+
+def _sliding_quantiles(y: np.ndarray, spans, q: float, out: np.ndarray, rows) -> None:
+    """Quantiles of the windows ``y[lo:hi]`` for ``(lo, hi) in spans``, written to ``out[rows]``.
+
+    The windows overlap by all but a point or two, so one sorted list is kept and moved: a
+    point in, a point out, by bisection. At the ends of a 60-s baseline the windows are most of
+    the trace, and calling np.quantile on each one was ~74,000 calls for 40 ROIs — seconds on
+    a fast machine and minutes on a five-year-old one (the first user's report, 27 Oct 2026).
+    """
+    from bisect import bisect_left, insort
+    cur_lo = cur_hi = None
+    s: list = []
+    for (lo, hi), r in zip(spans, rows):
+        if cur_lo is None or lo >= cur_hi or hi <= cur_lo:
+            s = sorted(y[lo:hi].tolist())
+        else:
+            for j in range(cur_lo, lo):                 # leaving on the left
+                del s[bisect_left(s, y[j])]
+            for j in range(lo, cur_lo):                 # arriving on the left
+                insort(s, y[j])
+            for j in range(hi, cur_hi):                 # leaving on the right
+                del s[bisect_left(s, y[j])]
+            for j in range(cur_hi, hi):                 # arriving on the right
+                insort(s, y[j])
+        cur_lo, cur_hi = lo, hi
+        out[r] = _quantile_of_sorted(s, q)
+
+
 def rolling_quantile(y: np.ndarray, w: int, q: float) -> np.ndarray:
     """pandas ``rolling(w, center=True, min_periods=1).quantile(q)`` — the window shrinks at
     the ends instead of padding, and the quantile is linear-interpolated like numpy's."""
@@ -118,18 +158,19 @@ def rolling_quantile(y: np.ndarray, w: int, q: float) -> np.ndarray:
     n = y.size
     half = w // 2
     out = np.empty(n)
-    # the middle, vectorised; the ends, one by one (they are few)
+    span = lambda i: (max(0, i - half), min(n, i + half + 1))
+    # the middle, vectorised; the ends — which for a 60-s window are most of a 80-s unit — by
+    # one sorted window moved a point at a time
     if n >= w:
         from numpy.lib.stride_tricks import sliding_window_view
         mid = np.quantile(sliding_window_view(y, w), q, axis=1)
         out[half:half + mid.size] = mid
-        for i in range(half):
-            out[i] = np.quantile(y[:i + half + 1], q)
-        for i in range(half + mid.size, n):
-            out[i] = np.quantile(y[i - half:], q)
+        left = range(half)
+        right = range(half + mid.size, n)
+        _sliding_quantiles(y, [span(i) for i in left], q, out, left)
+        _sliding_quantiles(y, [span(i) for i in right], q, out, right)
     else:
-        for i in range(n):
-            out[i] = np.quantile(y[max(0, i - half):i + half + 1], q)
+        _sliding_quantiles(y, [span(i) for i in range(n)], q, out, range(n))
     return out
 
 

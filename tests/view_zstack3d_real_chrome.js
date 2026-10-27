@@ -306,6 +306,17 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   console.log("  stack:", JSON.stringify(meta));
   console.log("  from above  :", JSON.stringify(top));
   console.log("  turned      :", JSON.stringify(turned), JSON.stringify(ang));
+  // turning the stack draws it coarse while the hand moves and full again once it stops
+  {
+    const full = await ev("(()=>{const c=document.getElementById('vol');return [c.width,c.height]})()");
+    await ev("volInteract(); volDraw(); 'ok'");
+    const busy = await ev("(()=>{const c=document.getElementById('vol');return [c.width,c.height,volBusy]})()");
+    await sleep(450);
+    const rest = await ev("(()=>{const c=document.getElementById('vol');return [c.width,c.height,volBusy]})()");
+    console.log("  interactive :", JSON.stringify({ full, busy, rest }));
+    if (!(busy[2] && busy[0] < full[0] && busy[1] < full[1])) fail("a moving 3D view was not drawn coarser: " + JSON.stringify([full, busy]));
+    if (rest[2] || rest[0] !== full[0] || rest[1] !== full[1]) fail("the 3D view did not come back to full quality at rest: " + JSON.stringify([full, rest]));
+  }
   console.log("  depth       :", JSON.stringify(depth));
   console.log("  glass       :", JSON.stringify(glass));
   console.log("  restored    :", back.mode, "yaw", back.yaw.toFixed(2));

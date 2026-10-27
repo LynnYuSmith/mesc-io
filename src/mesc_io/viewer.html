@@ -1710,10 +1710,19 @@ function volSetTarget(p, ext) {          // a world point -> the target, kept in
   V.vol.ty = Math.max(-1, Math.min(1, p[1] / ext[1]));
   V.vol.tz = Math.max(-1, Math.min(1, p[2] / ext[2]));
 }
+/* While the stack is being turned, moved or zoomed it is drawn at half the CSS pixels (no retina
+   factor) and with rays stepped twice as far; ~180 ms after the last movement it is drawn again at
+   full quality. A weak GPU then keeps up with the hand — on a retina screen a moving frame is an
+   eighth of the pixels — and what you stop on is the real picture (VTK's interactive/still split). */
+let volBusy = false, volIdleT = 0;
+function volInteract() {
+  volBusy = true; clearTimeout(volIdleT);
+  volIdleT = setTimeout(() => { volBusy = false; volDraw(); }, 180);
+}
 function volDraw() {
   if (!V.vol.on || !volMeta || !unit) return;
   if (volTexKey !== volKey + "|" + volCutKey()) volUpload();   // new stack, or a new cut
-  const gl = GL, cv = $("vol"), dpr = window.devicePixelRatio || 1;
+  const gl = GL, cv = $("vol"), dpr = volBusy ? 0.5 : (window.devicePixelRatio || 1);
   const W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   gl.viewport(0, 0, W, H);
@@ -1737,7 +1746,7 @@ function volDraw() {
     gl.uniform3fv(u("colA"), cols[0]); gl.uniform3fv(u("colB"), cols[1]); gl.uniform1i(u("dch"), dch);
     gl.uniform1f(u("thr"), t[dch]); gl.uniform1f(u("ceil_"), c2[dch]);   // depth: the one channel, its own floor
   }
-  gl.uniform1f(u("dt"), 1.0 / Math.max(Wx, Hy, D * V.vol.z * vz / Math.min(vx, vy)));
+  gl.uniform1f(u("dt"), (volBusy ? 2.0 : 1.0) / Math.max(Wx, Hy, D * V.vol.z * vz / Math.min(vx, vy)));
   gl.uniform1i(u("mode"), { mip: 0, glass: 1, depth: 2 }[V.vol.mode]);
   gl.uniform1i(u("deep"), V.vol.deep ? 1 : 0); gl.uniform1i(u("fy"), V.flipY ? 1 : 0);
   gl.uniform1f(u("slz"), (V.frame + .5) / D); gl.uniform1f(u("slw"), V.proj ? 0 : .5 / D);
@@ -1794,11 +1803,11 @@ cvol.addEventListener("pointermove", e => {
     const dx = -(e.clientX - volDrag.x) * k, dy = (e.clientY - volDrag.y) * k;
     const t0 = [volDrag.tx * c.ext[0], volDrag.ty * c.ext[1], volDrag.tz * c.ext[2]];
     volSetTarget([0, 1, 2].map(i => t0[i] + dx * c.R[i] + dy * c.U[i]), c.ext);
-    volDraw(); return;
+    volInteract(); volDraw(); return;
   }
   V.vol.yaw = volDrag.yaw + (e.clientX - volDrag.x) * 0.01;
   V.vol.pitch = Math.max(-1.55, Math.min(1.55, volDrag.pitch + (e.clientY - volDrag.y) * 0.01));
-  volDraw();
+  volInteract(); volDraw();
 });
 const volEnd = e => { if (!volDrag) return; volDrag = null; cvol.classList.remove("drag");
   try { cvol.releasePointerCapture(e.pointerId); } catch (_) {} saveView(); };
@@ -1841,7 +1850,7 @@ function volPick(c, rd) {
   }
   return bt < 0 ? null : [o[0] + rd[0] * bt, o[1] + rd[1] * bt, o[2] + rd[2] * bt];
 }
-$("vol").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagation();
+$("vol").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagation(); volInteract();
   if (!volMeta) return;
   const r = cvol.getBoundingClientRect(), c = volCam(r.width / r.height);
   const nd = Math.max(volDmin(), Math.min(4, V.vol.dist * Math.exp(e.deltaY * 0.0012))), s = nd / V.vol.dist;

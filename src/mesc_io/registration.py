@@ -29,6 +29,8 @@ Needs Suite2p: `pip install mesc-io[register]`.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
@@ -80,6 +82,30 @@ DEFAULTS = {"nonrigid": True, "block_size": 64, "max_shift": 0.1, "max_shift_nr"
 #: frame, commented "ignore" — so this is the ordinary case, not the exceptional one.
 MIN_FRAMES_FOR_REFERENCE = 16
 
+#: Pixels Suite2p registers per batch when `batch` is not given: 1000 frames of 256^2, 250 of
+#: 512^2. Suite2p's FFT buffers grow with the batch, and 1000 frames of 512^2 asked for ~2 GB
+#: of them — on a 512^2 recording that was 28.5 s per 1000 frames against 13.0 s at 250, with
+#: the same output. Every frame is registered on its own against the reference, so the batch
+#: changes speed and memory, not the result (with this module's settings; see `_batch_for`).
+BATCH_PIXELS = 1000 * 256 * 256
+MAX_BATCH = 1000
+
+
+def _batch_for(frame_shape, batch: Optional[int] = None) -> int:
+    """Frames per Suite2p batch: `batch` if given, else `BATCH_PIXELS` worth, at most 1000.
+
+    The output does not depend on it as long as nothing in the ops mixes frames within a batch:
+    `smooth_sigma_time > 0` (this module sets 0) and `do_bidiphase` without a fixed `bidiphase`
+    (off by default) do. Pass `batch=1000` to reproduce a run of 0.3.11 or earlier exactly
+    when you set either.
+    """
+    if batch is not None:
+        if int(batch) < 1:
+            raise RegistrationError(f"batch must be at least 1 frame, got {batch}")
+        return int(batch)
+    ly, lx = (int(v) for v in frame_shape[-2:])
+    return int(max(1, min(MAX_BATCH, BATCH_PIXELS // max(1, ly * lx))))
+
 
 class RegistrationError(MescIOError, RuntimeError):
     """Registration could not be run, or the data does not suit it."""
@@ -112,7 +138,8 @@ def _ops(fs: float, nonrigid: bool, block_size: int, max_shift: float,
 
     Not a fresh guess: they are what the calcium-imaging pipeline's sessions run — the ops
     ``lib/mesc/concat_mc._suite2p_ops_base`` builds (`maxregshift=0.1`, `smooth_sigma_time=0`,
-    `snr_thresh=1.2`, `batch_size=1000`), called with `PipelineConfig`'s `block_size=64` and
+    `snr_thresh=1.2`, `batch_size=1000` — here the batch follows the frame size, see
+    `_batch_for`), called with `PipelineConfig`'s `block_size=64` and
     `maxregshift_nr=3.0` and with `suite2p_nonrigid: true`, which every session YAML sets. The ones that happen to agree
     with Suite2p's own defaults are spelled out anyway — a silent agreement is not a decision,
     and if a future Suite2p moves one of them we want to see it move.
@@ -150,6 +177,20 @@ def _ops(fs: float, nonrigid: bool, block_size: int, max_shift: float,
                 "A misspelled key would have changed nothing and said nothing.")
         ops.update(extra)
     return ops
+
+
+def _to_stored(moved, scale: int, out: np.ndarray) -> None:
+    """Registered int16 frames back to the file's uint16, written into `out`.
+
+    Negative values (Suite2p's interpolation can undershoot near zero) become 0. At scale 1 the
+    int16 is clipped directly — the same numbers as going through int32, without two copies of
+    the batch in int32.
+    """
+    moved = np.asarray(moved)
+    if scale == 1 and moved.dtype == np.int16:
+        np.copyto(out, np.maximum(moved, 0), casting="unsafe")
+    else:
+        out[...] = np.clip(np.asarray(moved, dtype=np.int32) * scale, 0, 65535).astype(np.uint16)
 
 
 def _as_int16(block: np.ndarray, scale: int) -> np.ndarray:
@@ -279,7 +320,7 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
                   block_size: Optional[int] = None, max_shift: Optional[float] = None,
                   max_shift_nr: Optional[float] = None,
                   preset=None, ops: Optional[Dict] = None,
-                  batch: int = 1000, tag: Optional[str] = "_MC",
+                  batch: Optional[int] = None, tag: Optional[str] = "_MC",
                   progress=None, on_skip=None) -> Dict:
     """Register the units of `source` and write the result into a copy of it.
 
@@ -315,6 +356,15 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
     `{"1Preg": True, "spatial_hp_reg": 42}` when a smooth background dominates the match. A key
     Suite2p does not have raises rather than being ignored.
 
+    `batch` is how many frames go to Suite2p at once. By default it is scaled to the frame size
+    (1000 frames of 256^2, 250 of 512^2; see `BATCH_PIXELS`), which keeps Suite2p's buffers
+    small without changing the output. Pass a number to fix it.
+
+    Each unit is written into the output as soon as it is registered and then let go, so a
+    file of several recordings needs the memory of one. The output is first written as
+    `<out>.partial` and renamed when everything is in, so a run that fails leaves no
+    half-written file under the name asked for.
+
     Returns a report: `groups` (each with its anchor, members and reference image), and per
     unit the per-frame y/x shifts and the anchor it was registered to, so the registration
     can be inspected or reapplied. The frames are written through `mesc_io.writeback`, which
@@ -328,7 +378,7 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
     built from the recording, so it lands on some average state and every shift is measured
     from there. Only differences between frames are absolute.
     """
-    from .writeback import write_frames
+    from .writeback import _Output
 
     from .presets import PresetError, load_preset
     used = None
@@ -349,6 +399,11 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
 
     reg, _ = _suite2p()
     source, out = Path(source), Path(out)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if out.exists() and out.resolve() == source.resolve():
+        raise RegistrationError(f"{out} is the source itself — the output must be a new file")
+    partial_out = out.with_name(out.name + ".partial")
     with MescFile(source) as f:
         unit_groups = _resolve_groups(f, units, groups, reference_from)
         all_paths = [p for g in unit_groups for p in g]
@@ -375,91 +430,112 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
                   "ops": dict(ops or {}),
                   "leading_flat_frames": dark, "groups": [], "units": {},
                   "skipped": {}}
-        corrected: Dict[str, Dict[str, np.ndarray]] = {}
 
-        for group in unit_groups:
-            anchor = group[0]
-            if f.unit(anchor).z_step_um:
-                # Its frames are slices at different depths, not one field over time. Aligning
-                # them to a single reference is not motion correction: on the 2026-09-24
-                # calibration file it moved the slices of five stacks by 35 to 72 pixels and
-                # wrote them back tagged as corrected.
-                _skip(report, group, f"{anchor} is a z-stack ({f.unit(anchor).z_step_um:g} µm "
-                                     "per slice) — its third axis is depth, not time, and "
-                                     "there is no motion to correct across it", on_skip)
-                continue
-            usable = f.unit(anchor).n_frames - dark[anchor]
-            if usable < MIN_FRAMES_FOR_REFERENCE:
-                _skip(report, group, f"{anchor} has {usable} usable frame(s), fewer than "
-                                     f"{MIN_FRAMES_FOR_REFERENCE} — no reference can be built",
-                      on_skip)
-                continue
-            a_unit = f.unit(anchor)
-            group_ops = _ops(a_unit.frame_rate_hz or 30.0, nonrigid, block_size,
-                             max_shift, max_shift_nr, ops, batch)
-            a_dark, a_n = dark[anchor], a_unit.n_frames
-            if a_n - a_dark <= 0:
-                raise RegistrationError(
-                    f"{anchor}: every frame is flat, there is nothing to build a reference on")
-            take = min(group_ops["nimg_init"], a_n - a_dark)
-            idx = np.unique(np.linspace(a_dark, a_n - 1, take).astype(int))
-            ref_src = f.read(anchor, channel=channel, frames=idx, reader_units=False,
-                             max_gb=None)
-            try:
-                ref = reg.compute_reference(_as_int16(ref_src, scale), ops=group_ops)
-                masks = reg.compute_reference_masks(ref, ops=group_ops)
-            except Exception as exc:               # noqa: BLE001 — one bad unit is not the run
-                _skip(report, group, f"suite2p could not build a reference from {anchor}: "
-                                     f"{type(exc).__name__}: {exc}", on_skip)
-                continue
-            report["groups"].append({"anchor": anchor, "units": list(group), "reference": ref})
-
-            for path in group:
-                u = f.unit(path)
-                n_ch = len(u.channels)
-                out_by_channel = {c.name: np.empty(u.shape, dtype=np.uint16) for c in u.channels}
-                ys, xs = [], []
-                for start in range(0, u.n_frames, batch):
-                    sl = slice(start, min(start + batch, u.n_frames))
-                    block = f.read(path, channel=channel, frames=sl, reader_units=False,
-                                   max_gb=None)
-                    # register_frames returns the registered frames first, then the rigid
-                    # offsets, their correlation, the non-rigid offsets and theirs.
-                    moved_reg, y, x, _c, y1, x1, _c1, _ = reg.register_frames(
-                        masks, _as_int16(block, scale), ops=group_ops)
-                    ys.append(np.asarray(y)); xs.append(np.asarray(x))
-                    for c in u.channels:                  # every channel takes the same shifts
-                        if c.index == channel:
-                            moved = moved_reg             # already shifted by register_frames
-                        else:
-                            raw = f.read(path, channel=c.index, frames=sl, reader_units=False,
-                                         max_gb=None)
-                            moved = reg.shift_frames(_as_int16(raw, scale), y, x, y1, x1,
-                                                     blocks=masks[-1] if nonrigid else None,
-                                                     ops=group_ops)
-                        out_by_channel[c.name][sl] = np.clip(
-                            np.asarray(moved, dtype=np.int32) * scale, 0, 65535).astype(np.uint16)
-                # The flat head has no structure to align: registration matched it to noise, so
-                # put those frames back exactly as they were and zero their recorded shifts.
-                d = dark[path]
-                if d:
-                    for c in u.channels:
-                        out_by_channel[c.name][:d] = f.read(
-                            path, channel=c.index, frames=slice(0, d), reader_units=False,
-                            max_gb=None)
-                y_all, x_all = np.concatenate(ys), np.concatenate(xs)
-                if d:
-                    y_all[:d] = 0
-                    x_all[:d] = 0
-                report["units"][path] = {"y_shift": y_all, "x_shift": x_all,
-                                         "n_frames": u.n_frames, "n_channels": n_ch,
-                                         "leading_flat_frames": d,
-                                         "reference_from": anchor}
-                corrected[path] = out_by_channel
-                if progress:
-                    progress(path, report["units"][path])
-
-    write_frames(source, out, corrected, reader_units=False, tag=tag,
-                 tolerance=float("inf"))       # registration moves pixels on purpose
+        # The copy is made once and every unit is written into it as soon as it is registered,
+        # then let go: holding them all until the end peaked at ~23 GB for a file of three
+        # 512^2 recordings. A skipped unit is never written, so it reaches the output exactly
+        # as it was in the source.
+        partial_out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, partial_out)
+        try:
+            with _Output(partial_out, tag=tag) as dest:
+                for group in unit_groups:
+                    _register_group(f, reg, group, report, dest, dark, scale, channel,
+                                    nonrigid, block_size, max_shift, max_shift_nr, ops, batch,
+                                    progress, on_skip)
+        except BaseException:
+            partial_out.unlink(missing_ok=True)
+            raise
+    os.replace(partial_out, out)
     report["out"] = str(out)
     return report
+
+
+def _register_group(f, reg, group, report, dest, dark, scale, channel, nonrigid, block_size,
+                    max_shift, max_shift_nr, ops, batch, progress, on_skip) -> None:
+    """Build one group's reference, then register, write and let go of each of its units."""
+    anchor = group[0]
+    if f.unit(anchor).z_step_um:
+        # Its frames are slices at different depths, not one field over time. Aligning
+        # them to a single reference is not motion correction: on the 2026-09-24
+        # calibration file it moved the slices of five stacks by 35 to 72 pixels and
+        # wrote them back tagged as corrected.
+        _skip(report, group, f"{anchor} is a z-stack ({f.unit(anchor).z_step_um:g} µm "
+                             "per slice) — its third axis is depth, not time, and "
+                             "there is no motion to correct across it", on_skip)
+        return
+    usable = f.unit(anchor).n_frames - dark[anchor]
+    if usable < MIN_FRAMES_FOR_REFERENCE:
+        _skip(report, group, f"{anchor} has {usable} usable frame(s), fewer than "
+                             f"{MIN_FRAMES_FOR_REFERENCE} — no reference can be built",
+              on_skip)
+        return
+    a_unit = f.unit(anchor)
+    n_batch = _batch_for(a_unit.shape, batch)            # a group shares one frame size
+    group_ops = _ops(a_unit.frame_rate_hz or 30.0, nonrigid, block_size,
+                     max_shift, max_shift_nr, ops, n_batch)
+    a_dark, a_n = dark[anchor], a_unit.n_frames
+    if a_n - a_dark <= 0:
+        raise RegistrationError(
+            f"{anchor}: every frame is flat, there is nothing to build a reference on")
+    take = min(group_ops["nimg_init"], a_n - a_dark)
+    idx = np.unique(np.linspace(a_dark, a_n - 1, take).astype(int))
+    ref_src = f.read(anchor, channel=channel, frames=idx, reader_units=False,
+                     max_gb=None)
+    try:
+        ref = reg.compute_reference(_as_int16(ref_src, scale), ops=group_ops)
+        masks = reg.compute_reference_masks(ref, ops=group_ops)
+    except Exception as exc:               # noqa: BLE001 — one bad unit is not the run
+        _skip(report, group, f"suite2p could not build a reference from {anchor}: "
+                             f"{type(exc).__name__}: {exc}", on_skip)
+        return
+    report["groups"].append({"anchor": anchor, "units": list(group), "reference": ref})
+
+    for path in group:
+        u = f.unit(path)
+        n_ch = len(u.channels)
+        # The one copy of the output: registered batches are written straight into it.
+        out_by_channel = {c.name: np.empty(u.shape, dtype=np.uint16) for c in u.channels}
+        ys, xs = [], []
+        for start in range(0, u.n_frames, n_batch):
+            sl = slice(start, min(start + n_batch, u.n_frames))
+            block = f.read(path, channel=channel, frames=sl, reader_units=False,
+                           max_gb=None)
+            # register_frames returns the registered frames first, then the rigid
+            # offsets, their correlation, the non-rigid offsets and theirs.
+            moved_reg, y, x, _c, y1, x1, _c1, _ = reg.register_frames(
+                masks, _as_int16(block, scale), ops=group_ops)
+            ys.append(np.asarray(y)); xs.append(np.asarray(x))
+            for c in u.channels:                  # every channel takes the same shifts
+                if c.index == channel:
+                    moved = moved_reg             # already shifted by register_frames
+                else:
+                    raw = f.read(path, channel=c.index, frames=sl, reader_units=False,
+                                 max_gb=None)
+                    moved = reg.shift_frames(_as_int16(raw, scale), y, x, y1, x1,
+                                             blocks=masks[-1] if nonrigid else None,
+                                             ops=group_ops)
+                _to_stored(moved, scale, out_by_channel[c.name][sl])
+            del moved_reg, moved, block
+        # The flat head has no structure to align: registration matched it to noise, so
+        # put those frames back exactly as they were and zero their recorded shifts.
+        d = dark[path]
+        if d:
+            for c in u.channels:
+                out_by_channel[c.name][:d] = f.read(
+                    path, channel=c.index, frames=slice(0, d), reader_units=False,
+                    max_gb=None)
+        y_all, x_all = np.concatenate(ys), np.concatenate(xs)
+        if d:
+            y_all[:d] = 0
+            x_all[:d] = 0
+        report["units"][path] = {"y_shift": y_all, "x_shift": x_all,
+                                 "n_frames": u.n_frames, "n_channels": n_ch,
+                                 "leading_flat_frames": d,
+                                 "reference_from": anchor}
+        # Into the copy now, then let go, so the next unit does not wait behind this one in
+        # memory. Registration moves pixels on purpose, so the agreement cannot refuse it.
+        dest.put(path, out_by_channel, reader_units=False, tolerance=float("inf"))
+        del out_by_channel
+        if progress:
+            progress(path, report["units"][path])

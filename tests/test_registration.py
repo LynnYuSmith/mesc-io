@@ -318,3 +318,157 @@ def test_a_pixel_past_int16_is_saturated_not_wrapped_to_black():
     with pytest.warns(RegistrationWarning, match="saturated"):
         got = _as_int16(np.array([40000, 65535], dtype=np.uint16), 1)
     assert got.tolist() == [32767, 32767]                   # a plain cast gave [-25536, -1]
+
+
+# --- 0.3.12: each unit written as soon as it is registered, through the threaded deflate -----
+
+def _as_mesc_layout(src, dst):
+    """`src` rewritten the way MESc stores frames — one gzip-1 chunk per frame — with a second
+    channel, so the threaded deflate path and the channels-follow path are both exercised."""
+    import h5py
+    with h5py.File(src, "r") as a, h5py.File(dst, "w") as b:
+        for sname, sess in a.items():
+            for uname, unit in sess.items():
+                g = b.require_group(sname).create_group(uname)
+                for k, v in unit.attrs.items():
+                    g.attrs[k] = v
+                ch0 = unit["Channel_0"][()]
+                ch1 = (ch0 // 2 + 300).astype(np.uint16)
+                for name, data in (("Channel_0", ch0), ("Channel_1", ch1)):
+                    g.create_dataset(name, data=data, chunks=(1,) + data.shape[1:],
+                                     compression="gzip", compression_opts=1)
+                g.attrs["Channel_1_Conversion_ConversionLinearOffset"] = -1170.0
+                g.attrs["Channel_1_Conversion_ConversionLinearScale"] = 1.0
+    return dst
+
+
+def _every_chunk(path):
+    import h5py
+    out = {}
+    with h5py.File(path, "r") as f:
+        def visit(name, obj):
+            if isinstance(obj, h5py.Dataset):
+                out[name] = [obj.id.read_direct_chunk(obj.id.get_chunk_info(i).chunk_offset)
+                             for i in range(obj.id.get_num_chunks())]
+            out[name + "@attrs"] = {k: np.asarray(v).tobytes() for k, v in obj.attrs.items()}
+        f.visititems(visit)
+    return out
+
+
+def test_per_unit_writing_gives_the_file_the_old_end_of_run_write_gave(two_fields_mesc,
+                                                                       tmp_path, monkeypatch):
+    """The old code registered everything, then wrote it all with `write_frames`. Writing each
+    unit as it is done must leave the same file: every chunk's bytes and every attribute."""
+    import mesc_io.writeback as wb
+    src = _as_mesc_layout(two_fields_mesc[0], tmp_path / "src.mesc")
+    held = {}
+    real_put = wb._Output.put
+
+    def keep(self, unit, per_channel, **kw):
+        held[unit] = {ch: a.copy() for ch, a in per_channel.items()}
+        return real_put(self, unit, per_channel, **kw)
+
+    monkeypatch.setattr(wb._Output, "put", keep)
+    register_file(src, tmp_path / "new.mesc")
+    assert sorted(held) == ["MSession_0/MUnit_0", "MSession_0/MUnit_1"]
+    # the 0.3.11 ending, verbatim: copy, h5py writes 500 frames at a time, then the tags
+    import shutil
+    import h5py
+    shutil.copy2(src, tmp_path / "old.mesc")
+    with h5py.File(tmp_path / "old.mesc", "r+") as d:
+        for unit_path, per_channel in held.items():
+            for ch, stored in per_channel.items():
+                for c0 in range(0, stored.shape[0], 500):
+                    d[unit_path][ch][c0:c0 + 500] = stored[c0:c0 + 500]
+        for unit_path in held:
+            wb._append_tag(d[unit_path], "_MC")
+    new, old = _every_chunk(tmp_path / "new.mesc"), _every_chunk(tmp_path / "old.mesc")
+    assert new.keys() == old.keys()
+    for k in new:
+        assert new[k] == old[k], k
+    assert not (tmp_path / "new.mesc.partial").exists()
+
+
+def test_each_unit_is_written_before_the_next_is_registered(two_fields_mesc, tmp_path,
+                                                            monkeypatch):
+    import mesc_io.registration as R
+    import mesc_io.writeback as wb
+    src = _as_mesc_layout(two_fields_mesc[0], tmp_path / "src.mesc")
+    events = []
+    real_put, real_s2p = wb._Output.put, R._suite2p
+
+    def put(self, unit, per_channel, **kw):
+        events.append(("write", unit.rsplit("/", 1)[-1]))
+        return real_put(self, unit, per_channel, **kw)
+
+    def s2p():
+        reg, default_ops = real_s2p()
+
+        class Spy:
+            def __getattr__(self, name):
+                return getattr(reg, name)
+
+            def compute_reference(self, *a, **kw):
+                events.append(("reference", None))
+                return reg.compute_reference(*a, **kw)
+        return Spy(), default_ops
+
+    monkeypatch.setattr(wb._Output, "put", put)
+    monkeypatch.setattr(R, "_suite2p", s2p)
+    register_file(src, tmp_path / "out.mesc")
+    assert events == [("reference", None), ("write", "MUnit_0"),
+                      ("reference", None), ("write", "MUnit_1")]
+
+
+def test_a_run_that_fails_leaves_no_file_behind(two_fields_mesc, tmp_path):
+    out = tmp_path / "out.mesc"
+
+    def boom(path, info):
+        raise RuntimeError("stopped")
+
+    with pytest.raises(RuntimeError, match="stopped"):
+        register_file(two_fields_mesc[0], out, progress=boom)
+    assert not out.exists()
+    assert not (tmp_path / "out.mesc.partial").exists()
+
+
+def test_the_source_cannot_be_the_output(two_fields_mesc):
+    from mesc_io.registration import RegistrationError
+    path = two_fields_mesc[0]
+    before = path.read_bytes()
+    with pytest.raises(RegistrationError):
+        register_file(path, path)
+    assert path.read_bytes() == before
+
+
+def test_the_batch_size_changes_nothing_in_the_output(two_fields_mesc, tmp_path):
+    src = _as_mesc_layout(two_fields_mesc[0], tmp_path / "src.mesc")
+    a = register_file(src, tmp_path / "a.mesc")                 # default: 1000 for 128^2
+    b = register_file(src, tmp_path / "b.mesc", batch=7)
+    for u in a["units"]:
+        assert np.array_equal(a["units"][u]["y_shift"], b["units"][u]["y_shift"])
+    assert _every_chunk(tmp_path / "a.mesc") == _every_chunk(tmp_path / "b.mesc")
+
+
+def test_the_default_batch_follows_the_frame_size():
+    from mesc_io.registration import _batch_for
+    assert _batch_for((3715, 512, 512)) == 250
+    assert _batch_for((3715, 256, 256)) == 1000
+    assert _batch_for((100, 128, 128)) == 1000               # capped, as before
+    assert _batch_for((10, 2048, 2048)) == 15
+    assert _batch_for((3715, 512, 512), 1000) == 1000        # an explicit batch wins
+
+
+def test_the_int16_to_uint16_shortcut_is_the_int32_route():
+    from mesc_io.registration import _to_stored
+    rng = np.random.RandomState(3)
+    moved = rng.randint(-32768, 32768, (5, 9, 11)).astype(np.int16)
+    for scale in (1, 2):
+        old = np.clip(np.asarray(moved, dtype=np.int32) * scale, 0, 65535).astype(np.uint16)
+        out = np.empty(moved.shape, np.uint16)
+        _to_stored(moved, scale, out)
+        assert np.array_equal(out, old)
+    as_float = moved.astype(np.float32) + 0.7                 # any other dtype: the old route
+    out = np.empty(moved.shape, np.uint16)
+    _to_stored(as_float, 1, out)
+    assert np.array_equal(out, np.clip(as_float.astype(np.int32), 0, 65535).astype(np.uint16))

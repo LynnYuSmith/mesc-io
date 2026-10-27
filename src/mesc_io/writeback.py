@@ -24,12 +24,18 @@ usual reason). Anything longer is refused.
 """
 from __future__ import annotations
 
+import os
 import shutil
+import zlib
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
-from typing import Dict, Mapping, Optional
+from typing import Callable, Dict, Mapping, Optional
 
 import h5py
 import numpy as np
+from h5py import h5z
+from h5py._objects import phil as _phil
 
 from .errors import MescIOError
 from .values import from_reader_units
@@ -37,7 +43,12 @@ from .values import from_reader_units
 __all__ = ["write_frames", "WritebackError", "DEFAULT_TAG"]
 
 DEFAULT_TAG = "_MC"
-_CHUNK = 500
+#: Frames converted and written per step. The conversion to stored integers goes through
+#: float64, so converting a whole unit at once peaked at 8x its stored size (15.6 GB for one
+#: channel of 3,715 frames of 512^2); 64 frames of 512^2 is 128 MB of float64.
+_CHUNK = 64
+#: Threads that deflate frames for the one-chunk-per-frame write path. Only zlib runs in them.
+_DEFLATE_THREADS = max(1, min(8, os.cpu_count() or 1))
 
 
 class WritebackError(MescIOError, RuntimeError):
@@ -101,6 +112,127 @@ def _agreement(new_stored, original, offset_frames: int, n_sample: int = 4) -> f
     return float(np.median(diffs))
 
 
+class _Converted:
+    """`arr` as stored integers, converted only for the frames that are asked for.
+
+    The conversion is element-wise, so a frame converted on its own is the same frame the
+    whole array would have given — without holding the whole array as float64.
+    """
+
+    def __init__(self, arr: np.ndarray, convert: Callable[[np.ndarray], np.ndarray]):
+        self.arr, self.convert, self.shape = arr, convert, arr.shape
+
+    def __getitem__(self, i: int) -> np.ndarray:
+        return self.convert(self.arr[i:i + 1])[0]
+
+
+def _converter(attrs, channel: str, reader_units: bool, dtype) -> Callable:
+    """The function that turns a block of the caller's frames into the file's integers."""
+    if reader_units:
+        off = float(attrs.get(f"{channel}_Conversion_ConversionLinearOffset", 0.0))
+        sc = float(attrs.get(f"{channel}_Conversion_ConversionLinearScale", 1.0))
+        return partial(from_reader_units, offset=off, scale=sc, dtype=dtype)
+    return lambda block: np.asarray(block).astype(dtype, copy=False)
+
+
+def _check_channel(f, unit_path: str, channel: str, arr, reader_units: bool,
+                   tolerance: float):
+    """Validate one channel against `f` (the source, or a copy not yet written to).
+
+    Returns `(array, convert, lead, agreement)`; raises `WritebackError` on any mismatch.
+    """
+    if channel not in f[unit_path]:
+        raise WritebackError(f"{unit_path} has no {channel}")
+    original = f[unit_path][channel]
+    a = np.asarray(arr)
+    if a.ndim != 3 or a.shape[1:] != original.shape[1:]:
+        raise WritebackError(
+            f"{unit_path}/{channel}: frames are {a.shape}, the file holds "
+            f"{original.shape} — frame size must match")
+    lead = original.shape[0] - a.shape[0]
+    if lead < 0:
+        raise WritebackError(
+            f"{unit_path}/{channel}: {a.shape[0]} frames offered, the file holds "
+            f"only {original.shape[0]}")
+    convert = _converter(f[unit_path].attrs, channel, reader_units, original.dtype)
+    delta = _agreement(_Converted(a, convert), original, lead)
+    if abs(delta) > tolerance:
+        raise WritebackError(
+            f"{unit_path}/{channel}: the frames differ from the ones they would "
+            f"replace "
+            f"by {delta:.0f} counts (tolerance {tolerance:.0f}) — refusing to "
+            f"write. Check whether they are in the units you think they are.")
+    return a, convert, lead, delta
+
+
+def _frame_deflate_level(ds) -> Optional[int]:
+    """The gzip level, if `ds` is one deflate-only chunk per frame; else None.
+
+    That is the layout MESc writes, and the only one the threaded path handles: one frame is
+    one chunk, so a frame can be deflated on its own and handed to HDF5 as the finished chunk.
+    Shuffle, Fletcher32, scale-offset or any other filter — or chunks that are not exactly one
+    frame — go through h5py as before.
+    """
+    try:
+        if ds.ndim != 3 or ds.chunks is None or tuple(ds.chunks) != (1,) + tuple(ds.shape[1:]):
+            return None
+        if ds.dtype.kind not in "ui" or ds.is_virtual or ds.external:
+            return None
+        dcpl = ds.id.get_create_plist()
+        if dcpl.get_nfilters() != 1:
+            return None
+        code, _flags, values, _name = dcpl.get_filter(0)
+        if code != h5z.FILTER_DEFLATE or len(values) != 1:
+            return None
+        return int(values[0])
+    except Exception:                       # noqa: BLE001 — anything unusual takes h5py's path
+        return None
+
+
+def _write_channel(ds, a: np.ndarray, convert: Callable, lead: int, block: int,
+                   pool: Optional[ThreadPoolExecutor]) -> str:
+    """Write `a` (the caller's frames) into `ds` from frame `lead`, `block` frames at a time.
+
+    For a one-chunk-per-frame deflate dataset the frames are deflated with `zlib` in `pool`
+    and handed to HDF5 as finished chunks; HDF5's deflate filter is zlib's `compress2` at the
+    dataset's level, so the stored chunks are the same bytes h5py would have written — and
+    that is checked on the first frame, which is written through h5py and compared, falling
+    back to h5py for the whole channel if they differ (a Python linked against another zlib).
+    Only zlib runs in the threads: HDF5 is not thread-safe, so every h5py call is made here,
+    in this thread, under h5py's own lock. Returns the path taken, "deflate" or "h5py".
+    """
+    n = a.shape[0]
+    level = _frame_deflate_level(ds) if pool is not None else None
+    path = "h5py"
+    c0 = 0
+    if level is not None and n:
+        first = np.ascontiguousarray(convert(a[0:1]))
+        with _phil:
+            ds[lead:lead + 1] = first
+            mask, stored = ds.id.read_direct_chunk((lead,) + (0,) * (ds.ndim - 1))
+        if (first.dtype == ds.dtype and mask == 0
+                and bytes(stored) == zlib.compress(first[0].tobytes(), level)):
+            path, c0 = "deflate", 1
+        else:
+            level = None
+            c0 = 1                                  # the first frame is already in
+    while c0 < n:
+        c1 = min(c0 + block, n)
+        s = np.ascontiguousarray(convert(a[c0:c1]))
+        if level is not None:
+            packed = list(pool.map(partial(zlib.compress, level=level),
+                                   [s[i] for i in range(s.shape[0])]))
+            with _phil:
+                for i, chunk_bytes in enumerate(packed):
+                    ds.id.write_direct_chunk((lead + c0 + i,) + (0,) * (ds.ndim - 1),
+                                             chunk_bytes)
+        else:
+            with _phil:
+                ds[lead + c0:lead + c1] = s
+        c0 = c1
+    return path
+
+
 def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
                  reader_units: bool = True, tag: Optional[str] = DEFAULT_TAG,
                  tolerance: float = 60.0, chunk: int = _CHUNK) -> Dict:
@@ -123,6 +255,8 @@ def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
     report = {"out": str(out), "written": [], "agreement": {}, "warnings": []}
 
     # Validate everything first, against the SOURCE, so a refusal leaves no half-written copy.
+    # Only the few frames the agreement samples are converted here; the rest are converted
+    # block by block as they are written.
     with h5py.File(str(source), "r") as f:
         sessions = [k for k in f if k.startswith("MSession_")]
         if not sessions:
@@ -131,49 +265,71 @@ def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
         for unit, per_channel in frames.items():
             unit_path = _resolve_unit(f, sessions, unit, source.name)
             for channel, arr in per_channel.items():
-                if channel not in f[unit_path]:
-                    raise WritebackError(f"{unit_path} has no {channel}")
-                original = f[unit_path][channel]
-                a = np.asarray(arr)
-                if a.ndim != 3 or a.shape[1:] != original.shape[1:]:
-                    raise WritebackError(
-                        f"{unit_path}/{channel}: frames are {a.shape}, the file holds "
-                        f"{original.shape} — frame size must match")
-                lead = original.shape[0] - a.shape[0]
-                if lead < 0:
-                    raise WritebackError(
-                        f"{unit_path}/{channel}: {a.shape[0]} frames offered, the file holds "
-                        f"only {original.shape[0]}")
-                attrs = f[unit_path].attrs
-                off = attrs.get(f"{channel}_Conversion_ConversionLinearOffset", 0.0)
-                sc = attrs.get(f"{channel}_Conversion_ConversionLinearScale", 1.0)
-                stored = (from_reader_units(a, offset=float(off), scale=float(sc),
-                                            dtype=original.dtype)
-                          if reader_units else a.astype(original.dtype))
-                delta = _agreement(stored, original, lead)
-                if abs(delta) > tolerance:
-                    raise WritebackError(
-                        f"{unit_path}/{channel}: the frames differ from the ones they would "
-                        f"replace "
-                        f"by {delta:.0f} counts (tolerance {tolerance:.0f}) — refusing to "
-                        f"write. Check whether they are in the units you think they are.")
+                a, convert, lead, delta = _check_channel(f, unit_path, channel, arr,
+                                                         reader_units, tolerance)
                 report["agreement"][f"{unit_path}/{channel}"] = delta
-                plan.append((unit_path, channel, stored, lead))
+                plan.append((unit_path, channel, a, convert, lead))
                 if lead:
                     report["warnings"].append(
                         f"{unit_path}/{channel}: {lead} frame(s) shorter — aligned to the end")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, out)
-    with h5py.File(str(out), "r+") as d:
-        for unit_path, channel, stored, lead in plan:
-            ds = d[unit_path][channel]
-            n = stored.shape[0]
-            for c0 in range(0, n, chunk):
-                c1 = min(c0 + chunk, n)
-                ds[lead + c0:lead + c1] = stored[c0:c1]
+    with _Output(out, tag=tag, chunk=chunk) as dest:
+        for unit_path, channel, a, convert, lead in plan:
+            dest.write(unit_path, channel, a, convert, lead)
             report["written"].append(f"{unit_path}/{channel}")
-        if tag:
-            for unit_path in {u for u, _, _, _ in plan}:
-                _append_tag(d[unit_path], tag)
+        for unit_path in dict.fromkeys(u for u, *_ in plan):
+            dest.tag(unit_path)
     return report
+
+
+class _Output:
+    """An open copy of a `.mesc` that frames are written into, one channel at a time.
+
+    `write_frames` validates everything first and then writes; registration writes each unit
+    as soon as it is registered (`put`), so only one unit is ever held in memory.
+    """
+
+    def __init__(self, path, tag: Optional[str] = DEFAULT_TAG, chunk: int = _CHUNK,
+                 threads: int = _DEFLATE_THREADS):
+        self.path, self._tag, self.chunk = Path(path), tag, max(1, int(chunk))
+        self._threads = threads
+        self.paths_taken: Dict[str, str] = {}
+
+    def __enter__(self):
+        with _phil:
+            self.d = h5py.File(str(self.path), "r+")
+        self.pool = ThreadPoolExecutor(self._threads) if self._threads > 1 else None
+        return self
+
+    def __exit__(self, *exc):
+        if self.pool is not None:
+            self.pool.shutdown(wait=True)
+        with _phil:
+            self.d.close()
+        return False
+
+    def write(self, unit_path: str, channel: str, a, convert, lead: int) -> None:
+        ds = self.d[unit_path][channel]
+        self.paths_taken[f"{unit_path}/{channel}"] = _write_channel(
+            ds, a, convert, lead, self.chunk, self.pool)
+
+    def tag(self, unit_path: str) -> None:
+        if self._tag:
+            with _phil:
+                _append_tag(self.d[unit_path], self._tag)
+
+    def put(self, unit: str, per_channel: Mapping[str, np.ndarray], reader_units: bool,
+            tolerance: float) -> Dict[str, float]:
+        """Validate one unit against the copy (which still holds its original frames), then
+        write and tag it. Returns the agreement per channel."""
+        sessions = [k for k in self.d if k.startswith("MSession_")]
+        unit_path = _resolve_unit(self.d, sessions, unit, self.path.name)
+        checked = [(ch,) + _check_channel(self.d, unit_path, ch, arr, reader_units, tolerance)
+                   for ch, arr in per_channel.items()]
+        for ch, a, convert, lead, _ in checked:
+            self.write(unit_path, ch, a, convert, lead)
+        if checked:
+            self.tag(unit_path)
+        return {f"{unit_path}/{ch}": delta for ch, _, _, _, delta in checked}

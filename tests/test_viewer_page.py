@@ -192,6 +192,11 @@ TWO_CHANNEL_CHECK = r"""
           { console.error("the channels were not asked for with share=2: " + JSON.stringify(urls)); process.exit(9); }
         if (rows.hidden || !rows.innerHTML.includes("vthr") || !byId.get("volThrL").hidden) { console.error("the per-channel rows are not shown"); process.exit(10); }
         if (!byId.get("volInfo").innerHTML.includes("depth") && !byId.get("volInfo").innerHTML.includes("ch0")) { console.error("volInfo says nothing of the channels"); process.exit(11); }
+        // the 3D point tool: a point in full-resolution voxels lists its µm and both channels' values
+        const pt = vm.runInContext("volSetTool('point'); volPts().push([1, 3, 5]); volPtsList(); orthoDraw(); V.vol.tool", sandbox);
+        const listed = byId.get("volPts").innerHTML;
+        if (pt !== "point" || !listed.includes("x 2.50 · y 1.50 · z 1.0") || !listed.includes("ch0 ≈") || !listed.includes("ch1 ≈"))
+          { console.error("the point tool or its list is wrong: " + pt + " " + listed); process.exit(12); }
         console.log("two-channel 3D ok " + JSON.stringify(st));
         process.exit(process.exitCode || 0);
       } catch (e) { console.error("threw in the overlay: " + (e && e.stack || e)); process.exit(6); }
@@ -222,4 +227,13 @@ def test_the_two_colour_controls_are_in_the_page():
     reads two channels from one RG texture with a floor and a ceiling each."""
     src = PAGE.read_text(encoding="utf-8")
     for needle in ('id="volChs"', 'id="oChs"', 'id="volThrL"', "gl.RG8", "uniform vec2 thr2, ceil2, on2", "share=2"):
+        assert needle in src, needle
+
+
+def test_the_3d_point_tool_is_in_the_page():
+    """The point tool's button and marker layer, a pick that snaps and stores full-resolution
+    voxels, and points that are saved with the view (volState keeps them, per unit)."""
+    src = PAGE.read_text(encoding="utf-8")
+    for needle in ('id="volPoint"', 'id="volMarks"', 'id="volPts"', "function volSnap(", "function volPickAt(",
+                   "y * k + h, x * k + h", 'tool: "", pts: {}'):
         assert needle in src, needle

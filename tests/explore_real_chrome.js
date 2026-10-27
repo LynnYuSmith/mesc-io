@@ -119,8 +119,10 @@ const pick = a => a[Math.floor(rnd() * a.length)];
   // ---------------- the monkey ----------------
   const targets = ["#playBtn", "#meanBtn", "#maxBtn", "#volBtn", "#orthoBtn", "#flipBtn", "#ovBtn", "#pngBtn", "#toolSpot", "#toolRect", "#toolPoly", "#toolRuler",
     "#winFixed", "#winPct", "#winFile", "#sigRaw", "#sigDff", "#modeStack", "#modeOverlay", "#gridBtn", "#yAuto", "#traceReset", "#doTraces", "#addRoi", "#delRoi",
-    "#volMip", "#volGlass", "#volDepth", "#volPoint", "#volMeasure", "#volBox", "#volBoxFull", "#volSlab", "#volCut", "#volAuto", "#volReset", "#volAxY", "#volAxX", "#volDeep", "#oMax", "#oCross", "#dlTracePng"];
-  const ranges = ["#frame", "#lo", "#hi", "#volThr", "#volCeil", "#volDen", "#volGain", "#volZ"];
+    "#volMip", "#volGlass", "#volDepth", "#volPoint", "#volMeasure", "#volBox", "#volBoxFull", "#volSlab", "#volCut", "#volAuto", "#volReset", "#volAxY", "#volAxX", "#volDeep", "#oMax", "#oCross", "#dlTracePng",
+    "#oSurf", "#oSurfTis", "#mosBtn", "#mosBtn", "#mosEdit", "#mosAuto", "#mosFlat", "#mosUndo", "#mosSeams", "#mosChan", "#mosCrop", "#mosListBtn",
+    "#mosMarksBtn", "#mosFitBtn", "#mosPng"];     // not the TIFF, the layout or the surface CSV: they write files
+  const ranges = ["#frame", "#lo", "#hi", "#volThr", "#volCeil", "#volDen", "#volGain", "#volZ", "#mosPlane"];
   for (let s = 0; s < +STEPS; s++) {
     const r = rnd(); let what;
     if (r < 0.32) { const id = pick(targets); what = "click " + id; step = "monkey " + s + ": " + what; await clickEl(id); }
@@ -131,7 +133,7 @@ const pick = a => a[Math.floor(rnd() * a.length)];
     else if (r < 0.78) { const [x, y] = await at(rnd(), rnd()); what = "wheel"; step = "monkey " + s + ": " + what; await send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: (rnd() - 0.5) * 800 }); }
     else if (r < 0.88) { const id = pick(ranges); const v = rnd(); what = "range " + id + "=" + v.toFixed(2); step = "monkey " + s + ": " + what;
       await ev(`(()=>{const e=document.querySelector('${id}'); if(!e) return; const lo=+e.min||0, hi=+e.max||100; e.value=lo+${v}*(hi-lo); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change'))})()`); }
-    else { const k = pick(["Escape", "Delete", "Enter", " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Backspace"]); what = "key " + JSON.stringify(k); step = "monkey " + s + ": " + what; await key(k); }
+    else { const k = pick(["Escape", "Delete", "Enter", " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Backspace", "[", "]", "h", "e"]); what = "key " + JSON.stringify(k); step = "monkey " + s + ": " + what; await key(k); }
     await sleep(60 + rnd() * 200);
     if (s % 5 === 4) await invariants();
   }
@@ -139,5 +141,5 @@ const pick = a => a[Math.floor(rnd() * a.length)];
   await ev("ROIS.length=0; saveRois && saveRois(); 'ok'");
   console.log(`\n${issues.length} issue(s), seed ${SEED}:`);
   for (const i of issues) console.log(`- [${i.kind}] ${i.msg}\n    at: ${i.step}`);
-  ch.kill(); process.exit(0);
+  ch.kill(); process.exit(issues.length ? 1 : 0);      // an issue fails the run: a log nobody reads is no check
 })();

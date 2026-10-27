@@ -10,6 +10,22 @@
   crosshair and every 3D point get their depth below it, along z, into the tissue: by default the
   brighter side of the stack, or the side set with **tissue**. **csv** writes the marks, the fit and
   the points' depths. Marks are kept per unit with the view.
+- **Mosaics of z-stacks.** **mosaic** lays every z-stack of a file that carries a stage position out as
+  one field, one plane at a time, hard seams (nearest centre, or by order). **auto** stitches it from
+  the overlaps — masked normalised cross-correlation in 3D per overlapping pair, sub-pixel in x and y,
+  one correction per tile by weighted least squares, starting from the current layout so a hand-made
+  one is refined; each seam shows its correlation and residual. **edit** moves tiles by hand (drag,
+  arrows, [ ] for a slice, h hides, ⌘Z undoes), **top** and **seams** choose which tile shows on an
+  overlap, **flatten** puts the tiles' marked surfaces on one plane, a double-click opens a tile in
+  XYZ. **crop**, planes and **TIFF** cut a piece out as a Fiji hyperstack written beside the view
+  (layout in its Info); **layout** downloads the corrections; **labels** off gives the bare picture
+  for a PNG. The layout is kept with the view. Python: `mesc_io.mosaic` (`tiles`, `geometry`,
+  `register`, `compose`, `to_tiff`); the page places tiles by the same rule, checked pixel for pixel.
+  `tools/make_synthetic.py --mosaic` writes six tiles off by known amounts, to test against.
+- The viewer's server takes 128 waiting connections instead of 5: a page asking for many pictures at
+  once (a mosaic, the unit list) had some connections reset and their pictures never arrived.
+- The exploratory clicker fails its run when it finds an issue (it printed them and exited 0), and
+  now clicks the surface and mosaic controls too.
 - The **surface ↑** button's tooltip no longer says slice 0 is always the surface: in a stack recorded
   upward slice 0 is the deepest.
 

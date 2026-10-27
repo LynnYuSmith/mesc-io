@@ -18,7 +18,8 @@ Endpoints:
     GET  /api/frame/{unit}/{ch}/{i}         → PNG of one frame       (?vmin=&vmax= fixed window in
                                               reader units — the viewer's default, from the file's
                                               LUT — or ?lo=&hi= percentiles of the whole unit,
-                                              ?n= average of n frames centred on i)
+                                              ?n= average of n frames centred on i;
+                                              ?win_unit= the percentiles of another unit)
     GET  /api/mean/{unit}/{ch}              → PNG of the mean image  (?lo=&hi=)
     GET  /api/pixel/{unit}/{ch}?x=&y=&i=&n=  → one pixel's value in reader units (n frames averaged;
                                               i omitted = the mean image), for the hover readout
@@ -37,6 +38,10 @@ Endpoints:
                                               the baseline quantile and window), plus the darkest
                                               patch's trace, the background, and the black head
     GET  /api/export/traces/{unit}/{ch}.csv → CSV, one column per ROI
+    POST /api/mosaic/register               → the z-stack tiles corrected from their overlaps
+                                              <- {"layout": {...}, "channel": 0, "fixed": <unit>}
+    POST /api/mosaic/export                 → a cut of the mosaic as a Fiji TIFF, written beside
+                                              the view   <- {"layout", "channels", "planes", "crop"}
     GET  /api/export/rois.json              → every unit's ROI set, as stored
     GET  /api/export/rois.zip?unit=         → that unit's ROIs as an ImageJ set, openable in Fiji
                                               and by our own pipeline, which reads exactly this format
@@ -60,6 +65,7 @@ import os
 import sys
 import subprocess
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -70,6 +76,7 @@ import numpy as np
 from . import MescFile
 from .check import check as mesc_check
 from .dff import DffParams, compute_dff, darkest_patch
+from . import mosaic as _mosaic
 
 PAGE = Path(__file__).resolve().parent / "viewer.html"
 
@@ -418,7 +425,12 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):                                       # noqa: N802
         url = urlparse(self.path)
         try:
-            if [p for p in url.path.split("/") if p] != ["api", "rois", "copy"]:
+            route = [p for p in url.path.split("/") if p]
+            if route[:2] == ["api", "mosaic"] and len(route) == 3 and route[2] in ("register", "export"):
+                n = int(self.headers.get("Content-Length", 0))
+                payload = json.loads(self.rfile.read(n) or b"{}")
+                return self._json(self._mosaic(route[2], payload if isinstance(payload, dict) else {}))
+            if route != ["api", "rois", "copy"]:
                 return self._json({"error": "no route"}, 404)
             n = int(self.headers.get("Content-Length", 0))
             payload = json.loads(self.rfile.read(n) or b"{}")
@@ -435,6 +447,26 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"unit": dst, "copied": len(store[dst]), "from": src})
         except Exception as exc:                             # noqa: BLE001
             self._fail(exc)
+
+    # -- mosaics of z-stack tiles ---------------------------------------------------
+    def _mosaic(self, what: str, payload: dict) -> dict:
+        layout = payload.get("layout") if isinstance(payload.get("layout"), dict) else {}
+        with self._file() as f:
+            ts = _mosaic.tiles(f)
+            if len(ts) < 2:
+                raise ValueError("a mosaic needs two or more z-stacks with a stage position")
+            if what == "register":
+                return _mosaic.register(f, ts, layout, channel=int(payload.get("channel", 0)),
+                                        fixed=payload.get("fixed"))
+            planes = payload.get("planes")
+            planes = list(range(int(planes[0]), int(planes[1]) + 1)) if planes else None
+            crop = payload.get("crop")
+            crop = [int(round(float(v))) for v in crop] if crop else None
+            chans = payload.get("channels")
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            out = self.view_path.parent / f"{self.mesc_path.stem}_mosaic_{stamp}.tif"
+            _mosaic.to_tiff(f, ts, layout, out, channels=chans, planes=planes, crop=crop)
+        return {"path": str(out), "bytes": out.stat().st_size}
 
     # -- the ROI store: {unit path: [roi, ...]} ---------------------------------
     def _load_store(self) -> dict:
@@ -830,7 +862,8 @@ class _Handler(BaseHTTPRequestHandler):
                    if n == 1 else _reduce(f, unit, ch, slice(lo, hi)))
         win = self._window(q)
         if win[0] == "pct":                    # one stretch for the whole recording, not per frame
-            win = ("fixed", *self._unit_window(unit, ch, win[1], win[2], n))
+            # ?win_unit= takes the stretch from another unit: a mosaic's tiles share the first one's
+            win = ("fixed", *self._unit_window((q.get("win_unit") or [unit])[0], ch, win[1], win[2], n))
         self._send(_png(img, win), "image/png")
 
     #: How many frames (or n-frame averages) the whole-recording percentile window is taken from.
@@ -1053,6 +1086,13 @@ def default_rois_path(mesc_path: Path) -> Path:
     return STATE_DIR / name
 
 
+class _Server(ThreadingHTTPServer):
+    # The listen backlog is 5 by default: a mosaic asks for every tile's frame at once, the unit
+    # list for every thumbnail, and on a reload both arrive together — the sixth connection was
+    # reset by the kernel and its picture never came. Room for a page's worth.
+    request_queue_size = 128
+
+
 def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
           rois_path: Path = None) -> None:
     _Handler.mesc_path = Path(mesc_path)
@@ -1064,7 +1104,7 @@ def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
     # backlog answered the first, queued four, and REFUSED the rest -- the page sat blank and
     # curl got "connection refused" while the process was busy at 65 % CPU. Each request opens
     # its own MescFile, so there is no shared handle to protect.
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
+    httpd = _Server(("127.0.0.1", port), _Handler)
     httpd.daemon_threads = True
     url = f"http://127.0.0.1:{port}/"
     print(f"  {Path(mesc_path).name}: {n} units  →  {url}   (ctrl-c to stop)")

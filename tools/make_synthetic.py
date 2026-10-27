@@ -3,6 +3,7 @@
 
     python tools/make_synthetic.py [out.mesc]        # default: synthetic_view.mesc
     python tools/make_synthetic.py --stack [out.mesc]  # a two-channel z-stack: synthetic_stack.mesc
+    python tools/make_synthetic.py --mosaic [out.mesc] # six overlapping stack tiles: synthetic_mosaic.mesc
     mesc-io view synthetic_view.mesc
 
 Three units — 1500, 400 and 900 frames at ~62 Hz, 128×128 px — over a dim wide blob, with
@@ -17,6 +18,12 @@ of 0.5 µm, two channels. Channel_0 (green) holds three thin axons running down 
 with boutons on them; Channel_1 (red, ten times brighter, as a red channel often is) holds two
 round cells, one of which sits on an axon's last bouton, so the overlay has a place where both
 channels are bright. A short recording sits beside it, which has no volume to give.
+
+``--mosaic`` writes six z-stack tiles (3 × 2, 96 × 96 px of 0.5 µm, 40 slices 1 µm apart, 24 px of
+overlap) cut from one volume of tissue whose surface is tilted and curved: dark above it, boutons
+and cells below. Each tile carries the stage position it was asked for, but was cut where the stage
+actually went — off by a few pixels and slices, as a real stage and a drifting brain are. Those
+errors (`MOSAIC_ERRORS`, tile 0 exact) are what stitching the tiles from their overlaps must find.
 """
 from __future__ import annotations
 
@@ -120,8 +127,76 @@ def stack(out: Path) -> int:
     return 0
 
 
+MOSAIC_GRID = (3, 2)                     # columns, rows
+MOSAIC_TILE, MOSAIC_STEP, MOSAIC_DEPTH, MOSAIC_PX = 96, 72, 40, 0.5
+# where each tile really is against where the stage said: (dx px, dy px, dz slices); tile 0 exact
+MOSAIC_ERRORS = [(0, 0, 0), (3, -2, 2), (-4, 1, -1), (2, 4, 3), (-3, -3, 1), (5, 2, -2)]
+
+
+def mosaic_surface(x_px, y_px):
+    """The tissue's surface in the mosaic's volume: the slice it begins at, at a pixel of the volume."""
+    return 6 + 0.04 * x_px + 0.00012 * (y_px - 90) ** 2
+
+
+def mosaic(out: Path) -> int:
+    rng = np.random.default_rng(7)
+    cols, rows = MOSAIC_GRID
+    n, step, d, pad, pz = MOSAIC_TILE, MOSAIC_STEP, MOSAIC_DEPTH, 12, 6
+    H, W, D = (rows - 1) * step + n + 2 * pad, (cols - 1) * step + n + 2 * pad, d + 2 * pz
+    zz, yy, xx = np.mgrid[0:D, 0:H, 0:W].astype(np.float32)
+    tissue = (zz - pz) >= mosaic_surface(xx - pad, yy - pad)
+    green = np.where(tissue, 1000.0, 820.0).astype(np.float32)
+    red = np.where(tissue, 9500.0, 9000.0).astype(np.float32)
+    # boutons (small, many) and a few cells, only below the surface
+    for _ in range(420):
+        z, y, x = rng.uniform(0, D), rng.uniform(0, H), rng.uniform(0, W)
+        if (z - pz) < mosaic_surface(x - pad, y - pad) + 1:
+            continue
+        sl = (slice(max(0, int(z) - 4), int(z) + 5), slice(max(0, int(y) - 6), int(y) + 7), slice(max(0, int(x) - 6), int(x) + 7))
+        green[sl] += rng.uniform(900, 2500) * np.exp(-((xx[sl] - x) ** 2 + (yy[sl] - y) ** 2) / 5.0 - (zz[sl] - z) ** 2 / 2.0)
+    for _ in range(14):
+        z, y, x = rng.uniform(pz + 15, D), rng.uniform(0, H), rng.uniform(0, W)
+        sl = (slice(max(0, int(z) - 8), int(z) + 9), slice(max(0, int(y) - 12), int(y) + 13), slice(max(0, int(x) - 12), int(x) + 13))
+        red[sl] += 14000 * np.exp(-((xx[sl] - x) ** 2 + (yy[sl] - y) ** 2) / 40.0 - (zz[sl] - z) ** 2 / 14.0)
+    with h5py.File(out, "w") as f:
+        sess = f.create_group("MSession_0")
+        for t in range(cols * rows):
+            c, r = t % cols, t // cols
+            ex, ey, ez = MOSAIC_ERRORS[t]
+            y0, x0, z0 = pad + r * step + ey, pad + c * step + ex, pz + ez
+            u = sess.create_group(f"MUnit_{t}")
+            for k, (vol, colour) in enumerate([(green, 0x00FF00), (red, 0xFF0000)]):
+                cut = vol[z0:z0 + d, y0:y0 + n, x0:x0 + n]
+                noisy = cut + rng.normal(0, 25 * (1 + 4 * k), cut.shape)
+                u.create_dataset(f"Channel_{k}", data=np.clip(noisy, 0, 65535).astype(np.uint16))
+                u.attrs[f"Channel_{k}_Conversion_ConversionLinearOffset"] = -786.0
+                u.attrs[f"Channel_{k}_Conversion_ConversionLinearScale"] = 0.5
+                u.attrs[f"Channel_{k}_LUT_VecColors"] = lut_colours(colour)
+            u.attrs["ZAxisGeomRole"] = 3
+            u.attrs["ZAxisConversionConversionLinearScale"] = 1.0
+            u.attrs["XAxisConversionConversionLinearScale"] = MOSAIC_PX
+            u.attrs["YAxisConversionConversionLinearScale"] = MOSAIC_PX
+            u.attrs["Comment"] = text(f"tile {t + 1} zstack {d}x1um")
+            # the stage was asked for the tile's centre on the grid; the rig's zero is 1000 µm away
+            cx, cy = (c * step + n / 2) * MOSAIC_PX, (r * step + n / 2) * MOSAIC_PX
+            xml = ('<?xml version="1.0"?><Params><AxisControl><snapshot>'
+                   f'<axis attribute="AttributePosition" id="VirtX" value="{1000 + cx}"/>'
+                   f'<axis attribute="AttributePosition" id="VirtY" value="{2000 + cy}"/>'
+                   '<axis attribute="AttributePosition" id="VirtZ" value="-50.0"/>'
+                   f'<axis attribute="AttributeRelativePosition" id="SlowX" value="{cx}"/>'
+                   f'<axis attribute="AttributeRelativePosition" id="SlowY" value="{cy}"/>'
+                   '<axis attribute="AttributeRelativePosition" id="SlowZ" value="-50.0"/>'
+                   '</snapshot></AxisControl></Params>').encode("latin-1")
+            u.attrs["MeasurementParamsXML"] = np.frombuffer(xml, dtype=np.uint8)
+    print(f"  {out}: {cols * rows} stack tiles, {cols} × {rows}, {n} px of {MOSAIC_PX} µm, {d} slices")
+    print(f"  mesc-io view {out}")
+    return 0
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args[:1] == ["--mosaic"]:
+        sys.exit(mosaic(Path(args[1] if len(args) > 1 else "synthetic_mosaic.mesc")))
     if args[:1] == ["--stack"]:
         sys.exit(stack(Path(args[1] if len(args) > 1 else "synthetic_stack.mesc")))
     sys.exit(main(Path(args[0] if args else "synthetic_view.mesc")))

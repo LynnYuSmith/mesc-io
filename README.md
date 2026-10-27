@@ -98,6 +98,16 @@ rarely level). It is drawn in the panes, the tilt is given in degrees, and every
 crosshair get their depth below it in µm, into the tissue: the brighter side of the stack, or the
 side you set. **csv** saves the marks, the fit and the points' depths; the marks are kept with the view.
 
+**mosaic** (shown when a file holds two or more z-stacks with a stage position) lays every tile out
+as one field where the stage put it, a plane at a time, with hard seams — each pixel from the tile
+whose centre is nearest, never an average of two places. **auto** stitches it from the overlaps:
+every overlapping pair matched in 3D (x, y and the slice), one correction per tile by least squares,
+each seam labelled with its correlation and what the solve left of it. **edit** moves a tile by hand
+(drag; arrows a pixel, [ ] a slice, h hides; ⌘Z undoes), **flatten** puts every tile's marked surface
+on one plane, double-click opens a tile in XYZ. **crop** + planes from–to + **TIFF** cut a piece out as
+a Fiji hyperstack, placed exactly as on screen; **layout** saves the corrections as JSON. The same is
+in Python: `mesc_io.mosaic.tiles / register / compose / to_tiff`.
+
 **ruler** (beside the ROI tools) measures in µm between two clicks on the image; **PNG** saves what
 is on screen for a figure — the image at whole pixels with the ROIs, the ruler, a scale bar and a
 caption, or the 3D view — and **png** beside csv the traces.

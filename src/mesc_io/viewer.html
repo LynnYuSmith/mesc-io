@@ -180,8 +180,12 @@
                border-top:1px solid var(--line); background:var(--panel) }
   #traceBar { display:flex; align-items:center; gap:8px; padding:5px 12px; font-size:11px }
   #traceBar .grow { flex:1 }
-  #traceScroll { flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; position:relative }
-  #trace { display:block; width:100%; }
+  #traceScroll { flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; position:relative; isolation:isolate }
+  /* the frame cursor lives UNDER the canvas (whose background is clear), so it moves without a
+     redraw of the traces and is still drawn beneath them, as it was when it was painted first */
+  #trace { display:block; width:100%; position:relative; z-index:1 }
+  #traceCursor { position:absolute; top:0; left:0; width:1px; background:#4ea3dd; display:none; pointer-events:none; z-index:0 }
+  #traceRubber, #traceRead { z-index:2 }
   #traceLbl { color:var(--muted) }
   .ylim { display:inline-flex; align-items:center; gap:4px; color:var(--faint) }
   #dffKnobs input[type=number] { width:48px }
@@ -328,7 +332,7 @@
       <button id="traceReset" title="whole recording">⤢</button>
       <span class="hint">drag a box to zoom · double-click resets · ← → slide</span>
     </div>
-    <div id="traceScroll"><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
+    <div id="traceScroll"><div id="traceCursor"></div><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
   </section>
 
 </div>
@@ -512,7 +516,7 @@ const fmt = v => (v == null ? "—" : (Math.round(v * 10) / 10).toString());
 
 /* ------------------------------------------------------------------------------------------
    the image: frames (single or averaged) or the mean, zoomed by a rectangle */
-let imgEl = null, imgUrl = "", frameInFlight = false;
+let imgEl = null, imgUrl = "", frameInFlight = false, frameWanted = false;
 /* The fixed window: what was typed here for this unit and channel, else the file's own LUT. */
 function fixedWinFor(ch) {
   if (!unit) return null;
@@ -600,21 +604,54 @@ function paletteFor(ch) {                  // the palette in force for one chann
   return V.overlay ? (ch === 0 ? "green" : "magenta") : "grey";
 }
 /* Grey PNGs from the server -> one coloured canvas. Each channel goes through its own palette;
-   in overlay they are ADDED and clipped, so where both are bright the colours mix. */
+   in overlay they are ADDED and clipped, so where both are bright the colours mix.
+   One channel in plain grey is the PNG itself: its palette maps every grey to itself, so the
+   image is used as it came. Otherwise each palette is a table of 256 packed RGBA words and the
+   output is written in one pass through a Uint32 view: the same numbers as a loop of [r, g, b]
+   arrays, pixel for pixel, at a fraction of the work (15 ms a frame on a CPU throttled 6×). */
+const LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+const _lut32Cache = {};
+function lut32Of(name) {                   // 256 packed opaque words, as a little-endian Uint32 view reads RGBA
+  if (_lut32Cache[name]) return _lut32Cache[name];
+  const L = lutOf(name), out = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) out[i] = (255 << 24 | L[i][2] << 16 | L[i][1] << 8 | L[i][0]) >>> 0;
+  return (_lut32Cache[name] = out);
+}
+function lut32Pair(pa, pb) {               // every (a, b) grey pair once, summed and clipped: 64 k words
+  const key = pa + "+" + pb;
+  if (_lut32Cache[key]) return _lut32Cache[key];
+  const A = lutOf(pa), Bp = lutOf(pb), T = new Uint32Array(65536);
+  for (let a = 0; a < 256; a++) for (let b = 0; b < 256; b++) {
+    const r = Math.min(255, A[a][0] + Bp[b][0]), g = Math.min(255, A[a][1] + Bp[b][1]), bl = Math.min(255, A[a][2] + Bp[b][2]);
+    T[a << 8 | b] = (255 << 24 | bl << 16 | g << 8 | r) >>> 0;
+  }
+  return (_lut32Cache[key] = T);
+}
+let _compTmp = null;
 function composite(images, chans) {
   const w = unit.width, h = unit.height;
+  if (images.length === 1 && paletteFor(chans[0]) === "grey" && images[0].naturalWidth === w && images[0].naturalHeight === h) return images[0];
   const out = document.createElement("canvas"); out.width = w; out.height = h;
-  const tmp = document.createElement("canvas"); tmp.width = w; tmp.height = h;
+  if (!_compTmp) _compTmp = document.createElement("canvas");
+  const tmp = _compTmp; if (tmp.width !== w || tmp.height !== h) { tmp.width = w; tmp.height = h; }
   const tg = tmp.getContext("2d", { willReadFrequently: true });
-  const acc = new Uint16Array(w * h * 3);
-  images.forEach((im, j) => {
-    tg.clearRect(0, 0, w, h); tg.drawImage(im, 0, 0, w, h);
-    const px = tg.getImageData(0, 0, w, h).data, L = lutOf(paletteFor(chans[j]));
-    for (let i = 0, p = 0; i < px.length; i += 4, p += 3) { const c = L[px[i]]; acc[p] += c[0]; acc[p + 1] += c[1]; acc[p + 2] += c[2]; }
-  });
   const og = out.getContext("2d"), od = og.createImageData(w, h);
-  for (let i = 0, p = 0; i < od.data.length; i += 4, p += 3) {
-    od.data[i] = Math.min(255, acc[p]); od.data[i + 1] = Math.min(255, acc[p + 1]); od.data[i + 2] = Math.min(255, acc[p + 2]); od.data[i + 3] = 255;
+  const srcs = images.map(im => { tg.clearRect(0, 0, w, h); tg.drawImage(im, 0, 0, w, h); return tg.getImageData(0, 0, w, h).data; });
+  const N = w * h;
+  if (LITTLE && srcs.length <= 2) {
+    const o32 = new Uint32Array(od.data.buffer), s0 = new Uint32Array(srcs[0].buffer, srcs[0].byteOffset, N);
+    if (srcs.length === 1) { const T = lut32Of(paletteFor(chans[0])); for (let i = 0; i < N; i++) o32[i] = T[s0[i] & 255]; }
+    else {                                 // two: per-component sums, clipped, packed
+      const T = lut32Pair(paletteFor(chans[0]), paletteFor(chans[1])), s1 = new Uint32Array(srcs[1].buffer, srcs[1].byteOffset, N);
+      for (let i = 0; i < N; i++) o32[i] = T[(s0[i] & 255) << 8 | (s1[i] & 255)];
+    }
+  } else {                                 // three channels or more, or a big-endian machine: the plain sum
+    const acc = new Uint16Array(N * 3);
+    srcs.forEach((px, j) => { const L = lutOf(paletteFor(chans[j]));
+      for (let i = 0, p = 0; i < px.length; i += 4, p += 3) { const c = L[px[i]]; acc[p] += c[0]; acc[p + 1] += c[1]; acc[p + 2] += c[2]; } });
+    for (let i = 0, p = 0; i < od.data.length; i += 4, p += 3) {
+      od.data[i] = Math.min(255, acc[p]); od.data[i + 1] = Math.min(255, acc[p + 1]); od.data[i + 2] = Math.min(255, acc[p + 2]); od.data[i + 3] = 255;
+    }
   }
   og.putImageData(od, 0, 0);
   return out;
@@ -667,12 +704,19 @@ function draw() {
   if (!unit) return;
   const chans = shownChans(), urls = chans.map(c => frameUrl(c));
   const url = urls.join(" + ") + " | " + chans.map(paletteFor).join(",");
-  if (url !== imgUrl) {
+  // At most one frame in flight. A slider dragged across 30 positions used to ask for all 30, and
+  // the disk served them in turn after the hand had stopped; now a step taken while a frame is on
+  // its way only marks that another is wanted, and when it lands the page asks for wherever the
+  // slider is THEN. Playback has always waited the same way (frameInFlight in togglePlay).
+  if (url !== imgUrl && frameInFlight) frameWanted = true;
+  else if (url !== imgUrl) {
     imgUrl = url;
-    frameInFlight = true;
+    frameInFlight = true; frameWanted = false;
+    const forUnit = unit;
+    const landed = () => { frameInFlight = false; if (frameWanted) { frameWanted = false; draw(); } };
     Promise.all(urls.map(u => new Promise((ok, bad) => { const im = new Image(); im.onload = () => ok(im); im.onerror = bad; im.src = u; })))
-      .then(ims => { frameInFlight = false; if (imgUrl === url) { imgEl = composite(ims, chans); paint(); badge("saved"); } })
-      .catch(() => { frameInFlight = false; if (imgUrl === url) { imgEl = null; paint(); badge("frame failed to load", true); } });
+      .then(ims => { if (imgUrl === url && unit === forUnit) { imgEl = composite(ims, chans); paint(); badge("saved"); } landed(); })
+      .catch(() => { if (imgUrl === url && unit === forUnit) { imgEl = null; paint(); badge("frame failed to load", true); } landed(); });
   } else paint();
   // A stack's third axis is depth, so the slider counts slices and the label says microns.
   // Calling a slice a "frame" and offering it in seconds is how a 1 um step became "1000 Hz"
@@ -738,7 +782,17 @@ function imgPoint(ev) {
   const y = (ev.clientY - r.top - m.oy) / m.k;
   return [(ev.clientX - r.left - m.ox) / m.k, m.fy ? unit.height - y : y];
 }
-new ResizeObserver(() => { paint(); plotTraces(); }).observe($("stage"));
+/* Every resize goes one way: the stage, the trace strip, a splitter being dragged. One observer
+   watches both boxes and redraws each view once per frame; there used to be three observers on
+   the stage, each redrawing on its own. While the size is moving the 3D view draws coarse
+   (volInteract), as it does while being turned, and settles to full quality when it stops. */
+function onResize() {
+  paint(); plotTraces();
+  if (V.vol && V.vol.on) { volInteract(); volDraw(); }
+  orthoDraw();
+}
+const resizeObs = new ResizeObserver(onResize);
+resizeObs.observe($("stage")); resizeObs.observe($("traceScroll"));
 
 /* zoom by selection, wheel zoom around the cursor, double-click resets; a plain click
    places an ROI. The rubber band only counts as a zoom past a few pixels of travel. */
@@ -787,7 +841,7 @@ $("stage").addEventListener("mousemove", ev => {
   clearTimeout(hoverT);
   hoverT = setTimeout(async () => {
     const seq = ++hoverSeq;
-    const qs = V.proj ? `x=${x}&y=${y}` : `x=${x}&y=${y}&i=${V.frame}&n=${V.avg}`;
+    const qs = V.proj ? `x=${x}&y=${y}&mode=${V.proj}` : `x=${x}&y=${y}&i=${V.frame}&n=${V.avg}`;   // a projection: which one
     try {
       const d = await (await fetch(`/api/pixel/${unit.path}/${V.ch}?${qs}`)).json();
       if (seq !== hoverSeq || d.error) return;
@@ -1156,17 +1210,70 @@ function visibleTraces() {
   return TR.names.map((n, i) => ({ name: n, i, v: src[i], area: TR.areas_px[i] }))
                  .filter(t => shown()[t.name] !== false);
 }
+/* The strip is two layers. The traces, grid and labels are drawn on the canvas, and only when
+   something they show has changed: the payload, the time or value window, the mode, the signal,
+   the size, the grid, the selection, which ROIs are shown. The frame cursor is a 1-px element
+   under the canvas. Playing or scrubbing used to redraw every band on every step (12 ms a step
+   with 40 ROIs, 75 ms on a CPU throttled 6×). Now a step moves one element. */
+let traceKey = "";
+const trIds = new WeakMap(); let trIdN = 0;
+const trId = o => { if (!o) return 0; if (!trIds.has(o)) trIds.set(o, ++trIdN); return trIds.get(o); };   // which payload, by identity
+function traceCursor(W, H, t0, t1) {
+  const cur = $("traceCursor");
+  if (!TR || V.proj) { cur.style.display = "none"; return; }
+  const x = Math.round(TL + (V.frame - t0) / Math.max(1, t1 - t0) * (W - TL - TR_));
+  if (x < 0 || x >= W) { cur.style.display = "none"; return; }
+  cur.style.display = "block"; cur.style.transform = `translateX(${x}px)`;
+  cur.style.top = TT + "px"; cur.style.height = Math.max(0, H - TT - TB) + "px";
+}
+/* One band's line. Past one frame per pixel, a polyline through every frame paints each column
+   of the screen many times over: 40 bands of 5000 frames is 200,000 segments for ~1400 columns.
+   Per column only its first, lowest, highest and last frame are kept, in time order (M4), and
+   the line goes through those: each column spans what it spanned, spikes included, and joins
+   its neighbours by the same segment as before. At one frame per pixel or fewer every frame is
+   drawn, exactly as before. (Where a dense trace zigzags, the old line also grew miter points
+   a few pixels past its true peaks; with fewer corners there are fewer of those.) */
+function traceLine(g, v, t0, t1, X, Y) {
+  const L = X(t0), cols = X(t1) - L;
+  if (t1 - t0 <= cols) { for (let f = t0; f <= t1; f++) { const y = Y(v[f]); f === t0 ? g.moveTo(X(f), y) : g.lineTo(X(f), y); } return; }
+  const k = cols / Math.max(1, t1 - t0);
+  let first = true;
+  const pt = f => { const x = X(f), y = Y(v[f]); if (first) { g.moveTo(x, y); first = false; } else g.lineTo(x, y); };
+  for (let f = t0; f <= t1;) {
+    const col = Math.floor((f - t0) * k);
+    let mn = Infinity, mx = -Infinity, fa = f, fmn = f, fmx = f;
+    for (; f <= t1 && Math.floor((f - t0) * k) === col; f++) { const y = v[f]; if (y < mn) { mn = y; fmn = f; } if (y > mx) { mx = y; fmx = f; } }
+    const fl = f - 1, lo = Math.min(fmn, fmx), hi = Math.max(fmn, fmx);
+    pt(fa); if (lo !== fa) pt(lo); if (hi !== lo) pt(hi); if (fl !== hi) pt(fl);
+  }
+}
 function plotTraces() {
-  const c = $("trace"), box = $("traceScroll"), g = c.getContext("2d");
+  const c = $("trace"), box = $("traceScroll");
   const dpr = window.devicePixelRatio || 1, W = box.clientWidth;
   const ts = visibleTraces();
   const stack = V.traceMode === "stack";
   const H = stack ? Math.max(box.clientHeight, ts.length * ROW_H + 22) : box.clientHeight;
-  c.width = W * dpr; c.height = H * dpr; c.style.height = H + "px"; g.scale(dpr, dpr);
+  const n = TR ? TR.traces[0].length : 0, [t0, t1] = V.traceZoom || [0, n - 1];
+  traceCursor(W, H, t0, t1);
+  const key = JSON.stringify([trId(TR), ROIS.length > 0, n, t0, t1, V.signal, V.traceMode, V.grid, V.sel, V.yFixed,
+    stack ? null : V.valueZoom, W, H, dpr, fs(), ts.map(t => t.i)]);
+  if (key === traceKey) { syncYBoxes(); return; }
+  traceKey = key;
+  // The canvas is resized only when its size changes: in stack mode it is ~2880×5164 on a retina
+  // screen, 59 MB reallocated on every call. A context that was not resized keeps its state, so
+  // the drawing runs between save() and restore() and always starts from the defaults.
+  const cw = Math.trunc(W * dpr), ch = Math.trunc(H * dpr);
+  if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+  if (c.style.height !== H + "px") c.style.height = H + "px";
+  const g = c.getContext("2d");
+  g.save();
+  try { drawTraces(g, ts, stack, W, H, dpr, n, t0, t1); } finally { g.restore(); }
+}
+function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
   if (!TR) { lastAuto = null; syncYBoxes(); $("traceLbl").textContent = ROIS.length ? "traces — press to compute" : "traces"; g.fillStyle = "#5d656e"; g.font = "12px sans-serif";
              g.fillText(ROIS.length ? "press ‹traces› to read every ROI's time course in one pass" : "draw an ROI on the image, then ‹traces›", 12, 24); return; }
-  const n = TR.traces[0].length, [t0, t1] = V.traceZoom || [0, n - 1];
   const L = TL, R = TR_, T = TT, B = TB;
   const X = f => L + (f - t0) / Math.max(1, t1 - t0) * (W - L - R);
   $("traceLbl").textContent = `${ts.length} of ${TR.names.length} ROIs · ${n} frames` + (V.traceZoom ? ` · ${t0}–${t1}` : "")
@@ -1187,17 +1294,16 @@ function plotTraces() {
       g.fillText(fs() ? (f / rate).toFixed(secs < 20 ? 1 : 0) + " s" : f + "", x + 3, H - 5);
     }
   }
-  // the frame cursor: the slider and the trace strip are the same number
-  if (!V.proj) { const x = Math.round(X(V.frame)) + .5; g.strokeStyle = "#4ea3dd"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); }
+  // (the frame cursor is #traceCursor, under the canvas: see traceCursor)
   if (stack) {
-    lastAuto = ts.length ? limits((ts.find(t => t.i === V.sel) || ts[0]).v.slice(t0, t1 + 1)) : null;
+    lastAuto = ts.length ? bandLimits(ts.find(t => t.i === V.sel) || ts[0], t0, t1) : null;
     ts.forEach((t, row) => {
       const y0 = T + row * ROW_H, band = ROW_H - 8;
-      const seg = t.v.slice(t0, t1 + 1), [lo, hi] = V.yFixed || limits(seg);
+      const [lo, hi] = V.yFixed || bandLimits(t, t0, t1);
       if (V.grid) { g.strokeStyle = "#20252b"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.3; g.beginPath();
       g.save(); g.beginPath(); g.rect(L, y0 - 2, W - L - R, band + 4); g.clip(); g.beginPath();
-      for (let f = t0; f <= t1; f++) { const y = y0 + band - (t.v[f] - lo) / ((hi - lo) || 1) * band; f === t0 ? g.moveTo(X(f), y) : g.lineTo(X(f), y); }
+      traceLine(g, t.v, t0, t1, X, v => y0 + band - (v - lo) / ((hi - lo) || 1) * band);
       g.stroke(); g.restore();
       g.fillStyle = colour(t.i); g.font = (t.i === V.sel ? "bold " : "") + "11px sans-serif";
       g.fillText(t.name, 6, y0 + 12);
@@ -1215,7 +1321,7 @@ function plotTraces() {
     g.save(); g.beginPath(); g.rect(L, T, W - L - R, H - T - B); g.clip();
     ts.forEach(t => {
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.2; g.globalAlpha = (V.sel < 0 || t.i === V.sel) ? 1 : .55; g.beginPath();
-      for (let f = t0; f <= t1; f++) { f === t0 ? g.moveTo(X(f), Y(t.v[f])) : g.lineTo(X(f), Y(t.v[f])); }
+      traceLine(g, t.v, t0, t1, X, Y);
       g.stroke(); g.globalAlpha = 1;
     });
     g.restore();
@@ -1227,12 +1333,22 @@ function plotTraces() {
    padded a little. Min/max let a single odd frame (the black head, a saturated flash) flatten
    everything else into a line. */
 /* The overlay's auto limits, cached for the window on screen: the hover readout asked for
-   them on every mouse move, which meant a copy and a sort of every visible sample per move. */
+   them on every mouse move, which meant a copy and a sort of every visible sample per move.
+   Keyed by the payload itself, not its unit and channel: a refetch with a new q is new numbers. */
 let limCache = { key: "", val: null };
 function overlayLimits(ts, t0, t1) {
-  const key = [TR && TR.unit, TR && TR.channel, TR && TR.params && TR.params.window_s, V.signal, t0, t1, ts.map(t => t.i).join(",")].join("|");
+  const key = [trId(TR), V.signal, t0, t1, ts.map(t => t.i).join(",")].join("|");
   if (limCache.key !== key) limCache = { key, val: limits(ts.flatMap(t => t.v.slice(t0, t1 + 1))) };
   return limCache.val;
+}
+// The same for each band in stack mode: one sort per trace per time window, not one per redraw.
+let bandCache = { key: "", map: new Map() };
+function bandLimits(t, t0, t1) {
+  const key = [trId(TR), V.signal, t0, t1].join("|");
+  if (bandCache.key !== key) bandCache = { key, map: new Map() };
+  let v = bandCache.map.get(t.i);
+  if (!v) { v = limits(t.v.slice(t0, t1 + 1)); bandCache.map.set(t.i, v); }
+  return v;
 }
 function limits(vals) {
   if (!vals.length) return [0, 1];
@@ -1465,7 +1581,10 @@ void main() {
         if (slw > 0.0 && abs(uvw.z - slz) < slw) { c = vec3(0.35, 0.72, 1.0) * clamp(max(b.x, b.y) * 1.6, 0.25, 1.0); s = min(1.0, s * 2.5 + 0.02); }
         acc.rgb += (1.0 - acc.a) * s * c; acc.a += (1.0 - acc.a) * s;
         if (acc.a > 0.985) break;
-      } else m2 = max(m2, w);
+      } else {
+        m2 = max(m2, w);
+        if (all(greaterThanEqual(m2, ceil2 * on2))) break;   // nothing further can be brighter
+      }
       continue;
     }
     vec4 tv = texture(vol, uvw);
@@ -1480,7 +1599,7 @@ void main() {
       if (slw > 0.0 && abs(uvw.z - slz) < slw) { c = vec3(0.35, 0.72, 1.0) * clamp(v / ceil_ * gain * 1.6, 0.25, 1.0); s = min(1.0, s * 2.5 + 0.02); }
       acc.rgb += (1.0 - acc.a) * s * c; acc.a += (1.0 - acc.a) * s;
       if (acc.a > 0.985) break;
-    } else if (v > m) { m = v; mz = uvw.z; }
+    } else if (v > m) { m = v; mz = uvw.z; if (m >= ceil_) break; }   // at the ceiling: nothing further can be brighter
   }
   if (mode == 1) { o = vec4(acc.rgb, 1.0); return; }
   if (ov == 1 && mode == 0) {                               // each channel's MIP, coloured, added
@@ -1540,7 +1659,7 @@ async function volLoad() {
       throw new Error("the two channels came back on different grids");
     // The bytes are kept: the XYZ views cut them here, and 3D puts them on the GPU only when it
     // is actually shown (volDraw -> volUpload), so the orthogonal views never need WebGL.
-    volBytes = got.map(g => g.data); volData = volBytes[0]; volProj = {}; volCut = {};
+    volBytes = got.map(g => g.data); volData = volBytes[0]; volProj = {}; volCut = {}; oPane = {};
     volMetaFrom(got);
     volKey = key; badge("stack loaded");
   } catch (e) {
@@ -1550,6 +1669,9 @@ async function volLoad() {
 }
 function volUpload() {             // the bytes are here from an XYZ view; 3D wants them on the GPU
   if (!volData || !volMeta) return;
+  // A new cut is computed in the background while the old picture stays; only the very first
+  // texture of a stack (a view restored with the cut on) waits for it.
+  if (volTex && volTexKey.startsWith(volKey + "|") && !volCutReady()) { volCutAsync(); return; }
   const gl = glInit(), [D, Hy, Wx] = volMeta.shape;
   if (!volTex) volTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_3D, volTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -1574,38 +1696,74 @@ let volCut = {};                   // per channel: { key, out }
 // The window follows the slider as it moves; the mask follows it when it is let go (ceilSet),
 // since cutting a 125-slice stack is a second of work and should not run on every step.
 function volCutKey() { return V.vol.cut && V.vol.ceilSet < 1 ? `cut${V.vol.ceilSet.toFixed(2)}` : "raw"; }
-function volCutData(j = 0) {
+function volCutData(j = 0) {           // the cut bytes of channel j, computed here and now if need be
+  if (volCutKey() === "raw") return volBytes[j];
+  const it = volCutSteps(j); let r; while (!(r = it.next()).done);
+  return r.value;
+}
+/* The cut, as steps that can pause. Run to the end in one go it held the page for 285 ms (1.6 s
+   on a CPU throttled 6×) when the ceiling was let go, with two channels; volCutAsync runs the
+   same steps and yields to the page every ~10 ms, so the arithmetic, and the bytes, are the same. */
+function* volCutSteps(j) {
   const key = volKey + "|" + volCutKey(), src = volBytes[j];
-  if (volCutKey() === "raw") return src;
   if (volCut[j] && volCut[j].key === key) return volCut[j].out;
   const [D, Hy, Wx] = volMeta.shape, [vz, vy, vx] = volMeta.vox, lim = Math.floor(V.vol.ceilSet * 255);
-  let m = new Uint8Array(src.length);
-  for (let i = 0; i < m.length; i++) m[i] = src[i] > lim ? 1 : 0;
+  const CH = 1 << 20, N = src.length;
+  let m = new Uint8Array(N);
+  for (let a = 0; a < N; a += CH) { volCutSeed(src, m, lim, a, Math.min(N, a + CH)); yield; }
   // grow the seeds by r voxels along one axis: a running count of seeds in the window
-  const grow = (src, n, stride, count, step, r) => {
-    const out = new Uint8Array(src.length);
-    for (let line = 0; line < count; line++) {
-      const base = Math.floor(line / step) * step * n + (line % step);
-      let run = 0;
-      for (let k = 0; k <= Math.min(r, n - 1); k++) run += src[base + k * stride];
-      for (let k = 0; k < n; k++) {
-        if (run > 0) out[base + k * stride] = 1;
-        const add = k + r + 1, drop = k - r;
-        if (add < n) run += src[base + add * stride];
-        if (drop >= 0) run -= src[base + drop * stride];
-      }
-    }
+  function* grow(src, n, stride, count, step, r) {
+    const out = new Uint8Array(src.length), per = Math.max(1, Math.floor(CH / n));
+    for (let a = 0; a < count; a += per) { volCutGrow(src, out, n, stride, step, r, a, Math.min(count, a + per)); yield; }
     return out;
-  };
+  }
   const rx = Math.max(1, Math.round(BLOB_RIM_UM / vx)), ry = Math.max(1, Math.round(BLOB_RIM_UM / vy));
   const rz = Math.max(1, Math.round(BLOB_RIM_UM / vz));
-  m = grow(m, Wx, 1, D * Hy, 1, rx);                 // along x: lines are rows
-  m = grow(m, Hy, Wx, D * Wx, Wx, ry);               // along y: stride one row
-  m = grow(m, D, Wx * Hy, Wx * Hy, Wx * Hy, rz);     // along z: stride one slice
-  const out = new Uint8Array(src.length);
-  for (let i = 0; i < out.length; i++) out[i] = m[i] ? 0 : src[i];
+  m = yield* grow(m, Wx, 1, D * Hy, 1, rx);                 // along x: lines are rows
+  m = yield* grow(m, Hy, Wx, D * Wx, Wx, ry);               // along y: stride one row
+  m = yield* grow(m, D, Wx * Hy, Wx * Hy, Wx * Hy, rz);     // along z: stride one slice
+  const out = new Uint8Array(N);
+  for (let a = 0; a < N; a += CH) { volCutMask(src, m, out, a, Math.min(N, a + CH)); yield; }
   volCut[j] = { key, out };
   return out;
+}
+function volCutSeed(src, m, lim, a, b) { for (let i = a; i < b; i++) m[i] = src[i] > lim ? 1 : 0; }
+function volCutMask(src, m, out, a, b) { for (let i = a; i < b; i++) out[i] = m[i] ? 0 : src[i]; }
+function volCutGrow(src, out, n, stride, step, r, l0, l1) {
+  for (let line = l0; line < l1; line++) {
+    const base = Math.floor(line / step) * step * n + (line % step);
+    let run = 0;
+    for (let k = 0; k <= Math.min(r, n - 1); k++) run += src[base + k * stride];
+    for (let k = 0; k < n; k++) {
+      if (run > 0) out[base + k * stride] = 1;
+      const add = k + r + 1, drop = k - r;
+      if (add < n) run += src[base + add * stride];
+      if (drop >= 0) run -= src[base + drop * stride];
+    }
+  }
+}
+const volCutChans = () => volMeta.ov ? [0, 1] : [0];
+const volCutReady = () => volCutKey() === "raw" || volCutChans().every(j => volCut[j] && volCut[j].key === volKey + "|" + volCutKey());
+const yieldToPage = () => new Promise(r => { const mc = new MessageChannel(); mc.port1.onmessage = () => r(); mc.port2.postMessage(0); });
+let volCutRun = "";
+function volCutAsync() {                    // cut in the background; the old texture stays on screen meanwhile
+  const key = volKey + "|" + volCutKey();
+  if (volCutRun === key) return;
+  volCutRun = key;
+  (async () => {
+    for (const j of volCutChans()) {
+      const it = volCutSteps(j); let t = performance.now();
+      while (!it.next().done) {
+        if (performance.now() - t < 10) continue;
+        await yieldToPage(); t = performance.now();
+        if (volCutRun !== key) return;                                          // a newer cut took over
+        if (volKey + "|" + volCutKey() !== key) { volCutRun = ""; volDraw(); return; }   // the ceiling moved, or a new stack
+      }
+    }
+    volCutRun = "";
+    if (volCutKey() !== "raw") badge("blobs above the ceiling cut");
+    volDraw();
+  })();
 }
 function volMetaFrom(got) {         // got: one { r, shape, vox, data } per channel, all on one grid
     const chs = got.map(({ r, data }) => {
@@ -1715,6 +1873,7 @@ function volSetTarget(p, ext) {          // a world point -> the target, kept in
    full quality. A weak GPU then keeps up with the hand — on a retina screen a moving frame is an
    eighth of the pixels — and what you stop on is the real picture (VTK's interactive/still split). */
 let volBusy = false, volIdleT = 0;
+const VOL_MAX_PX = 1.5e6;
 function volInteract() {
   volBusy = true; clearTimeout(volIdleT);
   volIdleT = setTimeout(() => { volBusy = false; volDraw(); }, 180);
@@ -1722,8 +1881,13 @@ function volInteract() {
 function volDraw() {
   if (!V.vol.on || !volMeta || !unit) return;
   if (volTexKey !== volKey + "|" + volCutKey()) volUpload();   // new stack, or a new cut
-  const gl = GL, cv = $("vol"), dpr = volBusy ? 0.5 : (window.devicePixelRatio || 1);
-  const W = Math.max(1, Math.round(cv.clientWidth * dpr)), H = Math.max(1, Math.round(cv.clientHeight * dpr));
+  // At rest: the screen's pixels, but no more than 1.5 per CSS pixel and ~1.5 MP in all (never
+  // fewer than one per CSS pixel, so an ordinary screen draws exactly as before). A ray
+  // per device pixel on a retina screen is 2.3 MP of ray-marching for a picture whose voxels are
+  // already several pixels wide; past 1.5 the difference is not visible, the cost is.
+  const gl = GL, cv = $("vol"), cssW = cv.clientWidth, cssH = cv.clientHeight;
+  const dpr = volBusy ? 0.5 : Math.min(window.devicePixelRatio || 1, 1.5, Math.max(1, Math.sqrt(VOL_MAX_PX / Math.max(1, cssW * cssH))));
+  const W = Math.max(1, Math.round(cssW * dpr)), H = Math.max(1, Math.round(cssH * dpr));
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   gl.viewport(0, 0, W, H);
   const [D, Hy, Wx] = volMeta.shape, [vz, vy, vx] = volMeta.vox;
@@ -1879,7 +2043,7 @@ $("volAuto").onclick = () => { if (!volMeta) return; V.vol.thr = volAutoThr(); V
 $("volCut").onclick = () => { V.vol.cut = !V.vol.cut; volShow(); volDraw(); saveView(); };
 $("volCeil").onchange = () => { V.vol.ceilSet = V.vol.ceil;         // let go: now cut the blobs
   if (V.vol.cut && V.vol.ceilSet < 1) badge("cutting the blobs…");
-  setTimeout(() => { volDraw(); if (V.vol.cut && V.vol.ceilSet < 1) badge("blobs above the ceiling cut"); saveView(); }, 0); };
+  setTimeout(() => { volDraw(); if (V.vol.cut && V.vol.ceilSet < 1 && volCutReady()) badge("blobs above the ceiling cut"); saveView(); }, 0); };
 for (const [id, k] of [["volThr", "thr"], ["volCeil", "ceil"], ["volDen", "den"], ["volGain", "gain"], ["volZ", "z"]])
   $(id).oninput = () => { V.vol[k] = +$(id).value; if (k === "thr") V.vol.thrFor = unit.path; if (k === "z") $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z; volNums(); volDraw(); saveView(); };
 // Floor and ceiling as numbers in the recording's own units. The sliders are fractions of the
@@ -1902,7 +2066,6 @@ $("volCeilN").onchange = () => { const x = +$("volCeilN").value; if (!volMeta ||
   V.vol.ceil = Math.max(.05, Math.min(1, volFrac(x))); $("volCeil").value = V.vol.ceil;
   $("volCeilN").blur(); volNums(); $("volCeil").onchange(); };
 ["volThrN", "volCeilN"].forEach(id => ["mousedown", "keydown", "wheel"].forEach(t => $(id).addEventListener(t, e => e.stopPropagation())));
-new ResizeObserver(() => volDraw()).observe($("stage"));
 
 /* ------------------------------------------------------------------------------------------
    Orthogonal views of a stack: XY at the crosshair's depth, YZ at its x (depth running to the
@@ -1936,6 +2099,55 @@ function orthoPlane(axis, j = 0) {          // Uint8 image of one pane (of chann
   if (max) volProj[key] = out;               // projections do not change with the crosshair
   return out;
 }
+/* One pane's picture at the stack's own size, kept until its slice, the stack or the colours
+   change. Moving the crosshair along x changes only the YZ pane, so only YZ is cut and coloured
+   again; the other two are redrawn from what they already were. The colouring goes through a
+   table of packed RGBA words, one per grey (two channels: one per pair of greys), built with the
+   same float sum and the same clamped rounding the per-pixel loop used, so the pixels are equal. */
+let oPane = {};
+const _oLut = {};
+function orthoLut(cols, shown) {
+  const key = JSON.stringify([cols, shown]);
+  if (_oLut[key]) return _oLut[key];
+  const q8 = new Uint8ClampedArray(1), word = (a, b) => {
+    let w = 255 << 24;
+    for (let ci = 0; ci < 3; ci++) { let s = 0; if (shown.length > 0) s += cols[shown[0]][ci] * a; if (shown.length > 1) s += cols[shown[1]][ci] * b;
+      q8[0] = Math.min(255, s); w |= q8[0] << (8 * ci); }
+    return w >>> 0;
+  };
+  const T = new Uint32Array(shown.length > 1 ? 65536 : 256);
+  if (shown.length > 1) { for (let a = 0; a < 256; a++) for (let b = 0; b < 256; b++) T[a << 8 | b] = word(a, b); }
+  else for (let a = 0; a < 256; a++) T[a] = word(a, 0);
+  return (_oLut[key] = T);
+}
+function orthoPicture(axis) {
+  const v = V.vol, ov = !!volMeta.ov;
+  const cols = ov ? volColours() : null, shown = ov ? [0, 1].filter(j => v.chOn[j]) : null;
+  const key = JSON.stringify([volKey, axis, v.oMax ? "M" : v[{ xy: "cz", xz: "cy", yz: "cx" }[axis]], ov, cols, shown]);
+  if (oPane[axis] && oPane[axis].key === key) return oPane[axis].off;
+  const pl = orthoPlane(axis), off = document.createElement("canvas"), N = pl.w * pl.h;
+  off.width = pl.w; off.height = pl.h;
+  const og = off.getContext("2d"), im = og.createImageData(pl.w, pl.h);
+  if (LITTLE) {
+    const o32 = new Uint32Array(im.data.buffer);
+    if (!ov) { const px = pl.px; for (let i = 0; i < N; i++) o32[i] = (0xff000000 | px[i] * 0x010101) >>> 0; }
+    else {                                           // the overlay: each channel in its colour, added
+      const T = orthoLut(cols, shown), pls = shown.map(j => orthoPlane(axis, j).px);
+      if (shown.length === 0) o32.fill(T[0]);
+      else if (shown.length === 1) { const a = pls[0]; for (let i = 0; i < N; i++) o32[i] = T[a[i]]; }
+      else { const a = pls[0], b = pls[1]; for (let i = 0; i < N; i++) o32[i] = T[a[i] << 8 | b[i]]; }
+    }
+  } else if (!ov) for (let i = 0; i < N; i++) { const q = pl.px[i]; im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = q; im.data[4 * i + 3] = 255; }
+  else {                                             // a big-endian machine: the plain loop
+    const pls = shown.map(j => orthoPlane(axis, j).px);
+    for (let i = 0; i < N; i++) {
+      for (let ci = 0; ci < 3; ci++) { let s = 0; shown.forEach((j, n) => { s += cols[j][ci] * pls[n][i]; }); im.data[4 * i + ci] = Math.min(255, s); }
+      im.data[4 * i + 3] = 255; }
+  }
+  og.putImageData(im, 0, 0);
+  oPane[axis] = { key, off };
+  return off;
+}
 let oGeom = null;
 function orthoDraw() {
   if (!V.vol.ortho || !volData || !volMeta || !unit) return;
@@ -1951,19 +2163,10 @@ function orthoDraw() {
   for (const [axis, r] of [["xy", xy], ["yz", yz], ["xz", xz]]) {
     const c = $("o" + axis.toUpperCase()), dpr = window.devicePixelRatio || 1;
     Object.assign(c.style, { left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px" });
-    c.width = Math.max(1, Math.round(r.w * dpr)); c.height = Math.max(1, Math.round(r.h * dpr));
-    const pl = orthoPlane(axis), off = document.createElement("canvas");
-    off.width = pl.w; off.height = pl.h;
-    const og = off.getContext("2d"), im = og.createImageData(pl.w, pl.h);
-    if (!volMeta.ov) for (let i = 0; i < pl.px.length; i++) { const q = pl.px[i]; im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = q; im.data[4 * i + 3] = 255; }
-    else {                                           // the overlay: each channel in its colour, added
-      const cols = volColours(), shown = [0, 1].filter(j => v.chOn[j]), pls = shown.map(j => orthoPlane(axis, j).px);
-      for (let i = 0; i < pl.px.length; i++) {
-        for (let ci = 0; ci < 3; ci++) { let s = 0; shown.forEach((j, n) => { s += cols[j][ci] * pls[n][i]; }); im.data[4 * i + ci] = Math.min(255, s); }
-        im.data[4 * i + 3] = 255; }
-    }
-    og.putImageData(im, 0, 0);
-    const g = c.getContext("2d");
+    const cw = Math.max(1, Math.round(r.w * dpr)), ch = Math.max(1, Math.round(r.h * dpr));
+    if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+    const off = orthoPicture(axis), g = c.getContext("2d");
+    g.save(); g.clearRect(0, 0, c.width, c.height);
     g.imageSmoothingEnabled = axis !== "xy";        // depth is resampled ~7x; xy stays pixel-true
     g.drawImage(off, 0, 0, c.width, c.height);
     if (v.oCross) {                                  // where the other two cut this one
@@ -1973,6 +2176,7 @@ function orthoDraw() {
       g.beginPath(); g.moveTo(hx * c.width, 0); g.lineTo(hx * c.width, c.height);
       g.moveTo(0, hy * c.height); g.lineTo(c.width, hy * c.height); g.stroke(); g.setLineDash([]);
     }
+    g.restore();
   }
   const um = (i, n, step) => ((i - (n - 1) / 2) * step).toFixed(1);
   const lab = (id, r, text) => Object.assign($(id), { textContent: text }).style.cssText = `left:${r.x + 4}px;top:${r.y - 18}px`;
@@ -2013,7 +2217,6 @@ $("ortho").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagatio
   orthoDraw(); saveView(); }, { passive: false });
 $("oMax").onclick = () => { V.vol.oMax = !V.vol.oMax; volShow(); saveView(); };
 $("oCross").onclick = () => { V.vol.oCross = !V.vol.oCross; volShow(); saveView(); };
-new ResizeObserver(() => orthoDraw()).observe($("stage"));
 </script>
 </body>
 </html>

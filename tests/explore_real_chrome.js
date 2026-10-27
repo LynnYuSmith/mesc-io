@@ -119,7 +119,7 @@ const pick = a => a[Math.floor(rnd() * a.length)];
   // ---------------- the monkey ----------------
   const targets = ["#playBtn", "#meanBtn", "#maxBtn", "#volBtn", "#orthoBtn", "#flipBtn", "#ovBtn", "#pngBtn", "#toolSpot", "#toolRect", "#toolPoly", "#toolRuler",
     "#winFixed", "#winPct", "#winFile", "#sigRaw", "#sigDff", "#modeStack", "#modeOverlay", "#gridBtn", "#yAuto", "#traceReset", "#doTraces", "#addRoi", "#delRoi",
-    "#volMip", "#volGlass", "#volDepth", "#volCut", "#volAuto", "#volReset", "#volAxY", "#volAxX", "#volDeep", "#oMax", "#oCross", "#dlTracePng"];
+    "#volMip", "#volGlass", "#volDepth", "#volPoint", "#volMeasure", "#volBox", "#volBoxFull", "#volSlab", "#volCut", "#volAuto", "#volReset", "#volAxY", "#volAxX", "#volDeep", "#oMax", "#oCross", "#dlTracePng"];
   const ranges = ["#frame", "#lo", "#hi", "#volThr", "#volCeil", "#volDen", "#volGain", "#volZ"];
   for (let s = 0; s < +STEPS; s++) {
     const r = rnd(); let what;

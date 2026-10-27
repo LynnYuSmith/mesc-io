@@ -59,8 +59,9 @@ def test_a_z_stack_carries_its_slice_spacing_not_a_frame_rate(tmp_path):
 
 
 def test_the_cli_writes_every_unit_into_a_folder(mesc, tmp_path):
+    # in-process, as tests/test_cli.py does: a child process with a hand-built environment failed to
+    # start Python at all on Windows (no SYSTEMROOT), which tested nothing of ours
+    from mesc_io.__main__ import main
     out = tmp_path / "all"
-    r = subprocess.run([sys.executable, "-m", "mesc_io", "export", str(mesc), "all", str(out), "--tiff"],
-                       capture_output=True, text=True, env={"PYTHONPATH": str(ROOT / "src"), "PATH": ""})
-    assert r.returncode == 0, r.stderr
+    assert main(["export", str(mesc), "all", str(out), "--tiff"]) == 0
     assert sorted(p.name for p in out.iterdir()) == ["synthetic_MUnit_0.tif", "synthetic_MUnit_1.tif"]

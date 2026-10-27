@@ -17,6 +17,26 @@
   - **The dF/F baseline:** at the ends of the rolling window (most of a short unit, for a 60-s window)
     the quantiles came from one np.quantile call per frame — 74,000 calls for 40 ROIs. One sorted
     window is now moved a point at a time instead. Bit-identical, 4× faster.
+- **Motion correction needs the memory of one unit, and runs 2.7× faster** — 291 s → 109 s and
+  8.0 GB → 4.1 GB peak for one two-channel 3,715-frame 512² recording; a file of three such
+  recordings now peaks at 4.3 GB (it needed ~23 GB). The written `.mesc` is the same: every
+  stored chunk and attribute byte-identical to 0.3.11's output on that recording.
+  - **Each unit is written as soon as it is registered**, then let go, instead of every unit
+    being held until the end and copied once more for the write. The output is written as
+    `<out>.partial` and renamed when complete, so a failed run leaves no half-written file; an
+    output path that is the source itself is refused up front.
+  - **Suite2p's batch follows the frame size** (`BATCH_PIXELS`: 1000 frames of 256², 250 of
+    512²). 1000 frames of 512² made ~2 GB FFT buffers and ran at half the speed. The output does
+    not depend on the batch; `batch=` still fixes it (pass 1000 to reproduce an older run if you
+    set `smooth_sigma_time` or `do_bidiphase`, which mix frames within a batch).
+  - **Writing back deflates frames in threads.** For one-gzip-chunk-per-frame datasets (MESc's
+    layout, no shuffle or checksum) frames are compressed with zlib in a few threads and stored
+    with `write_direct_chunk` from one thread under h5py's lock: 4.6 s → 0.7 s per 1,000 frames of
+    512², the same stored bytes (checked on each channel's first frame; h5py writes the channel
+    if they differ). Other layouts go through h5py as before.
+  - **Conversion to stored integers in 64-frame blocks** inside the write loop, not over whole
+    arrays (which peaked at 8× the stored size); the agreement check converts only the frames
+    it samples. Same values, same refusals.
 - **3D keeps up on a weak GPU.** While the stack is turned, moved or zoomed it is drawn at half the CSS
   pixels with rays stepped twice as far, and ~180 ms after the hand stops at full quality again.
 

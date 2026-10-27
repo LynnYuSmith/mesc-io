@@ -118,3 +118,24 @@ rep["settings"], rep["preset"], rep["skipped"]
 
 The report keeps the preset in full (`name`, `source`, `description`, `settings`) next to the
 settings that were resolved, so a corrected file can be traced to exactly what produced it.
+
+## Memory and speed
+
+- **One unit in memory at a time.** Each unit is written into the output as soon as it is
+  registered and then let go, so a file of several recordings needs the memory of one. On a
+  file of three 3,715-frame, two-channel 512² recordings the peak stayed at 4.3 GB (one unit
+  held about 8 GB, and the whole file would have needed about 23 GB, before 0.3.12).
+- **The output appears when it is complete.** It is written as `<out>.partial` and renamed at
+  the end; a run that fails or is stopped removes the partial file and leaves nothing under
+  the name asked for. The output cannot be the source.
+- **Batch size follows the frame size.** By default Suite2p gets `BATCH_PIXELS` worth of frames
+  at a time — 1000 frames of 256², 250 of 512² — which keeps its FFT buffers small (1000 frames
+  of 512² asked for ~2 GB of them and ran at half the speed). Every frame is registered on its
+  own, so the output does not change. `register_file(..., batch=N)` fixes it; do that with
+  `batch=1000` to reproduce an older run exactly if you set `smooth_sigma_time` or
+  `do_bidiphase`, the two Suite2p options that mix frames within a batch.
+- **Frames are deflated in threads.** MESc stores one gzip chunk per frame. Those frames are
+  compressed with zlib in a few threads and handed to HDF5 as finished chunks — the same bytes
+  HDF5's own deflate stores, checked on the first frame of every channel (if they differ, that
+  channel is written through h5py). Only zlib runs in the threads; every HDF5 call is made from
+  one thread, under h5py's lock. Any other layout is written through h5py as before.

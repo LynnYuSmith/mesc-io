@@ -91,6 +91,13 @@ slice and each channel's value; also shown in XYZ), **measure** gives the distan
 points in µm — shift+click goes on into a path, an axon's length — **box** clips the stack to six
 limits and **slab** draws only a thickness around the current slice, as MIP.
 
+**surface** in XYZ marks where the tissue begins: a few clicks in the XZ / YZ panes, just above the
+first slice where the label appears, and a surface is fitted through them — flat from one mark, a
+tilted plane from three, a curved one from six spread over the stack (a brain under a window is
+rarely level). It is drawn in the panes, the tilt is given in degrees, and every 3D point and the
+crosshair get their depth below it in µm, into the tissue: the brighter side of the stack, or the
+side you set. **csv** saves the marks, the fit and the points' depths; the marks are kept with the view.
+
 **ruler** (beside the ROI tools) measures in µm between two clicks on the image; **PNG** saves what
 is on screen for a figure — the image at whole pixels with the ROIs, the ruler, a scale bar and a
 caption, or the 3D view — and **png** beside csv the traces.

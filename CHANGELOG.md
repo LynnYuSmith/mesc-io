@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **The surface of the tissue, marked in XYZ.** **surface** in the XYZ bar: each click in a pane puts
+  a mark where the tissue begins, instead of moving the crosshair; shift+click removes the nearest,
+  Esc the last, shift+Esc all. A surface is fitted through the marks by least squares in µm — flat
+  from one or two, a tilted plane from three to five, a curved one (z = a + bx + cy + dx² + exy + fy²)
+  from six — and drawn as a dashed line where each pane cuts it, with its tilt in degrees. The
+  crosshair and every 3D point get their depth below it, along z, into the tissue: by default the
+  brighter side of the stack, or the side set with **tissue**. **csv** writes the marks, the fit and
+  the points' depths. Marks are kept per unit with the view.
+- The **surface ↑** button's tooltip no longer says slice 0 is always the surface: in a stack recorded
+  upward slice 0 is the deepest.
+
 ## 0.4.0 — 2026-10-27
 
 **Measure, export, open in Fiji.**

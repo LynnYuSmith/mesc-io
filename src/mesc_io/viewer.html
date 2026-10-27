@@ -147,6 +147,10 @@
   #orthoBar { position:absolute; right:8px; top:8px; display:flex; gap:6px; align-items:center; font-size:11px;
               background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
   #orthoBar button { padding:2px 8px; font-size:11px }
+  #oSurfInfo { position:absolute; right:8px; bottom:8px; max-width:calc(100% - 16px); font-size:11px; color:var(--ink);
+               background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px; white-space:pre-wrap }
+  #oSurfInfo[hidden] { display:none }
+  #ortho.surf canvas { cursor:cell }
 
   /* ---- instruments (right) ---- */
   #toolsCol { grid-area:tools; display:flex; flex-direction:column; min-height:0; position:relative;
@@ -244,7 +248,7 @@
         <button id="volReset" title="look straight down the stack again, from the surface (double-click does the same)">reset</button>
         <button id="volAxY" title="look along y: the stack from its side, depth running down">side y</button>
         <button id="volAxX" title="look along x: the stack from its other side, depth running down">side x</button>
-        <button id="volDeep" title="which end of the stack is up. Femtonics records from the surface down (slice 0 = surface) and MESc draws the deepest slice at the top; here the surface is on top unless this is on">surface ↑</button>
+        <button id="volDeep" title="which end of the stack is up: slice 0 (off) or the last slice, as MESc draws it (on). Which end is the surface depends on how the stack was taken — in a stack recorded upward, slice 0 is the deepest; the surface tool in XYZ finds the tissue side by brightness">surface ↑</button>
         <button id="volPoint" title="mark points: a click (not a drag — a drag still turns) puts a numbered point on the brightest voxel under the cursor, snapped to the brightest of its 3×3×3 neighbours; the XYZ crosshair goes there. Esc removes the last, shift+Esc all">point</button>
         <button id="volBox" title="clip the stack to a box: six limits, x y z from and to (fractions of the stack, in the file's own axes — a flip or deepest-up does not change which part is kept). The box is drawn in yellow; full brings the whole stack back">box</button>
         <button id="volSlab" title="a thick-slab MIP: only the slices within the thickness around the slider's slice are drawn, as MIP; the slider moves the slab through the stack">slab</button>
@@ -267,9 +271,13 @@
         <div id="orthoBar">
           <button id="oMax" title="each view becomes the brightest along its own depth axis — side projections of the stack">max</button>
           <button id="oCross" class="on" title="show the crosshair">cross</button>
+          <button id="oSurf" title="mark the surface: each click in a pane puts a mark where the tissue begins (just above the first slice where the green appears), instead of moving the crosshair. One mark: a flat surface; three: a tilted plane; six or more, spread over the stack: a curved one. Shift+click removes the nearest mark, Esc the last, shift+Esc all">surface</button>
+          <button id="oSurfTis" hidden title="which side of the surface is the tissue: found by brightness (the brighter side), or set by hand. Depth below the surface is counted into the tissue">tissue: auto</button>
+          <button id="oSurfCsv" hidden title="the marks, the fitted surface and every 3D point's depth below it, as a CSV">csv</button>
           <span id="oChs" hidden></span>
           <span class="hint" id="oPos"></span>
         </div>
+        <div id="oSurfInfo" hidden></div>
       </div>
     </div>
     <div id="player">
@@ -1677,6 +1685,7 @@ function volState(v) {
               mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0, deep: false, axes: 2,
               chOn: [true, true], thrC: [0.5, 0.5], thrCFor: "",   // the overlay: each channel shown?, its floor
               tool: "", pts: {},     // tool: "" | point | measure
+              oSurf: false, surf: {}, surfTis: 0,   // surface marks per unit path ([z, y, x] like pts); the tissue side: 0 by brightness, -1 toward slice 0, +1 toward the last
               box: [0, 1, 0, 1, 0, 1], boxOpen: false, slab: false, slabUm: 10 };   // the clip box: x0 x1 y0 y1 z0 z1 in 0..1 of the file's axes; the thick slab   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
   if (!v || typeof v !== "object") return d;
   // Before 0.3.6 the camera's up was the image's y; now it is depth. A view saved then would open
@@ -1701,6 +1710,9 @@ function volState(v) {
   const okPt = q => Array.isArray(q) && q.length === 3 && q.every(x => Number.isInteger(x) && x >= 0);
   o.pts = Object.fromEntries(Object.entries(o.pts && typeof o.pts === "object" && !Array.isArray(o.pts) ? o.pts : {})
     .map(([k, a]) => [k, Array.isArray(a) ? a.filter(okPt) : []]).filter(([, a]) => a.length));
+  o.surf = Object.fromEntries(Object.entries(o.surf && typeof o.surf === "object" && !Array.isArray(o.surf) ? o.surf : {})
+    .map(([k, a]) => [k, Array.isArray(a) ? a.filter(okPt) : []]).filter(([, a]) => a.length));
+  o.oSurf = !!o.oSurf; o.surfTis = [-1, 0, 1].includes(o.surfTis) ? o.surfTis : 0;
   return o;
 }
 V.vol = volState(V.vol);
@@ -1952,6 +1964,8 @@ function volShow() {
   const ortho = !!(V.vol.ortho && isStack);
   $("ortho").hidden = !ortho; $("orthoBtn").classList.toggle("on", ortho);
   $("oMax").classList.toggle("on", V.vol.oMax); $("oCross").classList.toggle("on", V.vol.oCross);
+  $("oSurf").classList.toggle("on", V.vol.oSurf); $("ortho").classList.toggle("surf", V.vol.oSurf);
+  $("oSurfTis").hidden = $("oSurfCsv").hidden = !(V.vol.oSurf || surfMarks().length);
   const on = !!(V.vol.on && isStack);
   $("vol").hidden = !on; $("volBar").hidden = !on; $("volInfo").hidden = !on; $("volMarks").hidden = !on;
   if (!on) $("volPts").hidden = true;
@@ -2432,7 +2446,9 @@ function volPtsList() {
   if (pts.length) {
     lines.push(`<span class="h">points (µm from the stack's corner) · Esc removes the last, shift+Esc all${volMeta.down > 1 ? ` · values: ${volMeta.down}×${volMeta.down} block means` : ""}</span>`);
     pts.forEach((q, n) => { const [x, y, z] = volUm(q);
-      lines.push(`<b style="color:${VOL_PT}">${n + 1}</b>  x ${x.toFixed(2)} · y ${y.toFixed(2)} · z ${z.toFixed(1)}  · slice ${q[0]} · px ${q[2]}, ${q[1]}  · ${volValues(q).join(" · ")}`); });
+      const d = surfDepth(q);
+      lines.push(`<b style="color:${VOL_PT}">${n + 1}</b>  x ${x.toFixed(2)} · y ${y.toFixed(2)} · z ${z.toFixed(1)}  · slice ${q[0]} · px ${q[2]}, ${q[1]}  · ${volValues(q).join(" · ")}`
+        + (d == null ? "" : `  · <span style="color:${SURF}">${d.toFixed(1)} µm below the surface</span>`)); });
   }
   if (volMeas.length) {
     lines.push(`<span class="h">measure · ${volMeas.length < 2 ? "click a second point (shift+click goes on from the last)" : "shift+click goes on · Esc removes the last point"}</span>`);
@@ -2491,6 +2507,11 @@ $("volMeasure").onclick = () => volSetTool("measure");
 // Esc in 3D: the last point goes; shift+Esc, all of them — of the ruler when it is the tool, of
 // the points otherwise. True when it took the key.
 function volEscape(all) {
+  if (V.vol.ortho && V.vol.oSurf && unit) {          // in the XYZ panes with the surface on: its marks
+    const m = surfMarks(); if (!m.length) return false;
+    if (all) m.length = 0; else m.pop();
+    orthoDraw(); volShow(); saveView(); return true;
+  }
   if (!V.vol.on || !unit) return false;
   const pts = V.vol.tool === "measure" ? volMeas : volPts(); if (!pts.length) return false;
   if (all) pts.length = 0; else pts.pop();
@@ -2607,6 +2628,7 @@ function orthoDraw() {
       g.moveTo(0, hy * c.height); g.lineTo(c.width, hy * c.height); g.stroke(); g.setLineDash([]);
     }
     orthoMarks(g, axis, c, dpr);
+    surfDrawPane(g, axis, c, dpr);
     g.restore();
   }
   const um = (i, n, step) => ((i - (n - 1) / 2) * step).toFixed(1);
@@ -2617,6 +2639,7 @@ function orthoDraw() {
   $("oPos").textContent = `x ${v.cx} · y ${v.cy} · z ${v.cz}` + (volMeta.down > 1 ? ` · xy ÷${volMeta.down}` : "")
     + (volMeta.ov ? " · each channel in its own window" : "");
   $("frameLbl").textContent = `slice ${v.cz} / ${D - 1} · ${um(v.cz, D, dz)} µm`;
+  surfInfo();
 }
 // the 3D points in a pane: where they lie in it, when the pane's cut passes within a voxel of them
 // (every point, on a projection), numbered as in 3D
@@ -2655,7 +2678,9 @@ function orthoSet(h) {
   $("frame").value = V.frame; orthoDraw();
 }
 $("ortho").addEventListener("pointerdown", e => { e.stopPropagation(); e.preventDefault();
-  const h = orthoHit(e); if (!h) return; oDrag = true; $("ortho").setPointerCapture(e.pointerId); orthoSet(h); });
+  const h = orthoHit(e); if (!h) return;
+  if (V.vol.oSurf) { surfClick(h, e.shiftKey); return; }
+  oDrag = true; $("ortho").setPointerCapture(e.pointerId); orthoSet(h); });
 $("ortho").addEventListener("pointermove", e => { e.stopPropagation(); if (!oDrag) return; const h = orthoHit(e); if (h) orthoSet(h); });
 const oEnd = e => { if (!oDrag) return; oDrag = false; try { $("ortho").releasePointerCapture(e.pointerId); } catch (_) {} saveView(); };
 $("ortho").addEventListener("pointerup", oEnd); $("ortho").addEventListener("pointercancel", oEnd);
@@ -2667,6 +2692,163 @@ $("ortho").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagatio
   else if (h.axis === "xz") v.cy = Math.max(0, Math.min(Hy - 1, v.cy + d));
   else v.cx = Math.max(0, Math.min(Wx - 1, v.cx + d));
   orthoDraw(); saveView(); }, { passive: false });
+/* ------------------------------------------------------------------------------------------
+   The surface of the tissue, marked by eye. In our big stacks the surface is neither flat nor
+   level: the brain is curved under the window and the stack is tilted, so one stack's surface is
+   an arc. Where it is is a judgement — just above the first slice where the green appears — so
+   it is marked by hand, a few clicks in the XZ / YZ panes, and a surface is fitted through the
+   marks in µm: one or two marks give a flat one, three to five a tilted plane, six or more (spread
+   over the stack) a curved one, z = a + bx + cy + dx² + exy + fy². Depth below the surface is the
+   vertical distance (along the stack's z) into the tissue, which is the side the user set or, by
+   default, the brighter side of the stack. Marks are kept per unit with the view.
+   ------------------------------------------------------------------------------------------ */
+const SURF = "#5ce1e6";
+function surfMarks() { if (!unit) return []; return V.vol.surf[unit.path] || (V.vol.surf[unit.path] = []); }
+function surfSolve(A, b) {                  // A x = b by Gaussian elimination with partial pivoting
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    if (Math.abs(M[p][c]) < 1e-12) return null;
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  return M.map((r, i) => r[n] / r[i]);
+}
+let _surfFit = { key: "", fit: null };
+function surfFit() {
+  const ms = surfMarks(); if (!ms.length || !unit) return null;
+  const key = JSON.stringify([unit.path, ms, unit.pixel_size_um, unit.z_step_um]);
+  if (_surfFit.key === key) return _surfFit.fit;
+  const P = ms.map(volUm), n = P.length;
+  const mx = P.reduce((a, p) => a + p[0], 0) / n, my = P.reduce((a, p) => a + p[1], 0) / n;
+  const S = Math.max(1, ...P.map(p => Math.max(Math.abs(p[0] - mx), Math.abs(p[1] - my))));
+  const kind = n < 3 ? "flat" : n < 6 ? "plane" : "curved";
+  const feat = (x, y) => { const u = (x - mx) / S, v = (y - my) / S;
+    return kind === "flat" ? [1] : kind === "plane" ? [1, u, v] : [1, u, v, u * u, u * v, v * v]; };
+  // least squares; when the marks cannot pin every term (all of them along one XZ cut, say), a
+  // whisper of ridge on the slopes and curvatures keeps it solvable — the direction the marks say
+  // nothing about stays level
+  const m = feat(0, 0).length, A = Array.from({ length: m }, () => new Array(m).fill(0)), b = new Array(m).fill(0);
+  P.forEach(p => { const f = feat(p[0], p[1]); for (let i = 0; i < m; i++) { b[i] += f[i] * p[2]; for (let j = 0; j < m; j++) A[i][j] += f[i] * f[j]; } });
+  let w = surfSolve(A, b);
+  if (!w) { for (let i = 1; i < m; i++) A[i][i] += 1e-6 * n; w = surfSolve(A, b); }
+  if (!w) return (_surfFit = { key, fit: null }).fit;
+  const z = (x, y) => feat(x, y).reduce((a, f, i) => a + f * w[i], 0);
+  const rms = Math.sqrt(P.reduce((a, p) => a + (p[2] - z(p[0], p[1])) ** 2, 0) / n);
+  const h = 1e-3 * S, gx = (z(mx + h, my) - z(mx - h, my)) / (2 * h), gy = (z(mx, my + h) - z(mx, my - h)) / (2 * h);
+  const fit = { kind, n, w, mx, my, S, z, rms, gx, gy };
+  return (_surfFit = { key, fit }).fit;
+}
+// which way the tissue lies: +1 toward the last slice, -1 toward slice 0 — set by hand, or the
+// side of the fitted surface whose voxels are brighter on average (every shown channel added)
+let _surfSide = { key: "", side: 0 };
+function surfSide(fit) {
+  if (V.vol.surfTis) return { side: V.vol.surfTis, how: "set" };
+  if (!fit || !volMeta || !volBytes || !volBytes[0]) return { side: 1, how: "guess" };
+  const key = _surfFit.key + "|" + volKey;
+  if (_surfSide.key !== key) {
+    const [D, Hy, Wx] = volMeta.shape, k = volMeta.down, dz = unit.z_step_um || 1;
+    const px = unit.pixel_size_um || 0, py = unit.pixel_size_y_um || px;
+    const st = Math.max(1, Math.round(Math.sqrt(Hy * Wx / 4096)));        // ~4k columns sampled
+    let up = 0, nu = 0, dn = 0, nd = 0;
+    for (let y = 0; y < Hy; y += st) for (let x = 0; x < Wx; x += st) {
+      const zs = fit.z(((x + .5) * k - .5) * px, ((y + .5) * k - .5) * py) / dz;
+      for (let zz = 0; zz < D; zz++) { let q = 0; const i = (zz * Hy + y) * Wx + x;
+        for (const a of volBytes) if (a) q += a[i];
+        if (zz > zs) { dn += q; nd++; } else if (zz < zs) { up += q; nu++; } }
+    }
+    const side = !nu ? 1 : !nd ? -1 : dn / nd >= up / nu ? 1 : -1;
+    _surfSide = { key, side };
+  }
+  return { side: _surfSide.side, how: "bright" };
+}
+// µm below the surface of a full-resolution voxel [z, y, x]; negative = above it, outside the tissue
+function surfDepth(q, fit = surfFit()) {
+  if (!fit) return null;
+  const [x, y, z] = volUm(q);
+  return surfSide(fit).side * (z - fit.z(x, y));
+}
+function surfClick(h, remove) {
+  const { D, Hy, Wx } = oGeom, v = V.vol, k = volMeta.down, cl = (f, n) => Math.max(0, Math.min(n - 1, Math.floor(f * n)));
+  const full = (i, n) => Math.min(n * k - 1, Math.floor((i + .5) * k));      // a reduced voxel's full-resolution pixel
+  let z, y, x;
+  if (h.axis === "xy") { z = v.cz; y = cl(h.fy, Hy); x = cl(h.fx, Wx); }
+  else if (h.axis === "yz") { z = cl(h.fx, D); y = cl(h.fy, Hy); x = v.cx; }
+  else { z = cl(h.fy, D); y = v.cy; x = cl(h.fx, Wx); }
+  const ms = surfMarks();
+  if (remove) {                               // the nearest mark shown in this pane, within a few voxels
+    let best = -1, bd = 1e9;
+    ms.forEach((q, i) => { const qz = q[0], qy = Math.floor(q[1] / k), qx = Math.floor(q[2] / k);
+      const d = { xy: Math.hypot(qx - x, qy - y), yz: Math.hypot(qz - z, qy - y), xz: Math.hypot(qz - z, qx - x) }[h.axis];
+      if (d < bd) { bd = d; best = i; } });
+    if (best >= 0 && bd <= 6) ms.splice(best, 1);
+  } else ms.push([z, full(y, Hy), full(x, Wx)]);
+  orthoDraw(); volShow(); volPtsList(); saveView();
+}
+function surfDrawPane(g, axis, c, dpr) {
+  const ms = surfMarks(); if (!ms.length) return;
+  const { D, Hy, Wx } = oGeom, v = V.vol, k = volMeta.down, dz = unit.z_step_um || 1;
+  const px = unit.pixel_size_um || 0, py = unit.pixel_size_y_um || px, fit = surfFit();
+  if (fit && axis !== "xy") {                 // the fitted surface where this pane cuts it
+    const n = axis === "xz" ? Wx : Hy;
+    g.strokeStyle = SURF; g.lineWidth = 1.5 * dpr; g.setLineDash([6 * dpr, 3 * dpr]); g.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const a = (i * k - .5), xu = (axis === "xz" ? a : (v.cx + .5) * k - .5) * px, yu = (axis === "yz" ? a : (v.cy + .5) * k - .5) * py;
+      const fz = (fit.z(xu, yu) / dz + .5) / D, fa = i / n;
+      const [X, Y] = axis === "xz" ? [fa * c.width, fz * c.height] : [fz * c.width, fa * c.height];
+      i ? g.lineTo(X, Y) : g.moveTo(X, Y);
+    }
+    g.stroke(); g.setLineDash([]);
+  }
+  g.strokeStyle = SURF; g.lineWidth = 1.5 * dpr;
+  ms.forEach(q => {                           // the marks, as crosses, where this pane's cut passes near them
+    const z = q[0], y = Math.floor(q[1] / k), x = Math.floor(q[2] / k);
+    if (!v.oMax && { xy: Math.abs(z - v.cz), yz: Math.abs(x - v.cx), xz: Math.abs(y - v.cy) }[axis] > 1) return;
+    const [fx, fy] = { xy: [(x + .5) / Wx, (y + .5) / Hy], yz: [(z + .5) / D, (y + .5) / Hy], xz: [(x + .5) / Wx, (z + .5) / D] }[axis];
+    const X = fx * c.width, Y = fy * c.height, r = 4 * dpr;
+    g.beginPath(); g.moveTo(X - r, Y - r); g.lineTo(X + r, Y + r); g.moveTo(X - r, Y + r); g.lineTo(X + r, Y - r); g.stroke();
+  });
+}
+function surfInfo() {
+  const box = $("oSurfInfo"), ms = surfMarks(), fit = surfFit();
+  $("oSurfTis").textContent = "tissue: " + ({ 0: "auto", [-1]: "toward slice 0", 1: "toward the last" })[V.vol.surfTis];
+  if (!V.vol.oSurf && !ms.length) { box.hidden = true; return; }
+  const deg = g => (Math.atan(g) * 180 / Math.PI).toFixed(1);
+  const lines = [];
+  if (!ms.length) lines.push("surface: click where the tissue begins (in XZ or YZ), a few places across the stack");
+  else if (!fit) lines.push(`surface: ${ms.length} mark(s), no fit`);
+  else {
+    const sd = surfSide(fit), v = V.vol, k = volMeta.down;
+    lines.push(`surface: ${fit.n} mark${fit.n > 1 ? "s" : ""} · ${fit.kind}` + (fit.kind === "flat" ? "" : ` · tilt ${deg(Math.hypot(fit.gx, fit.gy))}° (x ${deg(fit.gx)}°, y ${deg(fit.gy)}°)`)
+      + (fit.n > (fit.kind === "flat" ? 1 : fit.kind === "plane" ? 3 : 6) ? ` · marks off it by ${fit.rms.toFixed(1)} µm rms` : "")
+      + ` · tissue toward ${sd.side > 0 ? "the last slice" : "slice 0"}` + ({ bright: " (the brighter side)", set: " (set)", guess: "" })[sd.how]);
+    const q = [v.cz, Math.floor((v.cy + .5) * k), Math.floor((v.cx + .5) * k)], d = surfDepth(q, fit);
+    lines.push(`the crosshair: ${Math.abs(d).toFixed(1)} µm ${d >= 0 ? "below" : "above"} the surface`);
+    const pts = volPts(); if (pts.length) lines.push("3D points: " + pts.map((p, i) => `${i + 1}: ${surfDepth(p, fit).toFixed(1)} µm`).join(" · "));
+  }
+  if (V.vol.oSurf) lines.push("click marks · shift+click removes the nearest · Esc the last · shift+Esc all");
+  const t = lines.join("\n");
+  if (box.textContent !== t) box.textContent = t;
+  box.hidden = false;
+}
+function surfCsv() {
+  const ms = surfMarks(), fit = surfFit(); if (!ms.length || !unit) return;
+  const sd = surfSide(fit), r = x => (x == null ? "" : (+x).toFixed(3));
+  const rows = [`# ${FILE.file || "stack"} · ${unit.path} · surface fitted through ${ms.length} mark(s), ${fit ? fit.kind : "no fit"}`,
+    "# x, y, z in µm from the stack's corner (pixel 0, slice 0); depth_um = below the surface along z, into the tissue (negative = above it)",
+    `# tissue toward ${sd.side > 0 ? "the last slice" : "slice 0"} (${sd.how})` + (fit ? ` · tilt x ${(Math.atan(fit.gx) * 180 / Math.PI).toFixed(2)}° y ${(Math.atan(fit.gy) * 180 / Math.PI).toFixed(2)}° · rms ${fit.rms.toFixed(2)} µm` : ""),
+    "kind,n,slice,px,py,x_um,y_um,z_um,surface_z_um,depth_um"];
+  const row = (kind, n, q) => { const [x, y, z] = volUm(q), zs = fit ? fit.z(x, y) : null;
+    return [kind, n, q[0], q[2], q[1], r(x), r(y), r(z), r(zs), r(fit ? surfDepth(q, fit) : null)].join(","); };
+  ms.forEach((q, i) => rows.push(row("mark", i + 1, q)));
+  volPts().forEach((q, i) => rows.push(row("point", i + 1, q)));
+  const b = new Blob([rows.join("\n") + "\n"], { type: "text/csv" }), a = document.createElement("a");
+  a.href = URL.createObjectURL(b); a.download = exportName([(FILE.file || "stack").replace(/\.mesc$/i, ""), unit.path, "surface"]).replace(/\.png$/, ".csv");
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+$("oSurf").onclick = () => { V.vol.oSurf = !V.vol.oSurf; volShow(); orthoDraw(); saveView(); };
+$("oSurfTis").onclick = () => { V.vol.surfTis = { 0: -1, [-1]: 1, 1: 0 }[V.vol.surfTis]; orthoDraw(); volPtsList(); saveView(); };
+$("oSurfCsv").onclick = () => surfCsv();
 $("oMax").onclick = () => { V.vol.oMax = !V.vol.oMax; volShow(); saveView(); };
 $("oCross").onclick = () => { V.vol.oCross = !V.vol.oCross; volShow(); saveView(); };
 </script>

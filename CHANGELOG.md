@@ -19,6 +19,36 @@
     window is now moved a point at a time instead. Bit-identical, 4× faster.
 - **3D keeps up on a weak GPU.** While the stack is turned, moved or zoomed it is drawn at half the CSS
   pixels with rays stepped twice as far, and ~180 ms after the hand stops at full quality again.
+- **The page keeps up too.** Measured in Chrome on a current laptop, as-is and with the CPU slowed 6×
+  (an old laptop's worth), on a 512² recording with 40 ROIs × 5,000 frames and a 149-slice two-channel
+  stack:
+  - **Playing and scrubbing no longer redraw the traces.** The frame cursor is its own element under
+    the trace canvas; the traces are redrawn only when what they show changes. A frame step cost
+    12 ms of trace drawing (80 ms at 6×); now ~0. Playback at 6× went from 6.5 to 12 frames/s, with
+    2.9 s of blocked main thread per 6 s of playing down to none.
+  - **A redraw within the same time window is ~4× cheaper** (a selection, the grid, the mode): each
+    band's axis limits are kept per time window instead of sorted on every redraw, the canvas is
+    reallocated only when its size changes, and past one frame per pixel each pixel column draws its
+    first, lowest, highest and last frame (spikes kept; at one frame per pixel or fewer the line goes
+    through every frame, as before). 12 → 3 ms (80 → 27 ms at 6×). A new time window still sorts
+    each band once: unchanged at 12 ms (80 ms at 6×).
+  - **Scrubbing asks for one frame at a time** — while one is on its way, only the latest position is
+    remembered and fetched when it lands. 30 slider steps: 30 frame requests → 11–12.
+  - **Dragging a splitter** redraws once per frame through one resize path, with 3D drawn coarse while
+    the size moves: 237 → 3 ms for 20 moves (1.6 s → 9 ms at 6×).
+  - **Colouring a frame** goes through packed RGBA tables in one pass, and one channel in plain grey
+    is the PNG itself: 2–3 → 1 ms (13–19 → 4–7 ms at 6×). Pixel for pixel the same, checked.
+  - **XYZ views:** the same tables, and a pane is re-cut only when its own slice changes. A crosshair
+    step 7 → 2 ms (62 → 9 ms at 6×); the same pixels, checked.
+  - **Cutting the blobs** when the ceiling is let go runs in steps that yield to the page, the old
+    picture staying until the cut is ready: the page no longer freezes for 0.4 s (2.2 s at 6×); the
+    bytes are the same.
+  - **3D at rest is drawn at most 1.5 device pixels per CSS pixel and ~1.5 MP** (never below one per
+    CSS pixel): on a retina screen 1425×899 instead of 1900×1198. A MIP ray also stops at the first
+    voxel that reaches the ceiling, which cannot change what it shows.
+  - Also: the hover readout on a projection sends which projection (`mode=max|mean`); the overlay's
+    trace limits are cached by the payload itself, so a refetch with a new q is not shown with the
+    old q's limits.
 
 ## 0.3.11 — 2026-10-27
 

@@ -217,3 +217,34 @@ is hard to tell from green. A palette picked for a channel in instruments still 
   A switch per channel hides it in 3D and XYZ.
 * Overlay off, or a one-channel unit, is the old path untouched: same request, same R8 texture,
   same shader branch. The browser check compares the picture before and after the overlay.
+
+## Speed on an old laptop (2026-10-27)
+
+Measured with Chrome's CPU slowed 6×, which is roughly the first user's five-year-old Mac. The
+rule throughout: the picture does not change; only what is redrawn, and when.
+
+* **The trace strip is two layers.** The canvas holds the traces, grid and labels and is redrawn
+  only when one of the things it shows changes (payload, time or value window, mode, signal,
+  size, grid, selection, shown set — one key). The frame cursor is a 1-px element under the
+  canvas, whose background is clear, so it still sits beneath the traces. Playing and
+  scrubbing move it and nothing else.
+* **Past one frame per pixel, M4.** Each pixel column draws its first, lowest, highest and last
+  frame, in time order. The column spans what it spanned and joins its neighbours by the same
+  segment; at one frame per pixel or fewer every frame is drawn. The old dense line also grew
+  miter points past its peaks, which the new one has fewer of — the one visible difference,
+  and in the right direction.
+* **Limits are cached** per payload, signal, time window and trace; the overlay's by the
+  payload's identity, not its unit and channel, so a refetch with another q is new numbers.
+* **One frame request in flight.** A slider step while a frame is on its way only marks that
+  another is wanted; when it lands, the page asks for wherever the slider is then.
+* **One resize path** for the stage, the trace strip and the splitters; 3D draws coarse while the
+  size moves.
+* **Colour through tables.** A frame's palette and the XYZ views' colours are packed RGBA words,
+  written through a Uint32 view; two channels index a 64 k table of every grey pair. The tables
+  are built with the same arithmetic as the per-pixel loops they replace, and
+  `tests/view_fastpaths_real_chrome.js` holds them to those loops byte for byte. A pane is
+  re-cut only when its own slice changes.
+* **The blob cut yields.** The same steps, paused every ~10 ms; the old picture stays meanwhile.
+  Only a stack's first texture (a view restored with the cut on) still waits for it.
+* **3D at rest: ≤ 1.5 device px per CSS px and ~1.5 MP**, never below one per CSS px. A MIP ray
+  stops at the ceiling, past which nothing can be brighter.

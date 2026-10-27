@@ -168,6 +168,55 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   console.log("  point       :", JSON.stringify({ bouton16: b16.map(v => +v.toFixed(2)), brightest: want16, picked: p1, um, bouton40: p40,
                                                     marker_px: mk, xy_marks: xyMarks, png_orange: png1.orange, coarse: sizes, overlay_cell: P[0], values: vals }));
   await send("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,modifiers:8}); await send("Input.dispatchKeyEvent",{type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,modifiers:8});
+
+  // ---- 2. measure: a line between two picked boutons, a path through four ---------------------
+  await ev("V.overlay = false; V.lo = 1; V.hi = 100; V.vol = volState(null); V.vol.on = true; V.vol.mode = 'mip'; volShow(); volReset(); 'ok'");
+  for (let i = 0; i < 40 && (await ev("!!(volMeta && volMeta.ov)") || !(await ev("!!(volMeta && volKey.endsWith('|0|1|100'))"))); i++) await sleep(250);
+  await sleep(500);
+  await ev("$('volMeasure').click(); 'ok'");
+  if (await ev("V.vol.tool") !== "measure") fail("the measure button did not switch the tool on");
+  const umOf = q => [q[2] * u.px, q[1] * u.py, q[0] * u.dz];
+  const lenOf = Q => { let L = 0; for (let i = 1; i < Q.length; i++) { const a = umOf(Q[i - 1]), c = umOf(Q[i]); L += Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]); } return L; };
+  const analytic = (za, zb) => { const a = bouton(za), c = bouton(zb); return Math.hypot((c[2] - a[2]) * u.px, (c[1] - a[1]) * u.py, (c[0] - a[0]) * u.dz); };
+  const pickB = async (bz, mod = 0) => { const q = bouton(bz).map(Math.round), sp = await screenOf(q); await clickAt(sp.x, sp.y, mod); };
+  await pickB(16);
+  if ((await J("volMeas")).length !== 1 || (await pts()).length !== 0) fail("a measure click did not start a line (or added a point)");
+  await pickB(40);
+  let M = await J("volMeas");
+  if (M.length !== 2 || !near(M[0], bouton(16), 1, 1.5) || !near(M[1], bouton(40), 1, 1.5)) fail("the ruler's ends are not the boutons: " + JSON.stringify(M));
+  const want2 = lenOf(M), ana2 = analytic(16, 40), shown2 = await ev("volMeasText()");
+  if (!shown2.startsWith(want2.toFixed(2) + " µm")) fail(`the ruler does not read the picked points' distance ${want2.toFixed(2)}: ${shown2}`);
+  if (Math.abs(want2 - ana2) > 1.0) fail(`the ruler reads ${want2.toFixed(2)} µm, the boutons are ${ana2.toFixed(2)} µm apart`);
+  const dz2 = (M[1][0] - M[0][0]) * u.dz, dx2 = (M[1][2] - M[0][2]) * u.px;
+  if (!shown2.includes(`Δx ${dx2.toFixed(2)}`) || !shown2.includes(`Δz ${dz2.toFixed(1)} µm`)) fail("the ruler's Δs are wrong: " + shown2);
+  const list3 = await ev("document.getElementById('volPts').textContent");
+  if (!list3.includes(shown2) || !list3.includes("PSF")) fail("the list does not give the measurement and the z caveat: " + list3);
+  const yellow = await ev(`(()=>{const c=document.getElementById('volMarks'), d=c.getContext('2d').getImageData(0,0,c.width,c.height).data; let n=0; for(let i=0;i<d.length;i+=4) if(d[i]>220&&d[i+1]>190&&d[i+2]<60&&d[i+3]>200) n++; return n;})()`);
+  if (yellow < 200) fail("the ruler is not drawn: " + yellow);
+  await shot("measure_line");
+  // turned, the length does not change (it is a length in the tissue, not on the screen)
+  await ev("V.vol.yaw = 0.9; V.vol.pitch = 0.3; volDraw(); 'ok'"); await sleep(300);
+  if (await ev("volMeasText()") !== shown2) fail("turning changed the measurement");
+  await shot("measure_turned"); await ev("volReset(); 'ok'"); await sleep(200);
+  // a plain click starts again; shift+clicks make a path through the four boutons of axon 1
+  await pickB(4); await pickB(16); await pickB(28, 8); await pickB(40, 8);
+  M = await J("volMeas");
+  const wantP = lenOf(M), anaP = analytic(4, 40), shownP = await ev("volMeasText()");
+  if (M.length !== 4) fail("shift+click did not extend the line into a path: " + JSON.stringify(M));
+  if (!shownP.startsWith(`path ${wantP.toFixed(2)} µm over 3 segments`)) fail(`the path does not read ${wantP.toFixed(2)}: ${shownP}`);
+  if (Math.abs(wantP - anaP) > 1.5) fail(`the path along the axon reads ${wantP.toFixed(2)} µm, the axon is ${anaP.toFixed(2)} µm from bouton 4 to 40`);
+  if (Math.abs(await ev("volMeasure().straight") - lenOf([M[0], M[3]])) > 1e-9) fail("end to end is not the first point to the last");
+  await ev("savePng = window.__savePng0 || savePng; window.__cap = null; withCaption = ((w) => (src, lines, name) => { window.__cap = lines; })(withCaption); exportVolPng(); 'ok'");
+  const cap = await J("window.__cap");
+  if (!cap || !cap.some(l => l.startsWith("measured: path"))) fail("the 3D PNG's caption does not carry the measurement: " + JSON.stringify(cap));
+  await shot("measure_path");
+  // Esc takes the path's last point; shift+Esc the line; the points are not touched by either
+  await send("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27}); await sleep(150);
+  if ((await J("volMeas")).length !== 3) fail("Esc did not remove the path's last point");
+  await send("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,modifiers:8}); await sleep(150);
+  if ((await J("volMeas")).length !== 0) fail("shift+Esc did not clear the line");
+  console.log("  measure     :", JSON.stringify({ line: M.length && shown2, analytic_line: +ana2.toFixed(2), path: shownP, analytic_path: +anaP.toFixed(2), yellow_px: yellow }));
+
   await ev("V.overlay = false; V.lo = 1; V.hi = 99.5; V.vol = volState(null); saveView(); 'ok'"); await sleep(700);
 
   console.log("  stack:", JSON.stringify(meta.shape), "vox", JSON.stringify(meta.vox), "down", meta.down);

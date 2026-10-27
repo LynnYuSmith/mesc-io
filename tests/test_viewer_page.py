@@ -197,6 +197,10 @@ TWO_CHANNEL_CHECK = r"""
         const listed = byId.get("volPts").innerHTML;
         if (pt !== "point" || !listed.includes("x 2.50 · y 1.50 · z 1.0") || !listed.includes("ch0 ≈") || !listed.includes("ch1 ≈"))
           { console.error("the point tool or its list is wrong: " + pt + " " + listed); process.exit(12); }
+        // the 3D ruler: (0,0,0) to (2,4,6) in voxels of 1 × 0.5 × 0.5 µm is hypot(3, 2, 2) µm
+        const meas = vm.runInContext("volSetTool('measure'); volMeas = [[0, 0, 0], [2, 4, 6]]; volPtsList(); volMeasText()", sandbox);
+        if (!meas.startsWith(Math.hypot(3, 2, 2).toFixed(2) + " µm") || !byId.get("volPts").innerHTML.includes("PSF"))
+          { console.error("the 3D ruler reads wrong: " + meas); process.exit(13); }
         console.log("two-channel 3D ok " + JSON.stringify(st));
         process.exit(process.exitCode || 0);
       } catch (e) { console.error("threw in the overlay: " + (e && e.stack || e)); process.exit(6); }
@@ -230,10 +234,12 @@ def test_the_two_colour_controls_are_in_the_page():
         assert needle in src, needle
 
 
-def test_the_3d_point_tool_is_in_the_page():
+def test_the_3d_point_and_measure_tools_are_in_the_page():
     """The point tool's button and marker layer, a pick that snaps and stores full-resolution
-    voxels, and points that are saved with the view (volState keeps them, per unit)."""
+    voxels, points saved with the view (volState keeps them, per unit), and the 3D ruler with
+    its z caveat."""
     src = PAGE.read_text(encoding="utf-8")
     for needle in ('id="volPoint"', 'id="volMarks"', 'id="volPts"', "function volSnap(", "function volPickAt(",
-                   "y * k + h, x * k + h", 'tool: "", pts: {}'):
+                   "y * k + h, x * k + h", 'tool: "", pts: {}', 'id="volMeasure"', "function volMeasure(",
+                   "the PSF is longer along z"):
         assert needle in src, needle

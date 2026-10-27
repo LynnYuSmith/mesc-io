@@ -125,9 +125,9 @@
   /* points and measurements, drawn over the 3D picture; the list of them, bottom left */
   #volMarks { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none }
   #volMarks[hidden], #volPts[hidden] { display:none }
-  #volPts { position:absolute; left:8px; bottom:8px; font-size:11px; color:var(--ink); max-width:calc(100% - 16px);
+  #volPts { position:absolute; left:8px; bottom:8px; font-size:11px; color:var(--ink); max-width:calc(50% - 12px);
             background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px;
-            font-variant-numeric:tabular-nums; white-space:pre; max-height:40%; overflow-y:auto }
+            font-variant-numeric:tabular-nums; white-space:pre-wrap; max-height:40%; overflow-y:auto }
   #volPts .h { color:var(--muted) }
   #vol.tool { cursor:crosshair }
   #volInfo { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted); pointer-events:none;
@@ -240,6 +240,7 @@
         <button id="volAxX" title="look along x: the stack from its other side, depth running down">side x</button>
         <button id="volDeep" title="which end of the stack is up. Femtonics records from the surface down (slice 0 = surface) and MESc draws the deepest slice at the top; here the surface is on top unless this is on">surface ↑</button>
         <button id="volPoint" title="mark points: a click (not a drag — a drag still turns) puts a numbered point on the brightest voxel under the cursor, snapped to the brightest of its 3×3×3 neighbours; the XYZ crosshair goes there. Esc removes the last, shift+Esc all">point</button>
+        <button id="volMeasure" title="a ruler in 3D: click two points (picked as with point) and read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button>
       </div>
       <canvas id="volMarks" hidden></canvas>
       <div id="volPts" hidden></div>
@@ -388,6 +389,9 @@ let ROIS = [], tool = "spot", draft = [], TR = null;   // TR = last traces paylo
    second is still to come. It is not an ROI — nothing is saved or exported — and it measures in
    the file's own pixel size, x and y each by its own, so a non-square pixel still reads true. */
 let ruler = [], rulerHover = null;
+/* The 3D ruler: full-resolution voxels (z, y, x), two for a line, more for a path. Like the 2D
+   ruler it lives in memory and in one unit only — it is not saved. */
+let volMeas = [];
 const PALETTE = ["#e74c3c","#2ecc71","#9b59b6","#e67e22","#1abc9c","#3498db",
                  "#f1c40f","#e84393","#7f8c8d","#00cec9"];
 const colour = i => PALETTE[i % PALETTE.length];
@@ -473,7 +477,7 @@ function applyStatic() {                 // controls that reflect V without a un
 
 function pick(i, restoring) {
   if (playing) togglePlay();
-  unit = FILE.units[i]; ruler = []; rulerHover = null;   // a ruler is in one unit's pixels
+  unit = FILE.units[i]; ruler = []; rulerHover = null; volMeas = [];   // a ruler is in one unit's pixels
   document.querySelectorAll(".u").forEach((d, k) => d.classList.toggle("on", k === i));
   if (!restoring) { V.ch = 0; V.frame = 0; V.zoom = { x: 0, y: 0, w: 0, h: 0 }; V.traceZoom = null; V.valueZoom = null; TR = null; }
   V.ch = Math.min(V.ch, unit.channels.length - 1);
@@ -888,7 +892,8 @@ function exportVolPng() {
   c.width = src.width; c.height = src.height;
   const g = c.getContext("2d"); g.drawImage(src, 0, 0);
   if (volMeta) volMarksOn(g, c.width, c.height, src.clientWidth ? c.width / src.clientWidth : 1);   // the points, as on screen
-  withCaption(c, [captionLines()[0], `3D · ${V.vol.mode} · ${volMeta && volMeta.ov ? "two channels" : unit.channels[V.ch]}`],
+  withCaption(c, [captionLines()[0], `3D · ${V.vol.mode} · ${volMeta && volMeta.ov ? "two channels" : unit.channels[V.ch]}`]
+                 .concat(volMeasure() ? [`measured: ${volMeasText()}`] : []),
               exportName([FILE.file.replace(/\.mesc$/i, ""), unit.name, "3D", V.vol.mode]));
 }
 function exportTracePng() {
@@ -1654,7 +1659,7 @@ function volState(v) {
   const d = { on: false, ortho: false, oMax: false, oCross: true, cx: -1, cy: -1, cz: -1,
               mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0, deep: false, axes: 2,
               chOn: [true, true], thrC: [0.5, 0.5], thrCFor: "",   // the overlay: each channel shown?, its floor
-              tool: "", pts: {} };   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
+              tool: "", pts: {} };   // tool: "" | point | measure   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
   if (!v || typeof v !== "object") return d;
   // Before 0.3.6 the camera's up was the image's y; now it is depth. A view saved then would open
   // on its side, so its camera starts afresh (its mode, floor and the rest are kept).
@@ -1671,7 +1676,7 @@ function volState(v) {
   o.chOn = [0, 1].map(k => !(Array.isArray(v.chOn) && v.chOn[k] === false));
   o.thrC = [0, 1].map(k => cl(Array.isArray(v.thrC) ? v.thrC[k] : NaN, 0, .95, d.thr));
   o.thrCFor = typeof o.thrCFor === "string" ? o.thrCFor : "";
-  o.tool = ["point"].includes(o.tool) ? o.tool : "";
+  o.tool = ["point", "measure"].includes(o.tool) ? o.tool : "";
   const okPt = q => Array.isArray(q) && q.length === 3 && q.every(x => Number.isInteger(x) && x >= 0);
   o.pts = Object.fromEntries(Object.entries(o.pts && typeof o.pts === "object" && !Array.isArray(o.pts) ? o.pts : {})
     .map(([k, a]) => [k, Array.isArray(a) ? a.filter(okPt) : []]).filter(([, a]) => a.length));
@@ -1928,7 +1933,8 @@ function volShow() {
   const on = !!(V.vol.on && isStack);
   $("vol").hidden = !on; $("volBar").hidden = !on; $("volInfo").hidden = !on; $("volMarks").hidden = !on;
   if (!on) $("volPts").hidden = true;
-  $("volPoint").classList.toggle("on", V.vol.tool === "point"); $("vol").classList.toggle("tool", !!V.vol.tool);
+  $("volPoint").classList.toggle("on", V.vol.tool === "point"); $("volMeasure").classList.toggle("on", V.vol.tool === "measure");
+  $("vol").classList.toggle("tool", !!V.vol.tool);
   $("volBtn").classList.toggle("on", on);
   $("stageHint").hidden = on || ortho;
   ["volMip", "volGlass", "volDepth"].forEach(id => $(id).classList.toggle("on", "vol" + V.vol.mode[0].toUpperCase() + V.vol.mode.slice(1) === id));
@@ -2087,7 +2093,7 @@ function volDraw() {
     + (!ov ? "" : V.vol.mode === "depth" ? `\ndepth colours one channel: ${unit.channels[dch].replace("Channel_", "ch")} (pick it under the image); MIP and glass show both`
        : `\n${[0, 1].map(k => unit.channels[k].replace("Channel_", "ch") + (V.vol.chOn[k] ? "" : " (hidden)")).join(" + ")}, each in its own window`
          + (unit.channels.length > 2 ? ` · the first two of ${unit.channels.length}` : ""))
-    + (V.vol.tool ? `\nclick picks the brightest voxel under the cursor · drag turns · Esc removes the last point`
+    + (V.vol.tool ? `\nclick picks${V.vol.tool === "measure" ? " (shift+click: a path)" : ""} · drag turns · Esc: the last point`
        : `\ndrag turns · shift- or right-drag moves · wheel zooms where the cursor is · double-click resets`);
 }
 // turning and zooming
@@ -2290,6 +2296,10 @@ function volToolClick(e) {
   const q = volPickAt(e.clientX, e.clientY);
   if (!q) { badge("nothing drawn under the cursor — lower the floor, or click on the object"); return; }
   if (V.vol.tool === "point") volPts().push(q);
+  else if (V.vol.tool === "measure") {
+    // a click starts a line or finishes it; shift+click goes on from the last point (a path)
+    if ((e.shiftKey && volMeas.length) || volMeas.length === 1) volMeas.push(q); else volMeas = [q];
+  }
   volGoTo(q); volDraw(); saveView();
 }
 // µm of a full-resolution voxel from the stack's corner (pixel 0, slice 0): x, y by the pixel, z by the step
@@ -2308,6 +2318,24 @@ function volValues(q) {
     const f = x => +x.toPrecision(4), t = b === 0 ? `≤ ${f(w[0])}` : b === 255 ? `≥ ${f(w[1])}` : `≈ ${f(volVal(b / 255, w))}`;
     return `${unit.channels[ch].replace("Channel_", "ch")} ${t}`; }).filter(Boolean);
 }
+/* The 3D ruler's numbers: each segment by the stack's own voxel size — x and y by the pixel, z by
+   the slice step — so a line along z reads true. Δz is the least certain of the three: the PSF of
+   a two-photon microscope is several times longer along z than across (and a step of 1 µm is
+   coarser than a pixel), so a bouton's centre is known to about a slice in z. */
+const VOL_MEAS = "#ffd400";
+function volMeasure(pts = volMeas) {
+  if (pts.length < 2) return null;
+  let path = 0;
+  for (let i = 1; i < pts.length; i++) { const a = volUm(pts[i - 1]), b = volUm(pts[i]); path += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]); }
+  const a = volUm(pts[0]), b = volUm(pts[pts.length - 1]), d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  return { path, straight: Math.hypot(...d), d, n: pts.length - 1 };
+}
+function volMeasText(m = volMeasure()) {
+  if (!m) return "";
+  const delta = `Δx ${m.d[0].toFixed(2)}  Δy ${m.d[1].toFixed(2)}  Δz ${m.d[2].toFixed(1)} µm`;
+  return m.n === 1 ? `${m.path.toFixed(2)} µm  ·  ${delta}`
+    : `path ${m.path.toFixed(2)} µm over ${m.n} segments  ·  end to end ${m.straight.toFixed(2)} µm  ·  ${delta}`;
+}
 function volPtsList() {
   const box = $("volPts"), pts = volPts();
   const lines = [];
@@ -2316,6 +2344,11 @@ function volPtsList() {
     pts.forEach((q, n) => { const [x, y, z] = volUm(q);
       lines.push(`<b style="color:${VOL_PT}">${n + 1}</b>  x ${x.toFixed(2)} · y ${y.toFixed(2)} · z ${z.toFixed(1)}  · slice ${q[0]} · px ${q[2]}, ${q[1]}  · ${volValues(q).join(" · ")}`); });
   }
+  if (volMeas.length) {
+    lines.push(`<span class="h">measure · ${volMeas.length < 2 ? "click a second point (shift+click goes on from the last)" : "shift+click goes on · Esc removes the last point"}</span>`);
+    if (volMeas.length > 1) lines.push(`<b style="color:${VOL_MEAS}">${volMeasText()}</b>`,
+      `<span class="h">Δz is the least certain (the PSF is longer along z)</span>`);
+  }
   const html = lines.join("\n");
   if (box.dataset.html !== html) { box.dataset.html = html; box.innerHTML = html; }
   box.hidden = !V.vol.on || !lines.length;
@@ -2323,9 +2356,22 @@ function volPtsList() {
 /* The markers on a W × H picture of the current camera — the screen's overlay canvas, or a PNG
    being exported at its own size (s: its pixels per CSS pixel, for line widths and type). */
 function volMarksOn(g, W, H, s) {
-  const pts = volPts(); if (!pts.length) return;
+  const pts = volPts(); if (!pts.length && !volMeas.length) return;
   const c = volCam(W / H), at = q => volProject(volVoxWorld(q, c.ext), c, W, H);
-  g.save(); g.lineWidth = 1.5 * s; g.font = `${Math.round(11 * s)}px sans-serif`; g.textBaseline = "middle";
+  g.save();
+  if (volMeas.length) {                         // the ruler: a line (a path), its ends, its length
+    const P = volMeas.map(at);
+    g.lineWidth = 2 * s; g.strokeStyle = VOL_MEAS; g.fillStyle = VOL_MEAS;
+    g.beginPath(); P.forEach((p, i) => { if (!p) return; i && P[i - 1] ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); }); g.stroke();
+    P.forEach(p => { if (p) { g.beginPath(); g.arc(p[0], p[1], 3 * s, 0, 2 * Math.PI); g.fill(); } });
+    const t = volMeasText(), a = P[P.length - 2], b = P[P.length - 1];
+    if (t && a && b) {
+      g.font = `${Math.round(12 * s)}px sans-serif`; g.textBaseline = "alphabetic";
+      const w = g.measureText(t).width, tx = Math.min(W - w - 8 * s, Math.max(4 * s, (a[0] + b[0]) / 2 + 8 * s)), ty = Math.max(16 * s, (a[1] + b[1]) / 2 - 8 * s);
+      g.fillStyle = "rgba(0,0,0,.65)"; g.fillRect(tx - 4 * s, ty - 13 * s, w + 8 * s, 18 * s);
+      g.fillStyle = VOL_MEAS; g.fillText(t, tx, ty);
+    }
+  } g.lineWidth = 1.5 * s; g.font = `${Math.round(11 * s)}px sans-serif`; g.textBaseline = "middle";
   pts.forEach((q, n) => { const p = at(q); if (!p) return; const [X, Y] = p, r = 5 * s;
     g.strokeStyle = "rgba(0,0,0,.7)"; g.lineWidth = 3.5 * s; g.beginPath(); g.arc(X, Y, r, 0, 2 * Math.PI); g.stroke();
     g.strokeStyle = VOL_PT; g.lineWidth = 1.5 * s; g.beginPath(); g.arc(X, Y, r, 0, 2 * Math.PI);
@@ -2346,15 +2392,17 @@ function volMarksDraw() {
 }
 function volSetTool(t) {
   V.vol.tool = V.vol.tool === t ? "" : t;
-  $("volPoint").classList.toggle("on", V.vol.tool === "point");
+  $("volPoint").classList.toggle("on", V.vol.tool === "point"); $("volMeasure").classList.toggle("on", V.vol.tool === "measure");
   cvol.classList.toggle("tool", !!V.vol.tool);
   volDraw(); saveView();
 }
 $("volPoint").onclick = () => volSetTool("point");
-// Esc in 3D: the last point goes; shift+Esc, all of them. True when it took the key.
+$("volMeasure").onclick = () => volSetTool("measure");
+// Esc in 3D: the last point goes; shift+Esc, all of them — of the ruler when it is the tool, of
+// the points otherwise. True when it took the key.
 function volEscape(all) {
   if (!V.vol.on || !unit) return false;
-  const pts = volPts(); if (!pts.length) return false;
+  const pts = V.vol.tool === "measure" ? volMeas : volPts(); if (!pts.length) return false;
   if (all) pts.length = 0; else pts.pop();
   volDraw(); saveView(); return true;
 }
@@ -2483,10 +2531,15 @@ function orthoDraw() {
 // the 3D points in a pane: where they lie in it, when the pane's cut passes within a voxel of them
 // (every point, on a projection), numbered as in 3D
 function orthoMarks(g, axis, c, dpr) {
-  const pts = volPts(); if (!pts.length) return;
   const { D, Hy, Wx } = oGeom, v = V.vol, k = volMeta.down;
   g.font = `${Math.round(10 * dpr)}px sans-serif`; g.textBaseline = "middle"; g.lineWidth = 1.5 * dpr;
-  pts.forEach((q, n) => {
+  volMeas.forEach(q => {                       // the ruler's points, as dots
+    const z = q[0], y = Math.floor(q[1] / k), x = Math.floor(q[2] / k);
+    if (!v.oMax && { xy: Math.abs(z - v.cz), yz: Math.abs(x - v.cx), xz: Math.abs(y - v.cy) }[axis] > 1) return;
+    const [fx, fy] = { xy: [(x + .5) / Wx, (y + .5) / Hy], yz: [(z + .5) / D, (y + .5) / Hy], xz: [(x + .5) / Wx, (z + .5) / D] }[axis];
+    g.fillStyle = VOL_MEAS; g.beginPath(); g.arc(fx * c.width, fy * c.height, 3 * dpr, 0, 2 * Math.PI); g.fill();
+  });
+  volPts().forEach((q, n) => {
     const z = q[0], y = Math.floor(q[1] / k), x = Math.floor(q[2] / k);
     const off = { xy: Math.abs(z - v.cz), yz: Math.abs(x - v.cx), xz: Math.abs(y - v.cy) }[axis];
     if (!v.oMax && off > 1) return;

@@ -79,9 +79,47 @@ def to_hdf5(mesc, unit: str, out_path, channel: int = 0, dataset: str = "data",
     return out_path
 
 
-def to_tiff(mesc, unit: str, out_path, channel: int = 0, frames=None,
-            reader_units: bool = True):
-    """One unit's channel as a TIFF stack ImageJ can open with the right scales.
+_DEFAULT_COLOURS = ("#00ff00", "#ff00ff", "#00ffff", "#ffff00")
+
+
+def _lut(colour: str) -> np.ndarray:
+    """An ImageJ LUT (3 × 256, uint8) running from black to ``colour``."""
+    rgb = [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
+    ramp = np.arange(256, dtype=np.float64) / 255.0
+    return np.stack([np.round(ramp * c) for c in rgb]).astype(np.uint8)
+
+
+def _info(mesc, u, chans, reader_units: bool) -> str:
+    lines = [f"source_file = {mesc.path.name}", f"source_unit = {u.path}",
+             f"units = {'reader' if reader_units else 'stored'}"]
+    if u.comment:
+        lines.append(f"comment = {u.comment}")
+    if u.frame_rate_hz:
+        lines.append(f"frame_rate_hz = {u.frame_rate_hz}")
+    if u.z_step_um:
+        lines.append(f"z_step_um = {u.z_step_um}")
+    if u.pixel_size_um:
+        lines.append(f"pixel_size_um = {u.pixel_size_um}")
+    if u.pixel_size_y_um:
+        lines.append(f"pixel_size_y_um = {u.pixel_size_y_um}")
+    for c in chans:
+        lines.append(f"{c.name}: conversion_offset = {c.offset}, conversion_scale = {c.scale}"
+                     + (f", rig LUT = {c.lut[0]:g}..{c.lut[1]:g}" if c.lut else ""))
+    return "\n".join(lines)
+
+
+def to_tiff(mesc, unit: str, out_path, channel=0, frames=None,
+            reader_units: bool = True, block: int = 256):
+    """A unit as a TIFF stack ImageJ / Fiji opens with the right scales.
+
+    ``channel`` an index writes that one channel (axes TYX, or ZYX for a z-stack). ``channel="all"``
+    writes every channel as one ImageJ hyperstack (TCYX, or ZCYX), in composite mode: each channel
+    in its own colour (the file's, else green / magenta) and its own display range (1–99.8 % of
+    that channel, so a red ten times brighter does not set the window for the green). A z-stack
+    carries its slice spacing, a time series its frame interval; x and y keep their own pixel
+    sizes. The comment, the units and each channel's conversion go into the image's Info
+    (Image ▸ Show Info in Fiji). Frames are read and written a block at a time, so a long unit
+    never sits in memory whole.
 
     Needs `tifffile` (`pip install mesc-io[tiff]`).
     """
@@ -89,16 +127,52 @@ def to_tiff(mesc, unit: str, out_path, channel: int = 0, frames=None,
         import tifffile
     except ImportError as exc:  # noqa: BLE001
         raise ImportError("writing TIFF needs tifffile — pip install mesc-io[tiff]") from exc
-    u, data = _block(mesc, unit, channel, frames, reader_units)
+    u = mesc.unit(unit)
+    idx = list(range(len(u.channels))) if channel in ("all", None) else [int(channel)]
+    chans = [u.channels[i] for i in idx]
+    sel = range(u.n_frames)[frames] if isinstance(frames, slice) else (
+        list(frames) if frames is not None else range(u.n_frames))
+    sel = list(sel)
+    n, h, w, nc = len(sel), u.height, u.width, len(idx)
+    dtype = np.float32 if reader_units else np.dtype(u.dtype)
+    depth = bool(u.z_step_um)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    meta = {"axes": "TYX"}
-    if u.frame_rate_hz:
+
+    meta = {"axes": ("Z" if depth else "T") + ("C" if nc > 1 else "") + "YX",
+            "Info": _info(mesc, u, chans, reader_units)}
+    if depth:
+        meta["spacing"] = float(u.z_step_um)
+    elif u.frame_rate_hz:
         meta["finterval"] = 1.0 / u.frame_rate_hz
         meta["fps"] = u.frame_rate_hz
     res = None
     if u.pixel_size_um:
         meta["unit"] = "um"
-        res = (1.0 / u.pixel_size_um, 1.0 / u.pixel_size_um)
-    tifffile.imwrite(str(out_path), data, imagej=True, metadata=meta, resolution=res)
+        res = (1.0 / u.pixel_size_um, 1.0 / (u.pixel_size_y_um or u.pixel_size_um))
+    if nc > 1:
+        # one window per channel, from frames spread over the unit (never one shared window)
+        probe = sel[:: max(1, n // 64)][:64]
+        ranges = []
+        for i in idx:
+            a = np.asarray(mesc.read(unit, channel=i, frames=probe, reader_units=reader_units), np.float64)
+            lo, hi = np.percentile(a, [1, 99.8])
+            ranges += [float(lo), float(hi if hi > lo else lo + 1)]
+        meta["mode"] = "composite"
+        meta["Ranges"] = tuple(ranges)
+        meta["LUTs"] = [_lut(c.colour if c.colour and c.colour.lower() not in ("#000000",) else
+                             _DEFAULT_COLOURS[k % len(_DEFAULT_COLOURS)]) for k, c in enumerate(chans)]
+
+    def pages():
+        for s in range(0, n, block):
+            part = sel[s:s + block]
+            stack = [np.asarray(mesc.read(unit, channel=i, frames=part, reader_units=reader_units), dtype)
+                     for i in idx]
+            for t in range(len(part)):
+                for k in range(nc):
+                    yield stack[k][t]
+
+    shape = (n, nc, h, w) if nc > 1 else (n, h, w)
+    tifffile.imwrite(str(out_path), pages(), shape=shape, dtype=dtype, imagej=True,
+                     metadata=meta, resolution=res, bigtiff=False)
     return out_path

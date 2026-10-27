@@ -57,10 +57,20 @@ def _export(args) -> int:
     from . import export as _ex
     with MescFile(args.file) as f:
         out = Path(args.out)
-        writer = _ex.to_tiff if out.suffix.lower() in (".tif", ".tiff") else _ex.to_hdf5
-        written = writer(f, args.unit, out, channel=args.channel,
-                         reader_units=not args.stored_units)
-        print(f"  {written}  ({'stored' if args.stored_units else 'reader'} units)")
+        units = [u.name for u in f.units()] if args.unit == "all" else [args.unit]
+        if args.unit == "all":
+            if out.suffix:
+                raise SystemExit("with unit 'all' the output is a FOLDER; add --tiff or --h5 for the format")
+            out.mkdir(parents=True, exist_ok=True)
+        for name in units:
+            dest = out / f"{Path(args.file).stem}_{name}{'.tif' if args.tiff else '.h5'}" if args.unit == "all" else out
+            tiff = dest.suffix.lower() in (".tif", ".tiff")
+            ch = args.channel if args.channel is not None else ("all" if tiff else 0)
+            if tiff:
+                written = _ex.to_tiff(f, name, dest, channel=ch, reader_units=not args.stored_units)
+            else:
+                written = _ex.to_hdf5(f, name, dest, channel=int(ch), reader_units=not args.stored_units)
+            print(f"  {written}  ({'stored' if args.stored_units else 'reader'} units, channel {ch})")
     return 0
 
 
@@ -202,11 +212,14 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=_check)
 
-    p = sub.add_parser("export", help="write one unit to .h5 or .tif (by the output's suffix)")
+    p = sub.add_parser("export", help="write a unit to .h5 or .tif (by the output's suffix); a .tif "
+                                      "is an ImageJ/Fiji hyperstack of every channel")
     p.add_argument("file")
-    p.add_argument("unit", help="MUnit_0, or MSession_0/MUnit_0")
+    p.add_argument("unit", help="MUnit_0, or MSession_0/MUnit_0, or 'all' (then out is a folder)")
     p.add_argument("out")
-    p.add_argument("--channel", type=int, default=0)
+    p.add_argument("--channel", type=lambda v: v if v == "all" else int(v), default=None,
+                   help="a channel index, or 'all' (default: all for .tif, 0 for .h5)")
+    p.add_argument("--tiff", action="store_true", help="with unit 'all': write .tif (default .h5)")
     p.add_argument("--stored-units", action="store_true",
                    help="write the file's own integers instead of the values the reader shows")
     p.set_defaults(func=_export)

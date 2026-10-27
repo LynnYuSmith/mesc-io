@@ -29,18 +29,41 @@ def _block(mesc, unit: str, channel: int, frames, reader_units: bool):
     return u, (np.asarray(data, dtype=np.float32) if reader_units else np.asarray(data))
 
 
+def _selection(u, frames):
+    """The frame indices a ``frames`` argument (None, slice, int, indices) stands for."""
+    n = u.n_frames
+    if frames is None:
+        return list(range(n))
+    if isinstance(frames, slice):
+        return list(range(n)[frames])
+    if isinstance(frames, (int, np.integer)):
+        return [range(n)[frames]]
+    return [range(n)[int(i)] for i in np.asarray(frames).ravel()]
+
+
 def to_hdf5(mesc, unit: str, out_path, channel: int = 0, dataset: str = "data",
-            frames=None, reader_units: bool = True, compression: Optional[str] = "lzf"):
+            frames=None, reader_units: bool = True, compression: Optional[str] = "lzf",
+            block: int = 256):
     """One unit's channel into an HDF5 dataset, with its metadata as attributes.
+
+    Written a block of frames at a time, so a unit larger than memory exports too: a whole
+    3,715-frame 512² unit was refused before (7.8 GB as float64, over the read guard).
 
     Returns the path written.
     """
-    u, data = _block(mesc, unit, channel, frames, reader_units)
+    u = mesc.unit(unit)
     ch = u.channels[channel]
+    sel = _selection(u, frames)
+    dtype = np.float32 if reader_units else np.dtype(u.dtype)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(str(out_path), "w") as f:
-        ds = f.create_dataset(dataset, data=data, compression=compression)
+        ds = f.create_dataset(dataset, shape=(len(sel), u.height, u.width), dtype=dtype,
+                              chunks=(1, u.height, u.width) if sel else None, compression=compression)
+        for s in range(0, len(sel), block):
+            part = sel[s:s + block]
+            ds[s:s + len(part)] = np.asarray(
+                mesc.read(unit, channel=channel, frames=part, reader_units=reader_units), dtype)
         ds.attrs["source_file"] = mesc.path.name
         ds.attrs["source_unit"] = u.path
         ds.attrs["source_channel"] = ch.name

@@ -17,6 +17,30 @@
   - **The dF/F baseline:** at the ends of the rolling window (most of a short unit, for a 60-s window)
     the quantiles came from one np.quantile call per frame — 74,000 calls for 40 ROIs. One sorted
     window is now moved a point at a time instead. Bit-identical, 4× faster.
+- **Long recordings: the dF/F baseline no longer grows with the recording squared.** The rolling
+  quantile now moves one sorted window over the whole trace; np.quantile over a sliding-window view
+  partitioned an (n−w+1)×w copy (1.7 GB per ROI at 60,000 frames). One 15,000-frame trace: 878 → 55 ms;
+  40 ROIs at 60,000 frames: 83 s → 6 s. Bit-identical.
+- **The viewer's server:**
+  - **Hovering on a mean or max image** rebuilt the 300-frame projection on every move (~1 s), because
+    it looked in the cache under a key nothing was stored under — and in max mode it reported the
+    mean's value. It now reads the projection on screen. The traces had the same cache miss (0.8 s).
+  - **Traces after a new q or window** recompute dF/F from the cached raw means instead of reading
+    the recording again.
+  - **Mean, max, thumbnails, averaged frames, the scrub window and the 3D volume** are reduced on the
+    stored integers and converted once: 300 frames of 512² were 630 MB of float64 (above 1 GB at the
+    peak) and 0.5–1.6 s; now ~0.1 s. Equal to float rounding (5e-16), max bit-identical.
+  - **ROI masks** test only the polygon's own box: 40 discs on 512² took 0.6 s, now ~7 ms; same masks.
+  - **A frame PNG** is deflated at level 1 instead of 6: 37 ms → 2 ms of a ~40 ms scrub step, about
+    10 % larger on the wire (localhost), same pixels.
+  - **3D window changes** re-map a cached block-averaged volume instead of re-reading the stack.
+  - **The traces payload** is built vectorised (0.2 s → ~0.01 s); the single-disc `/api/trace` uses the
+    fast ROI pass (12 s → ~1 s).
+  - **The cache has a ceiling** (1 GB, oldest first); it used to keep everything it ever made.
+- **`to_reader_units` converts in place:** one float64 copy instead of three (a 500-frame 512² block
+  peaked at 2.1 GB); bit-identical.
+- **`export` to HDF5 streams** a block of frames at a time: a whole 3,715-frame 512² unit was refused
+  (7.8 GB as float64); now it exports in 19 s at 1.1 GB.
 - **3D keeps up on a weak GPU.** While the stack is turned, moved or zoomed it is drawn at half the CSS
   pixels with rays stepped twice as far, and ~180 ms after the hand stops at full quality again.
 

@@ -43,10 +43,15 @@ def to_reader_units(stored, offset: float, scale: float = 1.0, halved: bool = Fa
     Returns float64 — the conversion can produce negatives and the caller should see them
     rather than have them clipped away silently.
     """
-    a = np.asarray(stored, dtype=np.float64)
+    # one float64 copy, then in place: ``a * scale + offset`` made two more (18 bytes a pixel at
+    # the peak where the read guard counts 8 — a 500-frame 512² block was 2.1 GB)
+    a = np.array(stored, dtype=np.float64)
     if halved:
-        a = a * 2.0
-    return a * float(scale) + float(offset)
+        a *= 2.0
+    if float(scale) != 1.0:
+        a *= float(scale)
+    a += float(offset)
+    return a
 
 
 def from_reader_units(values, offset: float, scale: float = 1.0, dtype=np.uint16,

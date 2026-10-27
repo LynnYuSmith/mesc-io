@@ -113,13 +113,96 @@ def _in_polygon(pts: np.ndarray, h: int, w: int) -> np.ndarray:
     return inside
 
 
+class _BoundedCache(dict):
+    """The server's cache, with a memory ceiling. It used to keep every mean, max, thumbnail,
+    window, volume and trace set it ever made; on a 30-unit two-channel file that is hundreds of
+    megabytes that never come back. Past ``limit`` bytes the oldest entries go first."""
+
+    def __init__(self, limit: int = 1 << 30):
+        super().__init__()
+        self.limit = limit
+
+    @staticmethod
+    def _size(v) -> int:
+        if isinstance(v, np.ndarray):
+            return v.nbytes
+        if isinstance(v, (tuple, list)):
+            return sum(_BoundedCache._size(x) for x in v)
+        return 64
+
+    def __setitem__(self, key, value):
+        super().pop(key, None)
+        super().__setitem__(key, value)          # newest last; dicts keep insertion order
+        total = sum(self._size(v) for v in self.values())
+        while total > self.limit and len(self) > 1:
+            old = next(iter(self))
+            total -= self._size(super().pop(old))
+
+
+def _rlist(a, decimals: int) -> list:
+    """An array as a JSON-ready list, rounded, with NaN/inf as None. Vectorised: building the
+    traces payload value by value (40 ROIs × 5,000 frames, four arrays each) took 0.2 s."""
+    r = np.round(np.asarray(a, dtype=np.float64), decimals)
+    out = r.tolist()
+    for i in np.flatnonzero(~np.isfinite(r)):
+        out[i] = None
+    return out
+
+
+def _reduce(f, unit: str, ch: int, frames, op: str = "mean") -> np.ndarray:
+    """The mean (or max) of some frames in reader units, computed on the stored integers.
+
+    The conversion to reader units is linear, so the mean of converted frames is the converted
+    mean — and the max is the converted max when the scale is positive. Reducing the integers
+    first means no float64 copy of every frame: 300 frames of 512² were 630 MB of float64 for
+    one mean image (above 1 GB at the peak), and 0.8–1.6 s; on the integers it is ~0.1 s. The
+    result equals the old one to float rounding (1e-16 relative), not bit for bit.
+    """
+    u = f.unit(unit)
+    c = u.channels[ch]
+    raw = f.read(unit, channel=ch, frames=frames, reader_units=False, max_gb=None)
+    if op == "max" and c.scale > 0:
+        red = raw.max(axis=0).astype(np.float64)
+    elif op == "max":                       # a negative scale turns the brightest into the darkest
+        return f.read(unit, channel=ch, frames=frames, reader_units=True, max_gb=None).max(axis=0)
+    else:
+        red = raw.sum(axis=0, dtype=np.int64) / max(1, raw.shape[0])
+    if not c.converted:
+        f._warn_unconverted(u, c)
+    return red * float(c.scale) + float(c.offset)
+
+
+def _in_polygon_box(pts: np.ndarray, x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
+    """``_in_polygon`` over the pixels ``[y0:y1, x0:x1]`` only — the same arithmetic on the same
+    absolute pixel coordinates, so the answer for every pixel is the one the full frame gives."""
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    x = xx.astype(float)
+    y = yy.astype(float)
+    inside = np.zeros(x.shape, dtype=bool)
+    ax, ay = pts[-1]
+    for bx, by in pts:
+        straddles = ((ay > y) != (by > y))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            xkreuz = (bx - ax) * (y - ay) / np.where(by != ay, by - ay, np.nan) + ax
+        inside ^= straddles & (x < xkreuz)
+        ax, ay = bx, by
+    return inside
+
+
 def _mask_of(roi: dict, h: int, w: int) -> np.ndarray:
     """Boolean mask for one ROI. Everything is stored as a polygon, including the disc a
     single click makes — one shape means one code path here and one format on export."""
     pts = np.asarray(roi.get("points", []), dtype=float)
     if len(pts) < 3:
         raise ValueError(f"ROI {roi.get('name')!r} has fewer than three points")
-    mask = _in_polygon(pts, h, w)
+    # only the polygon's own box is tested, not the whole frame: 40 discs on 512² took 0.6 s
+    # as 40 full-frame scans and take ~7 ms this way. The box is in whole pixels, so every
+    # pixel is tested at the same coordinates as before.
+    mask = np.zeros((h, w), dtype=bool)
+    x0, y0 = max(0, int(np.floor(pts[:, 0].min())) - 1), max(0, int(np.floor(pts[:, 1].min())) - 1)
+    x1, y1 = min(w, int(np.ceil(pts[:, 0].max())) + 2), min(h, int(np.ceil(pts[:, 1].max())) + 2)
+    if x1 > x0 and y1 > y0:
+        mask[y0:y1, x0:x1] = _in_polygon_box(pts, x0, y0, x1, y1)
     if not mask.any():                      # a shape thinner than a pixel still has a centre
         cx, cy = pts[:, 0].mean(), pts[:, 1].mean()
         yi, xi = int(round(cy)), int(round(cx))
@@ -199,7 +282,7 @@ def _png_grau(a: np.ndarray) -> bytes:
 
     return (b"\x89PNG\r\n\x1a\n"
             + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(raw, 6))
+            + chunk(b"IDAT", zlib.compress(raw, 1))
             + chunk(b"IEND", b""))
 
 
@@ -208,7 +291,7 @@ class _Handler(BaseHTTPRequestHandler):
     rois_path: Path = None          # ""
     _lock = threading.Lock()
     _store_lock = threading.Lock()      # the ROI store's read-modify-write
-    _cache = {}
+    _cache = _BoundedCache()
 
     # -- plumbing ---------------------------------------------------------
     def log_message(self, fmt, *args):      # quiet: one line per run, not per request
@@ -444,30 +527,39 @@ class _Handler(BaseHTTPRequestHandler):
             # the darkest patch of the mean image rides along in the same pass: it is the
             # background the pipeline subtracts, and the dark current comes off its first frames
             with self._lock:
-                mean_img = self._cache.get((str(self.mesc_path), unit, ch))
+                mean_img = self._cache.get((str(self.mesc_path), unit, ch, "mean"))   # _mean_image's key
             if mean_img is None:
                 mean_img = self._mean_image(unit, ch)
             params = self._dff_params(q)
             y0, x0, y1, x1 = darkest_patch(mean_img, params.bg_patch)
-            patch = np.zeros((u.height, u.width), bool); patch[y0:y1, x0:x1] = True
-            masks.append(patch)
-            traces = list(_mask_means(f, unit, ch, masks))
-        bg_trace = traces.pop()
+            # the raw means depend only on the ROI shapes and the background patch — a new q or
+            # window recomputes dF/F from them instead of reading the recording again
+            key = (str(self.mesc_path), unit, ch, "rawtraces", (y0, x0, y1, x1),
+                   json.dumps([r.get("points") for r in rois]))
+            with self._lock:
+                hit = self._cache.get(key)
+            if hit is None:
+                patch = np.zeros((u.height, u.width), bool); patch[y0:y1, x0:x1] = True
+                hit = _mask_means(f, unit, ch, masks + [patch]).astype(np.float64)
+                with self._lock:
+                    self._cache[key] = hit
+            traces = list(hit[:-1])
+        bg_trace = hit[-1]
         fs = u.frame_rate_hz
         # No rate, no dF/F: the baseline window is in seconds, and a guessed 30 Hz would turn
         # 60 s into 29 s at our 62 Hz and flatten every event, silently. Raw traces still come.
         r = (compute_dff(np.vstack(traces), bg_trace, fs, params, patch=(y0, x0, y1, x1))
              if fs else None)
-        nan = lambda v: None if not np.isfinite(v) else round(float(v), 4)   # the head is NaN → null
+        nan_rows = lambda a: [_rlist(t, 4) for t in a]                        # the head is NaN → null
         return {"unit": u.path, "channel": ch, "frame_rate_hz": u.frame_rate_hz,
                 "names": [rr.get("name", f"roi{i}") for i, rr in enumerate(rois)],
                 "areas_px": areas,
-                "traces": [[round(float(v), 2) for v in t] for t in traces],
-                "bg_trace": [round(float(v), 2) for v in bg_trace],
+                "traces": [_rlist(t, 2) for t in traces],
+                "bg_trace": _rlist(bg_trace, 2),
                 "patch": [y0, x0, y1, x1],
-                "dff": [[nan(v) for v in t] for t in r.dff] if r else None,
-                "baseline": [[nan(v) for v in t] for t in r.baseline] if r else None,
-                "background": [nan(v) for v in r.background] if r else None,
+                "dff": nan_rows(r.dff) if r else None,
+                "baseline": nan_rows(r.baseline) if r else None,
+                "background": _rlist(r.background, 4) if r else None,
                 "dark": round(r.dark, 2) if r else None, "head": r.head if r else None,
                 "eps": round(r.eps, 4) if r else None,
                 "dff_unavailable": None if r else "the file states no frame rate",
@@ -681,13 +773,22 @@ class _Handler(BaseHTTPRequestHandler):
             k = 1
             while u.n_frames * (u.height // k) * (u.width // k) > budget:
                 k += 1
-            hh, ww = (u.height // k) * k, (u.width // k) * k
-            vol = np.empty((u.n_frames, hh // k, ww // k), dtype=np.float32)
-            for z0 in range(0, u.n_frames, 64):
-                block = f.read(unit, channel=ch, frames=slice(z0, z0 + 64), reader_units=True,
-                               max_gb=None)[:, :hh, :ww]
-                vol[z0:z0 + len(block)] = block.reshape(
-                    len(block), hh // k, k, ww // k, k).mean(axis=(2, 4))
+            # the block-averaged volume does not depend on the window: kept, so moving the floor
+            # or the window re-maps it to bytes (~40 ms) instead of reading the stack (~0.5 s)
+            vkey = (str(self.mesc_path), unit, ch, "volume", k)
+            with self._lock:
+                vol = self._cache.get(vkey)
+            if vol is None:
+                hh, ww = (u.height // k) * k, (u.width // k) * k
+                c = u.channels[ch]
+                vol = np.empty((u.n_frames, hh // k, ww // k), dtype=np.float32)
+                for z0 in range(0, u.n_frames, 64):
+                    block = f.read(unit, channel=ch, frames=slice(z0, z0 + 64), reader_units=False,
+                                   max_gb=None)[:, :hh, :ww]
+                    m = block.reshape(len(block), hh // k, k, ww // k, k).sum(axis=(2, 4), dtype=np.int64) / (k * k)
+                    vol[z0:z0 + len(block)] = m * float(c.scale) + float(c.offset)
+                with self._lock:
+                    self._cache[vkey] = vol
         if win[0] == "fixed":
             lo, hi = win[1], win[2]
         else:
@@ -725,8 +826,8 @@ class _Handler(BaseHTTPRequestHandler):
             lo = max(0, i - n // 2)
             hi = min(u.n_frames, lo + n)
             lo = max(0, hi - n)
-            block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)
-            img = block[0] if n == 1 else block.mean(axis=0)
+            img = (f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)[0]
+                   if n == 1 else _reduce(f, unit, ch, slice(lo, hi)))
         win = self._window(q)
         if win[0] == "pct":                    # one stretch for the whole recording, not per frame
             win = ("fixed", *self._unit_window(unit, ch, win[1], win[2], n))
@@ -757,8 +858,8 @@ class _Handler(BaseHTTPRequestHandler):
             starts = np.unique(np.linspace(0, max(0, u.n_frames - n), k).astype(int))
             imgs = []
             for s0 in starts:
-                blk = f.read(unit, channel=ch, frames=slice(s0, s0 + n), reader_units=True, max_gb=MAX_READ_GB)
-                im = blk.mean(axis=0) if n > 1 else blk[0]
+                im = (_reduce(f, unit, ch, slice(s0, s0 + n)) if n > 1 else
+                      f.read(unit, channel=ch, frames=slice(s0, s0 + 1), reader_units=True, max_gb=MAX_READ_GB)[0])
                 imgs.append(np.asarray(im, np.float32)[::2, ::2])   # every other pixel: plenty for a percentile
         lo, hi = (float(v) for v in np.percentile(np.stack(imgs), [p_lo, p_hi]))
         if hi <= lo:
@@ -773,12 +874,15 @@ class _Handler(BaseHTTPRequestHandler):
         reads something a person can use; the single pixel is returned beside it."""
         x, y = int(float(q["x"][0])), int(float(q["y"][0]))
         n = max(1, min(MAX_AVG_FRAMES, int(float(q.get("n", ["1"])[0]))))
-        key = (str(self.mesc_path), unit, ch)
         if "i" not in q:
+            # the projection on screen — mean or max — from the same cache the picture came from;
+            # keyed without the mode, it missed every time (a fresh 300-frame mean per hover) and
+            # in max mode answered with the mean's value
+            mode = "max" if q.get("mode", ["mean"])[0] == "max" else "mean"
             with self._lock:
-                img = self._cache.get(key)
+                img = self._cache.get((str(self.mesc_path), unit, ch, mode))
             if img is None:
-                img = self._mean_image(unit, ch)
+                img = self._mean_image(unit, ch, mode)
         else:
             i = int(float(q["i"][0]))
             with self._file() as f:
@@ -786,8 +890,8 @@ class _Handler(BaseHTTPRequestHandler):
                 if not (0 <= i < u.n_frames):
                     raise ValueError(f"frame {i} is outside 0..{u.n_frames - 1}")
                 lo = max(0, i - n // 2); hi = min(u.n_frames, lo + n); lo = max(0, hi - n)
-                block = f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)
-                img = block[0] if n == 1 else block.mean(axis=0)
+                img = (f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)[0]
+                       if n == 1 else _reduce(f, unit, ch, slice(lo, hi)))
         h, w = img.shape
         if not (0 <= x < w and 0 <= y < h):
             raise ValueError(f"({x}, {y}) is outside the {w}x{h} field")
@@ -808,7 +912,7 @@ class _Handler(BaseHTTPRequestHandler):
             with self._file() as f:
                 u = f.unit(unit)
                 idx = np.unique(np.linspace(0, u.n_frames - 1, min(40, u.n_frames)).astype(int))
-                img = f.read(unit, channel=ch, frames=idx, reader_units=True, max_gb=None).mean(axis=0)
+                img = _reduce(f, unit, ch, idx)
             with self._lock:
                 self._cache[key] = img
         h, w = img.shape
@@ -829,8 +933,7 @@ class _Handler(BaseHTTPRequestHandler):
         with self._file() as f:
             u = f.unit(unit)
             idx = np.unique(np.linspace(0, u.n_frames - 1, min(300, u.n_frames)).astype(int))
-            block = f.read(unit, channel=ch, frames=idx, reader_units=True, max_gb=None)
-            img = block.max(axis=0) if mode == "max" else block.mean(axis=0)
+            img = _reduce(f, unit, ch, idx, "max" if mode == "max" else "mean")
         with self._lock:
             self._cache[key] = img
         return img
@@ -858,13 +961,10 @@ class _Handler(BaseHTTPRequestHandler):
             mask = (yy - y) ** 2 + (xx - x) ** 2 <= r * r
             if not mask.any():
                 raise ValueError(f"({x}, {y}) is outside the {u.width}x{u.height} field")
-            out = []
-            for block in f.iter_frames(unit, channel=ch, block=500, reader_units=True):
-                out.append(block[:, mask].mean(axis=1))
-            trace = np.concatenate(out)
+            trace = _mask_means(f, unit, ch, [mask])[0]
         return self._json({"unit": u.path, "channel": ch, "x": x, "y": y, "r": r,
                            "frame_rate_hz": u.frame_rate_hz,
-                           "values": [round(float(v), 2) for v in trace]})
+                           "values": _rlist(trace, 2)})
 
 
 PRIVATE_FLAGS = {          # how each browser is asked for a window that remembers nothing

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.13 — 2026-10-27
 
 **Motion correction on an 8 GB laptop, and a page that keeps up.**
 

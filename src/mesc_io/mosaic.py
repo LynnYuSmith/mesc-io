@@ -46,12 +46,16 @@ class Tile:
 
 def tiles(mesc, paths=None) -> List[Tile]:
     """The file's z-stacks that carry a stage position, in file order (or the ``paths`` given)."""
+    units = [u for u in mesc.units() if (paths is None or u.path in paths) and u.z_step_um and u.n_frames >= 2
+             and u.pixel_size_um and (u.stage_rel_um or u.stage_um)]
+    # one frame of reference for every tile: the position from the rig's zero only when every tile
+    # has one (the zero can be set again between tiles, and a tile without it would land in the
+    # other frame, silently), else the absolute stage
+    rel = all(u.stage_rel_um and "x" in u.stage_rel_um and "y" in u.stage_rel_um for u in units)
     out = []
-    for u in mesc.units():
-        if paths is not None and u.path not in paths:
-            continue
-        pos = u.stage_rel_um or u.stage_um
-        if not u.z_step_um or u.n_frames < 2 or not pos or "x" not in pos or "y" not in pos or not u.pixel_size_um:
+    for u in units:
+        pos = u.stage_rel_um if rel else u.stage_um
+        if not pos or "x" not in pos or "y" not in pos:
             continue
         out.append(Tile(u.path, u.name, u.comment or "", u.n_frames, u.height, u.width,
                         float(u.pixel_size_um), float(u.pixel_size_y_um or u.pixel_size_um),
@@ -147,24 +151,26 @@ def compose(mesc, ts: List[Tile], layout=None, channel: int = 0, planes=None, cr
 
 # -- stitching from the overlaps ------------------------------------------------------------------
 
-def _smooth(a: np.ndarray, sigma: float) -> np.ndarray:
-    """Gaussian blur over the last two axes (through the FFT; numpy only), the edges mirrored
-    first so the blur does not wrap one edge of a strip onto the other."""
-    m = int(np.ceil(3 * sigma))
-    b = np.pad(a, ((0, 0), (m, m), (m, m)), mode="reflect") if m else a
+def _smooth(a: np.ndarray, sy: float, sx: Optional[float] = None) -> np.ndarray:
+    """Gaussian blur over the last two axes, ``sy`` and ``sx`` pixels (through the FFT; numpy
+    only), the edges mirrored first so the blur does not wrap one edge of a strip onto the other."""
+    sx = sy if sx is None else sx
+    my, mx = int(np.ceil(3 * sy)), int(np.ceil(3 * sx))
+    b = np.pad(a, ((0, 0), (my, my), (mx, mx)), mode="reflect")
     h, w = b.shape[-2:]
     fy, fx = np.fft.fftfreq(h)[:, None], np.fft.rfftfreq(w)[None, :]
-    k = np.exp(-2 * (np.pi * sigma) ** 2 * (fx ** 2 + fy ** 2))
+    k = np.exp(-2 * np.pi ** 2 * ((sx * fx) ** 2 + (sy * fy) ** 2))
     out = np.fft.irfft2(np.fft.rfft2(b) * k, s=(h, w)).astype(np.float32)
-    return out[:, m:h - m, m:w - m] if m else out
+    return out[:, my:h - my, mx:w - mx]
 
 
-def _prepare(a: np.ndarray, px: float) -> np.ndarray:
+def _prepare(a: np.ndarray, px: float, py: Optional[float] = None) -> np.ndarray:
     """What two tiles are matched on: log intensity, band-passed per slice (fine structure kept,
     the slow background and the shot noise dropped), each slice to zero mean and unit spread —
     so a dimmer tile or a darker slice matches as well as a bright one."""
     a = np.log1p(np.maximum(a - np.percentile(a, 1), 0)).astype(np.float32)
-    a = _smooth(a, 0.7 / px) - _smooth(a, 4.0 / px)
+    py = px if py is None else py
+    a = _smooth(a, 0.7 / py, 0.7 / px) - _smooth(a, 4.0 / py, 4.0 / px)
     a -= a.mean(axis=(1, 2), keepdims=True)
     a /= a.std(axis=(1, 2), keepdims=True) + 1e-6
     return a
@@ -179,7 +185,10 @@ def _match(A: np.ndarray, B: np.ndarray, max_shift, min_frac: float = 0.4):
     """The shift d (z, y, x) for which A(p + d) best matches B(p): masked normalised cross-
     correlation over every shift within ``max_shift``, counting only where both volumes are
     (Padfield 2012), so a shift that leaves a thin sliver of overlap cannot win on a few voxels.
-    Returns (d with sub-voxel x and y, the peak correlation)."""
+    Every shift is scored directly, so there is no wrap-around to resolve and the best is the
+    best; but a periodic or empty overlap has several near-equal peaks, so the runner-up — the
+    best shift more than 2 voxels (1 slice) from the winner — is returned too.
+    Returns (d with sub-voxel x and y, the peak correlation, the runner-up's correlation)."""
     shape = tuple(int(n + m + 1) for n, m in zip(A.shape, max_shift))
     MA, MB = np.ones_like(A), np.ones_like(B)
     n = _corr(MA, MB, shape)
@@ -196,6 +205,10 @@ def _match(A: np.ndarray, B: np.ndarray, max_shift, min_frac: float = 0.4):
     ncc = np.where(keep, ncc, -1.0)
     i = np.unravel_index(int(np.argmax(ncc)), shape)
     d = [float(k if k <= m else k - s) for k, m, s in zip(i, max_shift, shape)]
+    away = ncc.copy()
+    near = [np.arange(c - r, c + r + 1) % s for c, r, s in zip(i, (1, 2, 2), shape)]
+    away[np.ix_(*near)] = -1.0
+    second = float(away.max())
     for ax in (1, 2):                                   # parabola through the peak along x and y
         lo, hi = list(i), list(i)
         lo[ax] = (i[ax] - 1) % shape[ax]
@@ -204,25 +217,124 @@ def _match(A: np.ndarray, B: np.ndarray, max_shift, min_frac: float = 0.4):
         den_ = a_ - 2 * b_ + c_
         if a_ > -1 and c_ > -1 and den_ < 0:
             d[ax] += float(np.clip(0.5 * (a_ - c_) / den_, -0.5, 0.5))
-    return d, float(ncc[i])
+    return d, float(ncc[i]), second
+
+
+def _components(paths, links):
+    """The groups of tiles joined by links (union–find)."""
+    root = {p: p for p in paths}
+
+    def find(p):
+        while root[p] != p:
+            root[p] = root[root[p]]
+            p = root[p]
+        return p
+    for ln in links:
+        root[find(ln["a"])] = find(ln["b"])
+    groups: Dict[str, list] = {}
+    for p in paths:
+        groups.setdefault(find(p), []).append(p)
+    return list(groups.values())
+
+
+def _lsq(paths, links, fixed):
+    idx = {p: i for i, p in enumerate(paths)}
+    rows, rhs, w = [], [], []
+    for ln in links:
+        r = np.zeros(len(paths)); r[idx[ln["b"]]] = 1; r[idx[ln["a"]]] = -1
+        rows.append(r); rhs.append(ln["shift"]); w.append(ln["weight"])
+    for gr in _components(paths, links):
+        # the group with the fixed tile is pinned by it; any other group is held where it
+        # started (its mean correction 0) — not thrown wherever a minimum-norm solution puts it
+        r = np.zeros(len(paths))
+        if fixed in gr:
+            r[idx[fixed]] = 1
+        else:
+            r[[idx[p] for p in gr]] = 1.0 / len(gr)
+        rows.append(r); rhs.append([0.0, 0.0, 0.0]); w.append(100.0)
+    sw = np.sqrt(np.array(w))[:, None]             # rows by √weight: the squares are then weighted by it
+    sol, *_ = np.linalg.lstsq(np.array(rows) * sw, np.array(rhs) * sw, rcond=None)
+    return {p: sol[idx[p]] for p in paths}
+
+
+def _in_loop(paths, links, k):
+    """Whether other links also join the two tiles of link ``k`` (so it can be checked at all)."""
+    ln, rest = links[k], links[:k] + links[k + 1:]
+    return any(ln["a"] in gr and ln["b"] in gr for gr in _components(paths, rest))
+
+
+def _solve(paths, links, fixed, dz_um: float = 1.0, max_ratio: float = 2.5, tol_um: float = 3.0):
+    """One correction (dx µm, dy µm, dz slices) per tile from pairwise links — each link says
+    ``b − a = shift`` with a weight — by weighted least squares, ``fixed`` held at 0.
+
+    A wrong match must not bend every tile it reaches, and least squares hides it: in a grid it
+    spreads its error round every loop it is in. So each link is checked against what the OTHER
+    links say about its two tiles (leave one out). A link whose disagreement is over ``tol_um``
+    (depth counted in µm) is a suspect; the suspect whose removal leaves the links still checked
+    by a loop agreeing best is dropped, and everything solved again — but only if, without it,
+    they agree within ``tol_um`` and ``max_ratio`` times better than without any other suspect.
+    Otherwise the loops cannot tell which is wrong —
+    in a grid of only edge neighbours, one bad link of a four-tile loop looks exactly like any
+    other of the four — so none is dropped and they are all returned as doubtful, for an eye.
+    (Diagonal neighbours add loops; with them a single wrong link can usually be named.)
+    Tiles left joined to nothing are held where they started.
+
+    Returns (corrections {path: array(3)}, the links dropped, the links in doubt)."""
+    to_um = np.array([1.0, 1.0, dz_um])
+    err = lambda s, ln: float(np.linalg.norm((np.asarray(ln["shift"]) - (s[ln["b"]] - s[ln["a"]])) * to_um))  # noqa: E731
+    live, dropped, doubt = list(links), [], []
+    while len(live) >= 3:
+        loo = []
+        for k, ln in enumerate(live):
+            loo.append(err(_lsq(paths, live[:k] + live[k + 1:], fixed), ln) if _in_loop(paths, live, k) else 0.0)
+        suspects = [int(k) for k in np.argsort(loo)[::-1] if loo[k] > tol_um]
+        if not suspects:
+            break
+        left = {}                                     # how well the rest agrees without each suspect
+        for k in suspects:
+            rest = live[:k] + live[k + 1:]
+            checked = [ln for j, ln in enumerate(rest) if _in_loop(paths, rest, j)]
+            if checked:
+                s = _lsq(paths, rest, fixed)
+                left[k] = max(err(s, ln) for ln in checked)
+        rank = sorted(left, key=left.get)
+        if rank and left[rank[0]] <= tol_um and (len(rank) == 1 or left[rank[1]] > max_ratio * max(left[rank[0]], 1e-9)):
+            dropped.append(live.pop(rank[0]))
+            continue
+        doubt = [live[k] for k in suspects]
+        break
+    return _lsq(paths, live, fixed), dropped, doubt
 
 
 def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: float = 15.0,
              max_dz_um: float = 15.0, down: int = 2, min_overlap_um: float = 8.0,
-             min_score: float = 0.15, fixed: Optional[str] = None) -> dict:
+             min_score: float = 0.15, fixed: Optional[str] = None, null_samples: int = 24) -> dict:
     """Correct the tiles from their overlaps, starting from ``layout`` (so a hand-made layout is
     refined, not thrown away). Each pair overlapping by at least ``min_overlap_um`` is matched in
-    3-D within ±``max_shift_um`` across and ±``max_dz_um`` in depth (on images reduced ``down``
-    times across, then the peak refined to a fraction of a pixel); the pairs that match (peak
-    correlation ≥ ``min_score``) give one correction per tile by least squares, weighted by the
-    correlation, with ``fixed`` (default: the first shown tile) held where it is.
+    3-D within ±``max_shift_um`` across and ±``max_dz_um`` in depth — how far the stage (and the
+    brain) can plausibly be off; no tile is ever moved further from where it started than that
+    (on images reduced ``down`` times across, then the peak refined to a fraction of a pixel).
 
-    Returns ``{"layout": the new layout, "pairs": [...], "fixed": path, "unmatched": [...]}``; each
-    pair has its correlation, the shift it measured and what is left of it after the solve (its
-    residual, µm and slices) — a residual of more than a pixel or a slice is a seam to look at.
+    Which matches to believe is decided by the data, as ASHLAR does: the same strips are matched
+    against tiles that do NOT overlap, and the best of those chance correlations is the bar a real
+    pair must clear (never below ``min_score``). Sparse axons in a dark field correlate weakly
+    everywhere, so a fixed bar is either too strict for them or too loose for an empty overlap.
+    The pairs that clear it give one correction per tile (``_solve``: weighted least squares,
+    outlier links dropped, unjoined groups held where they were), ``fixed`` (default: the first
+    shown tile) held still.
+
+    Returns ``{"layout", "pairs", "fixed", "unmatched", "threshold", "null"}``. Each pair has its
+    correlation, the runner-up peak's, the shift it measured, what is left of it after the solve
+    (µm, µm, slices), a ``status`` — ``used``, ``weak`` (below the bar), ``edge`` (its best match
+    on the edge of the search: the tile is further off than searched), ``outlier`` (dropped
+    for disagreeing with the others) or ``doubt`` (kept, but one of several links a loop says
+    cannot all be right: look at these seams) — and ``loop``: whether other links also join its two tiles,
+    i.e. whether it was checked at all (a link no loop runs through is believed unchecked).
     """
     g = geometry(ts, layout)
-    place, px, py, dzu = g["place"], g["px"], g["py"], g["dz"]
+    place, px, py, dzu = g["place"], g["px"], g["py"], abs(g["dz"])
+    if not dzu:
+        raise ValueError("the tiles have no slice step")
     paths = [p for p in g["order"]]
     fixed = fixed if fixed in place else paths[0]
     cache: Dict[str, np.ndarray] = {}            # the last few tiles read, stored integers
@@ -235,66 +347,112 @@ def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: 
         return cache[path]
 
     ms = (int(round(max_dz_um / dzu)), int(round(max_shift_um / (py * down))), int(round(max_shift_um / (px * down))))
-    pairs = []
-    for a, b in itertools.combinations(paths, 2):
-        A, B = place[a], place[b]
+
+    def overlap(A, B):
         x0, x1 = max(A["c0"], B["c0"]), min(A["c0"] + A["tile"].width, B["c0"] + B["tile"].width)
         y0, y1 = max(A["r0"], B["r0"]), min(A["r0"] + A["tile"].height, B["r0"] + B["tile"].height)
-        if (x1 - x0) * px < min_overlap_um or (y1 - y0) * py < min_overlap_um:
-            continue
-        # the shared rectangle, in each tile's own reduced pixels; the slices by each tile's dz
         za0, za1 = max(A["z0"], B["z0"]), min(A["z0"] + A["tile"].depth, B["z0"] + B["tile"].depth)
-        if za1 - za0 < 4:
-            continue
-        # cut at full resolution from the same mosaic pixel in both, then reduced: the two grids
-        # coincide, so reducing adds no shift of its own
-        h, w = (y1 - y0) // down, (x1 - x0) // down
+        return x0, x1, y0, y1, za0, za1
 
-        def cut(P, V):
-            v = V[za0 - P["z0"]:za1 - P["z0"], y0 - P["r0"]:y0 - P["r0"] + h * down,
-                  x0 - P["c0"]:x0 - P["c0"] + w * down].astype(np.float32)
-            return _prepare(v.reshape(v.shape[0], h, down, w, down).mean(axis=(2, 4)), px * down)
-        VA, VB = cut(A, vol(a)), cut(B, vol(b))
+    def strip(P, path, x0, y0, h, w, za0, za1):
+        # cut at full resolution from the same mosaic pixel in both tiles, then reduced: the two
+        # grids coincide, so reducing adds no shift of its own
+        v = vol(path)[za0 - P["z0"]:za1 - P["z0"], y0 - P["r0"]:y0 - P["r0"] + h * down,
+                      x0 - P["c0"]:x0 - P["c0"] + w * down].astype(np.float32)
+        return _prepare(v.reshape(v.shape[0], h, down, w, down).mean(axis=(2, 4)), px * down, py * down)
+
+    pairs, geo = [], {}
+    for a, b in itertools.combinations(paths, 2):
+        A, B = place[a], place[b]
+        x0, x1, y0, y1, za0, za1 = overlap(A, B)
+        if (x1 - x0) * px < min_overlap_um or (y1 - y0) * py < min_overlap_um or za1 - za0 < 4:
+            continue
+        h, w = (y1 - y0) // down, (x1 - x0) // down
+        VA, VB = strip(A, a, x0, y0, h, w, za0, za1), strip(B, b, x0, y0, h, w, za0, za1)
         lim = (min(ms[0], VA.shape[0] // 2), min(ms[1], h // 2), min(ms[2], w // 2))
-        d, r = _match(VA, VB, lim)
+        d, r, r2 = _match(VA, VB, lim)
+        geo[(a, b)] = (x0, y0, h, w, za0, za1, lim)
+        # a peak on the edge of the search is no peak: the true shift is further out, and the best
+        # the window could offer is whatever chance put there
+        edge = any(m > 0 and abs(round(v)) >= m for v, m in zip(d, lim))
         # B's content at p is A's at p + d: B sits d further on than its layout says (µm, slices)
-        pairs.append({"a": a, "b": b, "score": r,
+        pairs.append({"a": a, "b": b, "score": r, "second": r2, "edge": edge,
                       "shift": [d[2] * px * down, d[1] * py * down, d[0]]})
-    good = [p for p in pairs if p["score"] >= min_score]
-    idx = {p: i for i, p in enumerate(paths)}
-    rows, rhs, w = [], [], []
-    for p in good:
-        row = np.zeros(len(paths)); row[idx[p["b"]]] = 1; row[idx[p["a"]]] = -1
-        rows.append(row); rhs.append(p["shift"]); w.append(p["score"])
-    row = np.zeros(len(paths)); row[idx[fixed]] = 1
-    rows.append(row); rhs.append([0.0, 0.0, 0.0]); w.append(10.0)
-    Aw, bw = np.array(rows) * np.array(w)[:, None], np.array(rhs) * np.array(w)[:, None]
-    sol, *_ = np.linalg.lstsq(Aw, bw, rcond=None)
-    # a tile no matched pair reaches is left where it was (the solve would put it at 0 anyway)
-    linked = {fixed} | {p["a"] for p in good} | {p["b"] for p in good}
+
+    # the bar: the same strips of A matched against tiles that share nothing with A — any
+    # correlation found there is chance (the strip is cut from the other tile at the place B's
+    # was, relative to its corner, with the depth clipped to that tile)
+    null = []
+    overl = {(p["a"], p["b"]) for p in pairs} | {(p["b"], p["a"]) for p in pairs}
+    for p in pairs:
+        if len(null) >= null_samples:
+            break
+        a, b = p["a"], p["b"]
+        x0, y0, h, w, za0, za1, lim = geo[(a, b)]
+        B = place[b]
+        for c in paths:
+            if c in (a, b) or (a, c) in overl or len(null) >= null_samples:
+                continue
+            C = place[c]
+            ox, oy = x0 - B["c0"] + C["c0"], y0 - B["r0"] + C["r0"]   # the same place in C
+            z0c, z1c = max(za0, C["z0"]), min(za1, C["z0"] + C["tile"].depth)
+            if z1c - z0c < 4 or C["tile"].width < (x0 - B["c0"]) + w * down or C["tile"].height < (y0 - B["r0"]) + h * down:
+                continue
+            VA = strip(place[a], a, x0, y0, h, w, z0c, z1c)
+            VC = strip(C, c, ox, oy, h, w, z0c, z1c)
+            null.append(_match(VA, VC, (min(lim[0], VA.shape[0] // 2), lim[1], lim[2]))[1])
+            break                                    # one stranger per pair: spread over pairs
+    bar = max(min_score, max(null)) if len(null) >= 3 else min_score
+
+    links = [{"a": p["a"], "b": p["b"], "shift": p["shift"], "weight": max(p["score"], 1e-3)}
+             for p in pairs if p["score"] >= bar and not p["edge"]]
+    sol, dropped, doubt = _solve(paths, links, fixed, dz_um=dzu)
+    out_keys = {(ln["a"], ln["b"]) for ln in dropped}
+    doubt_keys = {(ln["a"], ln["b"]) for ln in doubt}
+    used = [ln for ln in links if (ln["a"], ln["b"]) not in out_keys]
+    groups = _components(paths, used)
+    joined = next(gr for gr in groups if fixed in gr)
+
     new = {"tiles": {k: dict(v) for k, v in ((layout or {}).get("tiles") or {}).items()},
            "order": list((layout or {}).get("order") or paths), "seams": g["seams"]}
     for path in paths:
         e = _entry(layout, path)
-        if path in linked:
-            e["dx"] = round(e["dx"] + float(sol[idx[path]][0]), 3)
-            e["dy"] = round(e["dy"] + float(sol[idx[path]][1]), 3)
-            e["dz"] = int(e["dz"] + _round(float(sol[idx[path]][2])))
+        e["dx"] = round(e["dx"] + float(sol[path][0]), 3)
+        e["dy"] = round(e["dy"] + float(sol[path][1]), 3)
+        e["dz"] = int(e["dz"] + _round(float(sol[path][2])))
         new["tiles"][path] = {**new["tiles"].get(path, {}), **e}
     for p in pairs:
-        fit = sol[idx[p["b"]]] - sol[idx[p["a"]]]
+        key = (p["a"], p["b"])
+        fit = sol[p["b"]] - sol[p["a"]]
         p["residual"] = [round(float(m - f), 3) for m, f in zip(p["shift"], fit)]
-        p["used"] = p["score"] >= min_score
+        p["status"] = ("edge" if p["edge"] else "weak" if p["score"] < bar else "outlier" if key in out_keys
+                       else "doubt" if key in doubt_keys else "used")
+        p["used"] = p["status"] in ("used", "doubt")
+        others = [ln for ln in used if (ln["a"], ln["b"]) != key]
+        p["loop"] = any(p["a"] in gr and p["b"] in gr for gr in _components(paths, others))
         p["shift"] = [round(float(v), 3) for v in p["shift"]]
-        p["score"] = round(p["score"], 3)
-    return {"layout": new, "pairs": pairs, "fixed": fixed,
-            "unmatched": [p for p in paths if p not in linked]}
+        p["score"], p["second"] = round(p["score"], 3), round(p["second"], 3)
+    return {"layout": new, "pairs": pairs, "fixed": fixed, "threshold": round(bar, 3),
+            "null": [round(v, 3) for v in sorted(null)],
+            "unmatched": [p for p in paths if p not in joined]}
+
+
+def tiff_bytes(ts: List[Tile], layout, channels=1, planes=None, crop=None) -> int:
+    """What a TIFF of this cut would weigh, float32, before writing it."""
+    g = geometry(ts, layout)
+    z0, z1 = g["planes"]
+    n = (int(planes[1]) - int(planes[0]) + 1) if planes else z1 - z0
+    x0, y0, x1, y1 = crop if crop is not None else (0, 0, g["width"], g["height"])
+    w, h = min(g["width"], int(x1)) - max(0, int(x0)), min(g["height"], int(y1)) - max(0, int(y0))
+    return max(0, n) * max(1, int(channels)) * max(0, w) * max(0, h) * 4
 
 
 def to_tiff(mesc, ts: List[Tile], layout, out_path, channels=None, planes=None, crop=None) -> Path:
     """A cut of the mosaic as a Fiji hyperstack (ZCYX, or ZYX for one channel), float32 reader
-    units, 0 where no tile reaches; the slice spacing and pixel sizes set, and the layout (each
-    tile's correction) written into the Info. Needs tifffile."""
+    units, NaN where no tile reaches (0 is a value a recording can hold; NaN is not); the slice
+    spacing and pixel sizes set, and the layout (each tile's correction) written into the Info.
+    Written a plane at a time, so a whole field of twenty tiles never sits in memory — only one
+    plane of it does. ``planes`` is a list of mosaic planes (default all). Needs tifffile."""
     try:
         import tifffile
     except ImportError as exc:  # noqa: BLE001
@@ -303,28 +461,40 @@ def to_tiff(mesc, ts: List[Tile], layout, out_path, channels=None, planes=None, 
     g = geometry(ts, layout)
     first = mesc.unit(g["order"][0])
     chans = list(range(len(first.channels))) if channels is None else [int(c) for c in channels]
-    vols = [np.nan_to_num(compose(mesc, ts, layout, c, planes, crop)) for c in chans]
-    data = np.stack(vols, axis=1) if len(chans) > 1 else vols[0]
-    z0, _ = g["planes"]
+    z0, z1 = g["planes"]
+    planes = list(range(z0, z1)) if planes is None else [int(p) for p in planes]
     info = [f"source_file = {mesc.path.name}", "mosaic of z-stack tiles, hard seams ("
-            + g["seams"] + ")", f"first plane = {planes[0] if planes else z0}",
+            + g["seams"] + "), NaN where no tile reaches", f"first plane = {planes[0]}",
             f"crop (mosaic px) = {list(crop) if crop is not None else 'none'}"]
     for path in g["order"]:
         e = _entry(layout, path)
         info.append(f"{path}: dx = {e['dx']} um, dy = {e['dy']} um, dz = {e['dz']} slices")
-    meta = {"axes": "ZCYX" if len(chans) > 1 else "ZYX", "spacing": g["dz"], "unit": "um",
+    meta = {"axes": "ZCYX" if len(chans) > 1 else "ZYX", "spacing": abs(g["dz"]), "unit": "um",
             "Info": "\n".join(info)}
+    probe = compose(mesc, ts, layout, chans[0], planes[:1], crop)[0]
+    h, w = probe.shape
     if len(chans) > 1:
+        # each channel its own display range, from a few planes spread through the cut
         meta["mode"] = "composite"
         ranges = []
-        for v in vols:
-            lo, hi = np.percentile(v[v > 0], [1, 99.8]) if (v > 0).any() else (0.0, 1.0)
+        some = planes[:: max(1, len(planes) // 8)][:8]
+        for c in chans:
+            v = compose(mesc, ts, layout, c, some, crop)
+            v = v[np.isfinite(v)]
+            lo, hi = np.percentile(v, [1, 99.8]) if v.size else (0.0, 1.0)
             ranges += [float(lo), float(hi if hi > lo else lo + 1)]
         meta["Ranges"] = tuple(ranges)
         meta["LUTs"] = [_lut((first.channels[c].colour if first.channels[c].colour and first.channels[c].colour.lower() != "#000000"
                               else _DEFAULT_COLOURS[k % len(_DEFAULT_COLOURS)])) for k, c in enumerate(chans)]
+
+    def pages():
+        for q in planes:
+            for c in chans:
+                yield compose(mesc, ts, layout, c, [q], crop)[0]
+
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    tifffile.imwrite(str(out_path), data.astype(np.float32), imagej=True, metadata=meta,
+    shape = (len(planes), len(chans), h, w) if len(chans) > 1 else (len(planes), h, w)
+    tifffile.imwrite(str(out_path), pages(), shape=shape, dtype=np.float32, imagej=True, metadata=meta,
                      resolution=(1.0 / g["px"], 1.0 / g["py"]))
     return out_path

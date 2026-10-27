@@ -165,3 +165,173 @@ def test_the_viewer_stitches_and_exports(mos, tmp_path):
         assert Path(e["path"]).parent == tmp_path and e["bytes"] > 64 * 32 * 3 * 4
     finally:
         srv.shutdown()
+
+
+# -- the harder cases: a wrong match, a tile with nothing in it, a group joined to nothing ----------
+
+def grid_links(errs, cols=3, skip=(), diagonals=False):
+    """Exact links between grid neighbours (right and down; with ``diagonals`` the two diagonals
+    too, as overlapping corners give) for tiles off by ``errs``."""
+    out = []
+    for t in range(len(errs)):
+        c = t % cols
+        nb = [t + 1 if c + 1 < cols else None, t + cols if t + cols < len(errs) else None]
+        if diagonals:
+            nb += [t + cols + 1 if c + 1 < cols and t + cols + 1 < len(errs) else None,
+                   t + cols - 1 if c > 0 and t + cols - 1 < len(errs) else None]
+        for u in nb:
+            if u is None or (t, u) in skip:
+                continue
+            out.append({"a": str(t), "b": str(u), "weight": 0.5,
+                        "shift": [errs[u][k] - errs[t][k] for k in range(3)]})
+    return out
+
+
+def test_one_wrong_match_is_dropped_not_spread_over_every_tile():
+    errs = [np.array(e, float) * [0.5, 0.5, 1] for e in MOSAIC_ERRORS]
+    links = grid_links(errs)
+    bad = next(ln for ln in links if (ln["a"], ln["b"]) == ("1", "4"))
+    bad["shift"] = [bad["shift"][0] + 8.0, bad["shift"][1] - 6.0, bad["shift"][2] + 3]   # a confident wrong peak
+    bad["weight"] = 0.9
+    sol, dropped, doubt = M._solve([str(i) for i in range(6)], links, "0")
+    assert [(d["a"], d["b"]) for d in dropped] == [("1", "4")] and doubt == []
+    for i in range(6):
+        assert np.allclose(sol[str(i)], errs[i] - errs[0], atol=1e-6), i
+    # the same wrong link with plain least squares (no second round) bends the tiles it reaches
+    sol1, _, _ = M._solve([str(i) for i in range(6)], links, "0", tol_um=1e9)
+    assert np.abs(sol1["4"] - (errs[4] - errs[0])).max() > 1.0
+
+
+def test_a_group_joined_to_nothing_stays_where_it_was():
+    errs = [np.array(e, float) * [0.5, 0.5, 1] for e in MOSAIC_ERRORS]
+    # only 2–5 join tiles 2 and 5, and nothing joins them to the rest
+    links = [ln for ln in grid_links(errs) if {ln["a"], ln["b"]} <= {"0", "1", "3", "4"} or (ln["a"], ln["b"]) == ("2", "5")]
+    sol, dropped, doubt = M._solve([str(i) for i in range(6)], links, "0")
+    assert not dropped and not doubt
+    assert np.allclose(sol["2"] + sol["5"], 0, atol=1e-9)                    # held: mean correction 0
+    assert np.allclose(sol["5"] - sol["2"], errs[5] - errs[2], atol=1e-9)   # but true to each other
+    assert np.allclose(sol["4"], errs[4] - errs[0], atol=1e-9)
+
+
+@pytest.fixture(scope="module")
+def mos_blank(mos, tmp_path_factory):
+    """The synthetic mosaic with tile 6 (MUnit_5) replaced by noise: nothing in it to match."""
+    import shutil
+    import h5py
+    out = tmp_path_factory.mktemp("blank") / "blank.mesc"
+    shutil.copy(mos, out)
+    rng = np.random.default_rng(3)
+    with h5py.File(out, "r+") as f:
+        for k in (0, 1):
+            ds = f["MSession_0/MUnit_5"][f"Channel_{k}"]
+            ds[...] = rng.normal(ds[...].mean(), 25, ds.shape).clip(0, 65535).astype(ds.dtype)
+    return out
+
+
+def test_a_tile_with_nothing_in_it_is_not_moved_by_chance(mos_blank):
+    with MescFile(mos_blank) as f:
+        ts = M.tiles(f)
+        start = {"tiles": {ts[5].path: {"dx": 0.7, "dy": -0.4, "dz": 1}}}
+        r = M.register(f, ts, start)
+    p5 = [p for p in r["pairs"] if ts[5].path in (p["a"], p["b"])]
+    assert p5 and all(p["status"] in ("weak", "edge") for p in p5), p5
+    assert r["unmatched"] == [ts[5].path]
+    e = r["layout"]["tiles"][ts[5].path]
+    assert (e["dx"], e["dy"], e["dz"]) == (0.7, -0.4, 1)                     # where it started
+    for t, (ex, ey, ez) in list(zip(ts, MOSAIC_ERRORS))[:5]:                 # the rest as before
+        e = r["layout"]["tiles"][t.path]
+        assert e["dz"] == ez and abs(e["dx"] - ex * MOSAIC_PX) < 0.5 and abs(e["dy"] - ey * MOSAIC_PX) < 0.5
+
+
+def test_the_bar_comes_from_tiles_that_do_not_overlap(mos):
+    with MescFile(mos) as f:
+        r = M.register(f, M.tiles(f))
+    assert len(r["null"]) >= 3 and r["threshold"] == max(0.15, max(r["null"]))
+    used = [p for p in r["pairs"] if p["status"] == "used"]
+    assert min(p["score"] for p in used) > r["threshold"] and all(p["loop"] for p in used)
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_matching_noise_singles_nothing_out(seed):
+    # every link off by up to ±0.6 µm (the synthetic's own residuals are 0.1–0.6): nothing dropped
+    rng = np.random.default_rng(seed)
+    errs = [np.array(e, float) * [0.5, 0.5, 1] for e in MOSAIC_ERRORS]
+    links = grid_links(errs)
+    for ln in links:
+        ln["shift"] = [ln["shift"][0] + rng.uniform(-.6, .6), ln["shift"][1] + rng.uniform(-.6, .6), ln["shift"][2]]
+    _, dropped, doubt = M._solve([str(i) for i in range(6)], links, "0")
+    assert dropped == [] and doubt == []
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_one_wrong_match_is_found_under_matching_noise(seed):
+    rng = np.random.default_rng(100 + seed)
+    errs = [np.array(e, float) * [0.5, 0.5, 1] for e in MOSAIC_ERRORS]
+    links = grid_links(errs, diagonals=True)                  # as the overlapping corners give
+    for ln in links:
+        ln["shift"] = [ln["shift"][0] + rng.uniform(-.6, .6), ln["shift"][1] + rng.uniform(-.6, .6), ln["shift"][2]]
+    k = int(rng.integers(len(links)))
+    links[k]["shift"] = [links[k]["shift"][0] + rng.choice([-1, 1]) * rng.uniform(5, 10), links[k]["shift"][1], links[k]["shift"][2]]
+    sol, dropped, doubt = M._solve([str(i) for i in range(6)], links, "0")
+    assert [(d["a"], d["b"]) for d in dropped] == [(links[k]["a"], links[k]["b"])] and doubt == []
+    for i in range(6):
+        assert np.abs(sol[str(i)] - (errs[i] - errs[0]))[:2].max() < 1.0
+
+
+def test_a_wrong_link_the_loops_cannot_name_is_left_in_doubt_not_guessed():
+    # edge neighbours only: link 0–1 is in one four-tile loop with 0–3, 3–4 and 1–4… and 1–4 is in
+    # two; a wrong 0–3 cannot be told from a wrong 0–1 or 3–4
+    errs = [np.array(e, float) * [0.5, 0.5, 1] for e in MOSAIC_ERRORS]
+    links = grid_links(errs)
+    bad = next(ln for ln in links if (ln["a"], ln["b"]) == ("0", "3"))
+    bad["shift"] = [bad["shift"][0] + 7.0, bad["shift"][1], bad["shift"][2]]
+    _, dropped, doubt = M._solve([str(i) for i in range(6)], links, "0")
+    assert dropped == [] and {(d["a"], d["b"]) for d in doubt} >= {("0", "3"), ("0", "1"), ("3", "4")}
+
+
+def test_a_tile_further_off_than_the_overlap_allows_does_not_drag_the_others(tmp_path):
+    # tile 5 (MUnit_4) 6 µm off each way: past the small diagonal overlaps' search, which then
+    # offer chance peaks on their edges (the case that bent four tiles' depth before)
+    import make_synthetic as S
+    keep = list(S.MOSAIC_ERRORS)
+    try:
+        S.MOSAIC_ERRORS[4] = (-12, -12, 1)
+        out = tmp_path / "far.mesc"
+        S.mosaic(out)
+        errs = list(S.MOSAIC_ERRORS)
+    finally:
+        S.MOSAIC_ERRORS[:] = keep
+    with MescFile(out) as f:
+        ts = M.tiles(f)
+        r = M.register(f, ts)
+    for t, (ex, ey, ez) in zip(ts, errs):
+        e = r["layout"]["tiles"][t.path]
+        assert e["dz"] == ez and abs(e["dx"] - ex * MOSAIC_PX) < 0.5 and abs(e["dy"] - ey * MOSAIC_PX) < 0.5, (t.name, e)
+    assert all(p["status"] in ("weak", "edge") for p in r["pairs"] if p["residual"][2] != 0 or abs(p["residual"][0]) > 1)
+
+
+def test_refining_moves_a_tile_back_from_where_it_was_left(mos):
+    # a no-op register would pass the other refine test; this one starts a tile 2 px off
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+        start = truth(ts)
+        start["tiles"][ts[4].path]["dx"] += 1.0
+        r = M.register(f, ts, start)
+    assert abs(r["layout"]["tiles"][ts[4].path]["dx"] - MOSAIC_ERRORS[4][0] * MOSAIC_PX) < 0.4
+
+
+def test_the_tiff_is_written_a_plane_at_a_time_not_held_whole(mos, tmp_path):
+    pytest.importorskip("tifffile")
+    import tracemalloc
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+        lay = truth(ts)
+        whole = M.tiff_bytes(ts, lay, 2)
+        tracemalloc.start()
+        M.to_tiff(f, ts, lay, tmp_path / "w.tif")
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+    assert whole > 10e6 and peak < 0.4 * whole, (peak, whole)
+    import tifffile
+    a = tifffile.imread(tmp_path / "w.tif")
+    assert np.isnan(a).any() and np.isfinite(a).mean() > 0.8      # NaN where no tile, not 0

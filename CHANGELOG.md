@@ -22,6 +22,23 @@
   for a PNG. The layout is kept with the view. Python: `mesc_io.mosaic` (`tiles`, `geometry`,
   `register`, `compose`, `to_tiff`); the page places tiles by the same rule, checked pixel for pixel.
   `tools/make_synthetic.py --mosaic` writes six tiles off by known amounts, to test against.
+- **Stitching that does not believe a chance match.** Which pairs to trust is set by the data
+  (as ASHLAR does): the same strips are matched against tiles that do not overlap, and the best of
+  those chance correlations is the bar. A match whose peak sits on the edge of the search is no
+  match (the tile is further off than searched). A wrong match is found by checking each link
+  against what the other links say about its two tiles; it is dropped only when the loops can name
+  it — when several links could equally be the wrong one, none is dropped and they are all shown in
+  red as doubtful (a grid of edge neighbours alone often cannot tell; diagonal overlaps can). Groups
+  of tiles joined to nothing are left where they were instead of thrown to a minimum-norm answer.
+  Each seam is coloured by what became of it. Least-squares weights were applied squared; fixed.
+- The mosaic on screen is now composed pixel by pixel with the rule the export uses (the nearest
+  centre among the tiles that cover the pixel): cutting tiles by bisectors left black slivers on
+  screen where the TIFF had data. The check now compares every pixel, seams included, on an uneven
+  layout, and fails on the old rule.
+- The mosaic TIFF is written a plane at a time (peak memory a plane, not ~3× the file), with NaN
+  where no tile reaches (0 is a value a recording can hold), and refused if the disk cannot take it.
+- The crop is kept in stage µm, so it stays on the tissue when tiles move or one is hidden.
+- All tiles take their position from the same frame: the rig's zero only when every tile has it.
 - The viewer's server takes 128 waiting connections instead of 5: a page asking for many pictures at
   once (a mosaic, the unit list) had some connections reset and their pictures never arrived.
 - The exploratory clicker fails its run when it finds an issue (it printed them and exited 0), and

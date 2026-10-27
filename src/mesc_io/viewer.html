@@ -3146,7 +3146,7 @@ $("oCross").onclick = () => { V.vol.oCross = !V.vol.oCross; volShow(); saveView(
    ------------------------------------------------------------------------------------------ */
 function mosState(m) {
   const d = { on: false, layout: { tiles: {}, order: [], seams: "nearest" }, plane: 0, view: null, sel: "", edit: false,
-              crop: null, zr: null, chan: "ov", pairs: null, list: true, marks: true };
+              cropUm: null, zr: null, chan: "ov", pairs: null, list: true, marks: true };   // the crop in stage µm: it stays on the tissue when tiles move
   if (!m || typeof m !== "object") return d;
   const o = { ...d, ...m }, L = o.layout && typeof o.layout === "object" ? o.layout : {};
   const num = (x, def) => (Number.isFinite(+x) ? +x : def);
@@ -3155,14 +3155,20 @@ function mosState(m) {
     if (e && typeof e === "object") o.layout.tiles[p] = { dx: num(e.dx, 0), dy: num(e.dy, 0), dz: Math.round(num(e.dz, 0)), hidden: !!e.hidden };
   o.on = !!o.on; o.edit = !!o.edit; o.list = o.list !== false; o.marks = o.marks !== false; o.plane = Math.round(num(o.plane, 0)); o.sel = typeof o.sel === "string" ? o.sel : "";
   o.view = o.view && [o.view.x, o.view.y, o.view.k].every(Number.isFinite) && o.view.k > 0 ? o.view : null;
-  o.crop = Array.isArray(o.crop) && o.crop.length === 4 && o.crop.every(Number.isFinite) ? o.crop.map(Math.round) : null;
+  o.cropUm = Array.isArray(o.cropUm) && o.cropUm.length === 4 && o.cropUm.every(Number.isFinite) ? o.cropUm : null;
+  delete o.crop;                                  // a crop saved in mosaic pixels (before 0.5) moved with the layout
+  const fin = (a, n) => Array.isArray(a) && a.length === n && a.every(Number.isFinite);
+  o.pairs = Array.isArray(o.pairs) ? o.pairs.filter(q => q && typeof q.a === "string" && typeof q.b === "string"
+    && Number.isFinite(q.score) && fin(q.residual, 3)) : null;
   o.zr = Array.isArray(o.zr) && o.zr.length === 2 && o.zr.every(Number.isFinite) ? o.zr.map(Math.round) : null;
   o.chan = o.chan === 0 || o.chan === 1 ? o.chan : "ov";
-  o.pairs = Array.isArray(o.pairs) ? o.pairs : null;
   return o;
 }
 V.mos = mosState(V.mos);
-const mosPos = u => u.stage_rel_um || u.stage_um;
+// one frame of reference for every tile, as mesc_io.mosaic.tiles: from the rig's zero only when every tile has it
+const mosRel = () => FILE.units.filter(u => u.z_step_um && u.frames > 1 && u.pixel_size_um && (u.stage_rel_um || u.stage_um))
+  .every(u => u.stage_rel_um && Number.isFinite(u.stage_rel_um.x) && Number.isFinite(u.stage_rel_um.y));
+const mosPos = u => (mosRel() ? u.stage_rel_um : u.stage_um) || {};
 function mosTiles() {
   return FILE ? FILE.units.filter(u => u.z_step_um && u.frames > 1 && u.pixel_size_um && mosPos(u)
     && Number.isFinite(mosPos(u).x) && Number.isFinite(mosPos(u).y)) : [];
@@ -3231,20 +3237,48 @@ function mosPic(G, u, s) {
   if (mosPics.size > 300) mosPics.delete(mosPics.keys().next().value);
   return pic;
 }
-// the cell of a tile under nearest-centre seams: its rectangle, cut by the bisector with every
-// other tile that has this plane (Sutherland–Hodgman, one half-plane at a time)
-function mosCell(G, p, live) {
-  let poly = [[p.c0, p.r0], [p.c0 + p.u.width, p.r0], [p.c0 + p.u.width, p.r0 + p.u.height], [p.c0, p.r0 + p.u.height]];
-  for (const q of live) {
-    if (q === p || q.c0 >= p.c0 + p.u.width || p.c0 >= q.c0 + q.u.width || q.r0 >= p.r0 + p.u.height || p.r0 >= q.r0 + q.u.height) continue;
-    const nx = q.cx - p.cx, ny = q.cy - p.cy, mx = (p.cx + q.cx) / 2, my = (p.cy + q.cy) / 2;
-    const f = ([x, y]) => (x - mx) * nx + (y - my) * ny, out = [];      // keep f ≤ 0: nearer p
-    poly.forEach((a, i) => { const b = poly[(i + 1) % poly.length], fa = f(a), fb = f(b);
-      if (fa <= 0) out.push(a);
-      if ((fa < 0 && fb > 0) || (fa > 0 && fb < 0)) { const t = fa / (fa - fb); out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]); } });
-    poly = out; if (poly.length < 3) return null;
+// Which tile each mosaic pixel shows on this plane: the same rule as mesc_io.mosaic.compose,
+// pixel for pixel — the nearest centre among the tiles that COVER the pixel (or the last of them
+// in the order), ties to the earlier. Cutting each tile by its bisectors instead ran the bisector
+// with a neighbour through places that neighbour does not reach and left black slivers there.
+let mosOwn = { key: "", own: null };
+function mosOwners(G, live) {
+  const key = JSON.stringify([V.mos.plane, V.mos.layout, G.W, G.H]);
+  if (mosOwn.key === key) return mosOwn.own;
+  const W = G.W, H = G.H, own = new Int16Array(W * H).fill(-1), best = new Float32Array(W * H).fill(Infinity);
+  const order = V.mos.layout.seams === "order";
+  live.forEach(p => {
+    const rank = G.order.indexOf(p.u.path), k = live.indexOf(p);
+    for (let y = p.r0; y < p.r0 + p.u.height; y++) for (let x = p.c0; x < p.c0 + p.u.width; x++) {
+      const sc = order ? -rank : Math.fround((x + .5 - p.cx) ** 2 + (y + .5 - p.cy) ** 2), i = y * W + x;
+      if (sc < best[i]) { best[i] = sc; own[i] = k; } }
+  });
+  mosOwn = { key, own };
+  return own;
+}
+// the plane as one picture at mosaic resolution: each pixel from its owner's frame
+const mosPx = new Map();                     // a tile picture's pixels, as packed RGBA words
+function mosPixels(pic, w, h) {
+  let d = mosPx.get(pic); if (d) return d;
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(pic, 0, 0, w, h);
+  d = new Uint32Array(g.getImageData(0, 0, w, h).data.buffer);
+  mosPx.set(pic, d); if (mosPx.size > 120) mosPx.delete(mosPx.keys().next().value);
+  return d;
+}
+let mosPlaneCv = null;
+function mosPlanePic(G, live, pics) {
+  const W = G.W, H = G.H, own = mosOwners(G, live);
+  if (!mosPlaneCv) mosPlaneCv = document.createElement("canvas");
+  const c = mosPlaneCv; if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  const g = c.getContext("2d"), im = g.createImageData(W, H), o32 = new Uint32Array(im.data.buffer);
+  const src = live.map((p, k) => (pics[k] ? mosPixels(pics[k], p.u.width, p.u.height) : null));
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, k = own[i]; if (k < 0 || !src[k]) continue;   // no tile here, or its picture still on its way
+    const p = live[k]; o32[i] = src[k][(y - p.r0) * p.u.width + (x - p.c0)];
   }
-  return poly;
+  g.putImageData(im, 0, 0);
+  return c;
 }
 // screen <-> mosaic pixels; with flipY the mosaic is drawn upside down, as MESc draws an image
 function mosFit(G) {
@@ -3282,23 +3316,14 @@ function mosDraw() {
   g.setTransform(dpr * v.k, 0, 0, dpr * v.k * fy, -v.x * v.k * dpr, (V.flipY ? (G.H - v.y) : -v.y) * v.k * dpr);
   g.imageSmoothingEnabled = v.k < 1;
   const live = G.order.map(p => G.place[p]).filter(p => V.mos.plane - p.z0 >= 0 && V.mos.plane - p.z0 < p.u.frames);
-  let waiting = 0;
-  for (const p of live) {
-    const pic = mosPic(G, p.u, V.mos.plane - p.z0);
-    if (!pic) { waiting++; continue; }
-    g.save();
-    if (V.mos.layout.seams !== "order") {
-      const cell = mosCell(G, p, live); if (!cell) { g.restore(); continue; }
-      g.beginPath(); cell.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.clip();
-    }
-    g.drawImage(pic, p.c0, p.r0, p.u.width, p.u.height);
-    g.restore();
-  }
+  const pics = live.map(p => mosPic(G, p.u, V.mos.plane - p.z0)), waiting = pics.filter(x => !x).length;
+  if (live.length) g.drawImage(mosPlanePic(G, live, pics), 0, 0);
   // outlines, names, the seams' report, the crop: in screen pixels (labels off: the picture alone, for a figure)
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   if (V.mos.marks) mosMarks(g, G, v);
-  if (V.mos.crop || mosCropDrag) {
-    const k = mosCropDrag ? mosCropNow() : V.mos.crop, a = mosToScreen(G, k[0], k[1]), b = mosToScreen(G, k[2], k[3]);
+  const ck = mosCropDrag ? mosCropNow() : mosCropPx(G);
+  if (ck) {
+    const k = ck, a = mosToScreen(G, k[0], k[1]), b = mosToScreen(G, k[2], k[3]);
     g.strokeStyle = "#ffd400"; g.lineWidth = 1.5; g.setLineDash([6, 4]);
     g.strokeRect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])); g.setLineDash([]);
   }
@@ -3333,10 +3358,16 @@ function mosMarks(g, G, v) {
   if (V.mos.pairs) for (const q of V.mos.pairs) {    // each matched pair: its correlation and what the solve left of it
     const a = G.place[q.a], b = G.place[q.b]; if (!a || !b) continue;
     const [x, y] = mosToScreen(G, (a.cx + b.cx) / 2, (a.cy + b.cy) / 2);
-    const res = Math.hypot(q.residual[0], q.residual[1]), bad = !q.used || res > 2 * G.px || q.residual[2] !== 0;
-    const t = q.used ? `r ${q.score.toFixed(2)} · ${res.toFixed(1)} µm${q.residual[2] ? ` · ${q.residual[2] > 0 ? "+" : ""}${q.residual[2]} sl` : ""}` : `r ${q.score.toFixed(2)} · not used`;
+    // green: used and checked by a loop; amber: used, but nothing else joins these two tiles;
+    // grey: not believed (below chance, or its best match on the edge of the search); red: dropped
+    // as the one link that disagreed, or one of several a loop says cannot all be right
+    const st = q.status || (q.used ? "used" : "weak"), res = Math.hypot(q.residual[0], q.residual[1]);
+    const what = { used: q.loop === false ? "unchecked" : "", weak: "below chance", edge: "too far to find", outlier: "outlier, dropped", doubt: "doubt: look" }[st] || "";
+    const t = `r ${q.score.toFixed(2)}` + (st === "used" || st === "doubt" ? ` · ${res.toFixed(1)} µm${Math.round(q.residual[2]) ? ` · ${q.residual[2] > 0 ? "+" : ""}${q.residual[2].toFixed(1)} sl` : ""}` : "") + (what ? " · " + what : "");
     const tw = g.measureText(t).width + 8;
-    g.fillStyle = bad ? "rgba(140,30,30,.85)" : "rgba(18,60,30,.8)"; g.fillRect(x - tw / 2, y - 8, tw, 16);
+    g.fillStyle = st === "outlier" || st === "doubt" ? "rgba(150,30,30,.88)" : st === "weak" || st === "edge" ? "rgba(60,64,70,.85)"
+      : q.loop === false ? "rgba(130,95,10,.88)" : "rgba(18,60,30,.82)";
+    g.fillRect(x - tw / 2, y - 8, tw, 16);
     g.fillStyle = "#fff"; g.textBaseline = "middle"; g.fillText(t, x - tw / 2 + 4, y); g.textBaseline = "top";
   }
 }
@@ -3393,6 +3424,13 @@ function mosHover(G, m) {
   mosInfo(t);
 }
 let mosDragS = null, mosCropTool = false, mosCropDrag = null;
+// the crop in this layout's mosaic pixels (whole, clipped to the field), from where it is on the stage
+function mosCropPx(G) {
+  const c = V.mos.cropUm; if (!c || !G) return null;
+  const k = [Math.round((c[0] - G.ox) / G.px), Math.round((c[1] - G.oy) / G.py), Math.round((c[2] - G.ox) / G.px), Math.round((c[3] - G.oy) / G.py)];
+  const x0 = Math.max(0, k[0]), y0 = Math.max(0, k[1]), x1 = Math.min(G.W, k[2]), y1 = Math.min(G.H, k[3]);
+  return x1 - x0 >= 1 && y1 - y0 >= 1 ? [x0, y0, x1, y1] : null;
+}
 function mosCropNow() { const [a, b] = mosCropDrag; return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])].map(Math.round); }
 $("mosCv").addEventListener("pointerdown", e => {
   e.stopPropagation(); e.preventDefault();
@@ -3417,7 +3455,7 @@ $("mosCv").addEventListener("pointermove", e => {
   if (!mosDragS.moved) return;
   if (mosDragS.tile) {                     // whole pixels, so the screen and an export agree
     const t = mosDragS.tile, dc = Math.round(m[0] - mosDragS.m[0]), dr = Math.round(m[1] - mosDragS.m[1]);
-    mosSet(t.path, { dx: +(t.e.dx + dc * G.px).toFixed(3), dy: +(t.e.dy + dr * G.py).toFixed(3) });
+    mosSet(t.path, { dx: +(t.e.dx + dc * G.px).toFixed(6), dy: +(t.e.dy + dr * G.py).toFixed(6) });
     mosInfo(`${t.path.split("/").pop()} · ${mosEntry(t.path).dx.toFixed(2)}, ${mosEntry(t.path).dy.toFixed(2)} µm`);
   } else {
     const v = V.mos.view; v.x = mosDragS.vx - (e.clientX - mosDragS.sx) / v.k; v.y = mosDragS.vy - (e.clientY - mosDragS.sy) / v.k;
@@ -3426,7 +3464,9 @@ $("mosCv").addEventListener("pointermove", e => {
 });
 const mosUp = e => {
   if (mosCropDrag) { const k = mosCropNow(); mosCropDrag = null;
-    V.mos.crop = k[2] - k[0] >= 4 && k[3] - k[1] >= 4 ? k : null; mosCropTool = false; mosDraw(); saveView(); return; }
+    const G = mosGeom();
+    V.mos.cropUm = G && k[2] - k[0] >= 4 && k[3] - k[1] >= 4 ? [G.ox + k[0] * G.px, G.oy + k[1] * G.py, G.ox + k[2] * G.px, G.oy + k[3] * G.py] : null;
+    mosCropTool = false; mosDraw(); saveView(); return; }
   if (!mosDragS) return;
   const d = mosDragS; mosDragS = null;
   try { $("mosCv").releasePointerCapture(e.pointerId); } catch (_) {}
@@ -3462,12 +3502,12 @@ function mosKey(e) {
   const G = mosGeom(), sel = V.mos.sel, ed = V.mos.edit && sel && mosTiles().some(u => u.path === sel);
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") { mosUndo(); return true; }
   if (e.metaKey || e.ctrlKey || e.altKey) return false;
-  if (e.key === "Escape") { if (mosCropTool) mosCropTool = false; else if (V.mos.crop) V.mos.crop = null; else V.mos.sel = ""; mosDraw(); saveView(); return true; }
+  if (e.key === "Escape") { if (mosCropTool) mosCropTool = false; else if (V.mos.cropUm) V.mos.cropUm = null; else V.mos.sel = ""; mosDraw(); saveView(); return true; }
   if (e.key === "e") { V.mos.edit = !V.mos.edit; mosDraw(); saveView(); return true; }
   const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   if (ed && G && arrows[e.key]) {
     const [a, b] = arrows[e.key], n = e.shiftKey ? 10 : 1, en = mosEntry(sel), f = V.flipY ? -1 : 1;
-    mosPush(); mosSet(sel, { dx: +(en.dx + a * n * G.px).toFixed(3), dy: +(en.dy + f * b * n * G.py).toFixed(3) });
+    mosPush(); mosSet(sel, { dx: +(en.dx + a * n * G.px).toFixed(6), dy: +(en.dy + f * b * n * G.py).toFixed(6) });
     mosDraw(); saveView(); return true;
   }
   if (ed && (e.key === "[" || e.key === "]")) { mosPush(); mosSet(sel, { dz: mosEntry(sel).dz + (e.key === "]" ? 1 : -1) }); mosDraw(); saveView(); return true; }
@@ -3516,9 +3556,14 @@ $("mosAuto").onclick = async () => {
     if (r.error) throw new Error(r.error);
     mosPush(); V.mos.layout = mosState({ layout: r.layout }).layout; V.mos.pairs = r.pairs;
     const used = r.pairs.filter(p => p.used), worst = used.reduce((a, p) => Math.max(a, Math.hypot(p.residual[0], p.residual[1])), 0);
-    mosInfo(`stitched: ${used.length} of ${r.pairs.length} overlapping pairs matched, ${r.fixed.split("/").pop()} held still`
+    const n = st => r.pairs.filter(p => p.status === st).length, nm = p => p.split("/").pop();
+    mosInfo(`stitched: ${used.length} of ${r.pairs.length} overlapping pairs used (correlation above ${r.threshold}, the best chance match between tiles that do not overlap), ${nm(r.fixed)} held still`
       + (used.length ? ` · the worst seam is off by ${worst.toFixed(2)} µm after the solve` : "")
-      + (r.unmatched.length ? ` · no match for ${r.unmatched.map(p => p.split("/").pop()).join(", ")} (left where they were)` : "")
+      + (n("weak") + n("edge") ? ` · ${n("weak") + n("edge")} not believed` : "")
+      + (n("outlier") ? ` · ${n("outlier")} dropped as disagreeing with the rest` : "")
+      + (n("doubt") ? ` · ${n("doubt")} in DOUBT: a loop does not close and cannot say which seam is wrong — look at the red ones` : "")
+      + (used.some(p => !p.loop) ? ` · ${used.filter(p => !p.loop).length} unchecked (no loop)` : "")
+      + (r.unmatched.length ? ` · no match for ${r.unmatched.map(nm).join(", ")} (left where they were)` : "")
       + " · ⌘Z undoes");
     mosDraw(); saveView();
   } catch (err) { mosInfo("stitching failed: " + err.message); badge("stitching failed", true); }
@@ -3546,16 +3591,16 @@ $("mosTif").onclick = async () => {
   b.disabled = true; b.textContent = "writing…";
   try {
     const r = await (await fetch("/api/mosaic/export", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ layout: V.mos.layout, channels: mosChans(G), planes: zr, crop: V.mos.crop }) })).json();
+      body: JSON.stringify({ layout: V.mos.layout, channels: mosChans(G), planes: zr, crop: mosCropPx(G) }) })).json();
     if (r.error) throw new Error(r.error);
-    mosInfo(`written: ${r.path} (${(r.bytes / 1e6).toFixed(1)} MB, planes ${zr[0]}–${zr[1]}${V.mos.crop ? ", the crop" : ", the whole field"})`); badge("TIFF written");
+    mosInfo(`written: ${r.path} (${(r.bytes / 1e6).toFixed(1)} MB, planes ${zr[0]}–${zr[1]}${mosCropPx(G) ? ", the crop" : ", the whole field"})`); badge("TIFF written");
   } catch (err) { mosInfo("TIFF failed: " + err.message); badge("TIFF failed", true); }
   finally { b.disabled = false; b.textContent = "TIFF"; }
 };
 $("mosPng").onclick = () => savePng($("mosCv"), exportName([FILE.file.replace(/\.mesc$/i, ""), "mosaic", "plane" + V.mos.plane]));
 $("mosJson").onclick = () => {
   const G = mosGeom(); if (!G) return;
-  const out = { source: FILE.file, pixel_um: [G.px, G.py], slice_um: G.dz, seams: V.mos.layout.seams, order: G.order, crop_px: V.mos.crop,
+  const out = { source: FILE.file, pixel_um: [G.px, G.py], slice_um: G.dz, seams: V.mos.layout.seams, order: G.order, crop_px: mosCropPx(G), crop_stage_um: V.mos.cropUm,
     note: "dx, dy: µm from the stage position; dz: the mosaic plane of the tile's slice 0; x0, y0: the tile's corner in mosaic pixels",
     tiles: mosTiles().map(u => { const e = mosEntry(u.path), p = G.place[u.path];
       return { path: u.path, name: u.name, comment: u.comment, stage_x_um: mosPos(u).x, stage_y_um: mosPos(u).y,

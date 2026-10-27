@@ -64,6 +64,7 @@ import json
 import os
 import sys
 import subprocess
+import shutil
 import threading
 import time
 import webbrowser
@@ -465,6 +466,14 @@ class _Handler(BaseHTTPRequestHandler):
             chans = payload.get("channels")
             stamp = time.strftime("%Y%m%d_%H%M%S")
             out = self.view_path.parent / f"{self.mesc_path.stem}_mosaic_{stamp}.tif"
+            # refuse a cut the disk cannot take, before writing half of it
+            nch = len(chans) if chans else len(f.unit(ts[0].path).channels)
+            need = _mosaic.tiff_bytes(ts, layout, nch, payload.get("planes"), crop)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            free = shutil.disk_usage(out.parent).free
+            if need > 0.9 * free:
+                raise ValueError(f"the cut would take {need / 1e9:.1f} GB and {out.parent} has {free / 1e9:.1f} GB free"
+                                 " — crop it, or fewer planes")
             _mosaic.to_tiff(f, ts, layout, out, channels=chans, planes=planes, crop=crop)
         return {"path": str(out), "bytes": out.stat().st_size}
 

@@ -81,22 +81,22 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
 
   // ---- 2. the picture: each pixel from the tile whose centre is nearest, as the tile's own frame ---
   // grey (one channel), at one screen pixel per mosaic pixel: the canvas must equal the tile PNGs
+  // on the uneven layout the tiles really have (seams at odd angles, tiles at odd depths)
+  await ev(`${JSON.stringify(ERR)}.forEach((e, i) => mosSet(mosTiles()[i].path, {dx: e[0] * .5, dy: e[1] * .5, dz: e[2]})); 'ok'`);
   await ev("V.mos.chan = 0; V.flipY = false; V.mos.marks = false; mosDraw(); 'ok'"); await settled();
   const cmp = JSON.parse(await ev(`(async () => { const G = mosGeom(), c = $('mosCv'), r = c.getBoundingClientRect(), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, s = c.width / r.width;
     let n = 0, bad = 0, worst = 0; const ims = {};
     for (const path of G.order) { const p = G.place[path], im = new Image(); im.src = '/api/frame/' + path + '/0/' + (V.mos.plane - p.z0) + '?' + mosWinQ(G, 0) + '&n=1'; await im.decode();
       const t = document.createElement('canvas'); t.width = p.u.width; t.height = p.u.height; const g = t.getContext('2d'); g.drawImage(im, 0, 0); ims[path] = g.getImageData(0, 0, t.width, t.height).data; }
-    for (let y = 1; y < G.H - 1; y += 3) for (let x = 1; x < G.W - 1; x += 3) {
+    for (let y = 0; y < G.H; y++) for (let x = 0; x < G.W; x++) {       // every pixel, the seams too
       const o = mosOwner(G, x + .5, y + .5); if (!o) continue;
-      // skip the pixels a seam runs through (the clip edge is antialiased there)
-      const o2 = mosOwner(G, x - .5, y + .5), o3 = mosOwner(G, x + 1.5, y + 1.5), o4 = mosOwner(G, x + .5, y - .5); if (o2 !== o || o3 !== o || o4 !== o) continue;
       const want = ims[o.u.path][4 * ((y - o.r0) * o.u.width + (x - o.c0))], got = d[4 * (Math.round(y * s) * c.width + Math.round(x * s))];
       if (y * s > c.height - 40) continue;                              // the scale bar's corner
       n++; const e = Math.abs(want - got); if (e > 1) bad++; if (e > worst) worst = e; }
     return JSON.stringify({ n, bad, worst }); })()`));
-  if (!(cmp.n >= 2000) || cmp.bad !== 0) fail("the canvas is not the tiles' frames under nearest-centre seams: " + JSON.stringify(cmp));
+  if (!(cmp.n >= 30000) || cmp.bad !== 0) fail("the canvas is not the tiles' frames under nearest-centre seams: " + JSON.stringify(cmp));
   await shot("stage");
-  await ev("V.mos.marks = true; mosDraw(); 'ok'");
+  await ev("V.mos.layout.tiles = {}; V.mos.marks = true; mosDraw(); 'ok'");
 
   // ---- 3. auto: stitched from the overlaps, as the Python side does --------------------------------
   await ev("V.mos.chan = 'ov'; V.mos.view = null; $('mosAuto').click(); 'ok'");
@@ -158,8 +158,14 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   await ev("$('mosCrop').click(); 'ok'");
   const a = await scr(20, 30), b = await scr(120, 90);
   await drag(a, b);
-  const crop = await J("V.mos.crop");
+  const crop = await J("mosCropPx(mosGeom())");
   if (!crop || Math.abs(crop[0] - 20) > 1 || Math.abs(crop[1] - 30) > 1 || Math.abs(crop[2] - 120) > 1 || Math.abs(crop[3] - 90) > 1) fail("the crop: " + JSON.stringify(crop));
+  // the crop stays on the tissue when the layout moves the field's origin
+  const cu = await J("V.mos.cropUm");
+  await ev(`mosPush(); mosSet(mosTiles()[0].path, {dx: mosEntry(mosTiles()[0].path).dx - 3}); mosDraw(); 'ok'`);
+  const crop2 = await J("mosCropPx(mosGeom())");
+  if (JSON.stringify(await J("V.mos.cropUm")) !== JSON.stringify(cu) || crop2[0] !== crop[0] + 6 || crop2[2] !== crop[2] + 6) fail("the crop moved with the layout: " + JSON.stringify([crop, crop2]));
+  await ev("mosUndo(); 'ok'");
   await ev("$('mosZ0').value = 10; $('mosZ1').value = 12; $('mosZ0').onchange(); 'ok'");
   if (JSON.stringify(await J("V.mos.zr")) !== "[10,12]") fail("the planes from–to");
   await ev("$('mosTif').click(); 'ok'");
@@ -175,7 +181,7 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const LJ = JSON.parse(lay);
   if (LJ.tiles.length !== 6 || LJ.tiles[3].dz_slices !== 3 || LJ.tiles[3].stage_x_um !== 24 || JSON.stringify(LJ.pixel_um) !== "[0.5,0.5]") fail("the layout JSON: " + lay.slice(0, 300));
   await ev("$('mosCrop').click(); 'ok'"); await key("Escape"); await key("Escape");
-  if (await J("V.mos.crop") !== null) fail("Esc did not clear the crop");
+  if (await J("V.mos.cropUm") !== null) fail("Esc did not clear the crop");
 
   // ---- 6. flatten: the marked surfaces onto one plane ----------------------------------------------
   // tile 0's surface at its centre is at slice 9, tile 1's at 6, tile 3's at 12; tile 1 selected

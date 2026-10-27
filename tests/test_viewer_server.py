@@ -606,3 +606,51 @@ def test_private_window_on_windows(tmp_path, monkeypatch):
     monkeypatch.delenv("LocalAppData")
     monkeypatch.delenv("ProgramFiles(x86)")
     assert "NOT private" in viewer.open_private("http://x/")
+
+
+# --- 0.3.12: what the speed work must not change ---------------------------------------------
+
+def test_hover_on_a_projection_reads_the_projection_on_screen(server, recording):
+    """The hover used to look in the cache under a key nothing was stored under, so it rebuilt
+    the mean on every move — and in max mode answered with the mean's value."""
+    with h5py.File(recording, "r") as f:
+        raw = f["MSession_0/MUnit_0/Channel_0"][:].astype(float) + OFFSET
+    for mode, want in (("mean", raw.mean(axis=0)), ("max", raw.max(axis=0))):
+        got = get_json(f"{server}/api/pixel/MSession_0/MUnit_0/0?x=3&y=2&mode={mode}")
+        assert got["value"] == pytest.approx(round(want[2, 3], 2)), mode
+    assert ("mean" in str(list(_Handler._cache.keys())) and "max" in str(list(_Handler._cache.keys())))
+
+
+def test_traces_after_a_new_quantile_come_from_the_cached_means(server):
+    put_json(f"{server}/api/rois", {"unit": "MSession_0/MUnit_0",
+                                    "rois": [{"name": "a", "points": [[1, 1], [4, 1], [4, 4], [1, 4]]}]})
+    first = get_json(f"{server}/api/traces/MSession_0/MUnit_0/0")
+    n_raw = sum("rawtraces" in str(k) for k in _Handler._cache)
+    again = get_json(f"{server}/api/traces/MSession_0/MUnit_0/0?q=0.2")
+    assert again["traces"] == first["traces"]                       # the same raw means …
+    assert sum("rawtraces" in str(k) for k in _Handler._cache) == n_raw   # … not read again
+
+
+def test_the_cache_drops_its_oldest_past_its_ceiling():
+    from mesc_io.viewer import _BoundedCache
+    c = _BoundedCache(limit=3 * 800)
+    for k in range(5):
+        c[k] = np.zeros(100)                       # 800 bytes each
+    assert list(c) == [2, 3, 4]
+
+
+def test_rounded_lists_turn_nan_into_null():
+    from mesc_io.viewer import _rlist
+    assert _rlist(np.array([1.234, np.nan, 2.0, np.inf]), 2) == [1.23, None, 2.0, None]
+
+
+def test_an_roi_mask_is_the_full_frame_test_inside_its_box():
+    from mesc_io.viewer import _in_polygon, _mask_of
+    rng = np.random.RandomState(3)
+    for _ in range(100):
+        c, r = rng.uniform(3, 60, 2), rng.uniform(0.5, 9)
+        a = np.sort(rng.uniform(0, 2 * np.pi, rng.randint(3, 9)))
+        pts = np.c_[c[0] + r * np.cos(a), c[1] + r * np.sin(a)]
+        full = _in_polygon(pts, 64, 64)
+        if full.any():
+            assert np.array_equal(_mask_of({"points": pts.tolist()}, 64, 64), full)

@@ -305,6 +305,15 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (!/MUnit_\d+_mean/.test(png.name) || !png.name.endsWith(".png")) fail("the PNG name does not say what it is: " + png.name);
   if (png.corner.slice(0, 3).join() !== "22,33,62") fail("the caption strip is not the report's background: " + png.corner);
   await ev("ruler=[]; V.proj=''; paint(); 'ok'");
+  // the traces PNG: the whole plot as drawn, every ROI's band, plus the caption strip
+  await ev("ROIS.length=0; addRoi(makeSpot(30,40,3)); addRoi(makeSpot(60,40,3)); document.getElementById('doTraces').click(); 'ok'");
+  for (let i = 0; i < 40 && !(await ev("!!(TR && TR.names && TR.names.length===2)")); i++) await sleep(250);
+  await sleep(400);
+  await ev("window.__png=null; savePng=(c,n)=>{ const g=c.getContext('2d'), d=g.getImageData(0,0,c.width,c.height-40).data; let lit=0; for(let i=0;i<d.length;i+=4) lit+=(d[i]+d[i+1]+d[i+2])>60; window.__png={w:c.width,h:c.height,name:n,lit,src:[document.getElementById('trace').width,document.getElementById('trace').height]}; }; exportTracePng(); 'ok'");
+  await sleep(300);
+  const tp = await ev("window.__png");
+  console.log("  traces png:", JSON.stringify(tp));
+  if (!tp || tp.lit < 200 || tp.h <= tp.src[1] || tp.w !== tp.src[0] || !/_traces_/.test(tp.name)) fail("the traces PNG is empty, cut, or misnamed: " + JSON.stringify(tp));
 
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);

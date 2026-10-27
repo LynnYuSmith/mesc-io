@@ -280,6 +280,22 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   console.log("  traces after a switch mid-fetch: TR.unit =", trUnit, "screen unit =", await ev("unit.path"));
   if (trUnit === "MSession_0/MUnit_0") fail("MUnit_0's traces were shown on MUnit_1");
 
+  // 2k. the ruler: two clicks measure, in the file's own pixel size; no ROI is added; flipped too
+  await ev("ROIS.length=0; V.zoom={x:0,y:0,w:0,h:0}; V.flipY=false; setTool('ruler'); paint(); 'ok'");
+  for (const flip of [false, true]) {
+    await ev(`V.flipY=${flip}; ruler=[]; paint(); 'ok'`);
+    const [r1x, r1y] = await at(10, 20), [r2x, r2y] = await at(40, 60);
+    for (const [x, y] of [[r1x, r1y], [r2x, r2y]]) { await mouse("mouseMoved", x, y); await mouse("mousePressed", x, y, { clickCount: 1 }); await mouse("mouseReleased", x, y, { clickCount: 1 }); await sleep(120); }
+    const rp = JSON.parse(await ev("JSON.stringify(ruler)")), px = await ev("unit.pixel_size_um || 1"), py = await ev("unit.pixel_size_y_um || unit.pixel_size_um || 1");
+    const want = Math.hypot(30 * px, 40 * py), got = rp.length === 2 ? Math.hypot((rp[1][0] - rp[0][0]) * px, (rp[1][1] - rp[0][1]) * py) : NaN;
+    console.log(`  ruler (flip ${flip}): ${rp.length} points, ${got.toFixed(2)} µm, expected ${want.toFixed(2)} — "${await ev("ruler.length===2 ? rulerText(ruler[0], ruler[1]) : ''")}"`);
+    if (rp.length !== 2 || Math.abs(got - want) > 0.05 * want) fail("the ruler did not measure the two clicked points");
+    if (await ev("ROIS.length") !== 0) fail("ruler clicks added an ROI");
+  }
+  await ev("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'})); window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'})); 'ok'");
+  if (await ev("ruler.length") !== 0) fail("Escape did not clear the ruler");
+  await ev("V.flipY=false; setTool('spot'); paint(); 'ok'");
+
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);
   const avg = await ev("V.avg"); const url = await ev("frameUrl()");

@@ -271,6 +271,7 @@
       <button id="toolSpot" class="on" title="a disc where you click">spot</button>
       <button id="toolRect" title="a rectangle centred where you click">rect</button>
       <button id="toolPoly" title="click the corners, double-click to close">polygon</button>
+      <button id="toolRuler" title="a ruler: click two points, read the distance between them in µm (Esc clears it)">ruler</button>
       <button id="clearAll" title="remove every ROI (asks first)" style="margin-left:auto">clear all</button>
     </div>
     <div class="instr sizes" style="margin-top:6px" id="sizeRow">
@@ -370,6 +371,10 @@ const V = {
 };
 let FILE = null, unit = null, playing = null;
 let ROIS = [], tool = "spot", draft = [], TR = null;   // TR = last traces payload
+/* The ruler: two points in image coordinates (sub-pixel, as clicked), and the cursor while the
+   second is still to come. It is not an ROI — nothing is saved or exported — and it measures in
+   the file's own pixel size, x and y each by its own, so a non-square pixel still reads true. */
+let ruler = [], rulerHover = null;
 const PALETTE = ["#e74c3c","#2ecc71","#9b59b6","#e67e22","#1abc9c","#3498db",
                  "#f1c40f","#e84393","#7f8c8d","#00cec9"];
 const colour = i => PALETTE[i % PALETTE.length];
@@ -455,7 +460,7 @@ function applyStatic() {                 // controls that reflect V without a un
 
 function pick(i, restoring) {
   if (playing) togglePlay();
-  unit = FILE.units[i];
+  unit = FILE.units[i]; ruler = []; rulerHover = null;   // a ruler is in one unit's pixels
   document.querySelectorAll(".u").forEach((d, k) => d.classList.toggle("on", k === i));
   if (!restoring) { V.ch = 0; V.frame = 0; V.zoom = { x: 0, y: 0, w: 0, h: 0 }; V.traceZoom = null; V.valueZoom = null; TR = null; }
   V.ch = Math.min(V.ch, unit.channels.length - 1);
@@ -771,11 +776,38 @@ function overlay(g, m) {
     g.strokeStyle = "rgba(224,163,58,.8)"; g.setLineDash([3, 3]); g.lineWidth = 1; g.strokeRect(ax, ay, bx - ax, by - ay); g.setLineDash([]);
     g.fillStyle = "rgba(224,163,58,.9)"; g.font = "10px sans-serif"; g.fillText("bg", ax + 2, ay - 3);
   }
+  drawRuler(g, m);
   if (draft.length) {
     g.strokeStyle = "#fff"; g.setLineDash([4, 3]); g.beginPath();
     draft.forEach((p, k) => { const [X, Y] = P(p); k ? g.lineTo(X, Y) : g.moveTo(X, Y); });
     g.stroke(); g.setLineDash([]);
   }
+}
+function rulerText(a, b) {
+  const px = unit.pixel_size_um || 0, py = unit.pixel_size_y_um || px;
+  const dx = b[0] - a[0], dy = b[1] - a[1], dpx = Math.hypot(dx, dy);
+  if (!px) return `${dpx.toFixed(1)} px (pixel size not stated)`;
+  const ux = dx * px, uy = dy * py;
+  return `${Math.hypot(ux, uy).toFixed(2)} µm  ·  Δx ${ux.toFixed(1)}  Δy ${uy.toFixed(1)} µm  ·  ${dpx.toFixed(1)} px`;
+}
+function drawRuler(g, m) {
+  if (!ruler.length) return;
+  const P = ([x, y]) => [m.ox + x * m.k, m.sy(y)];
+  const a = ruler[0], b = ruler[1] || rulerHover;
+  const [ax, ay] = P(a);
+  g.save(); g.lineWidth = 2; g.strokeStyle = "#ffd400"; g.fillStyle = "#ffd400";
+  g.beginPath(); g.arc(ax, ay, 3, 0, 2 * Math.PI); g.fill();
+  if (b) {
+    const [bx, by] = P(b), L = Math.hypot(bx - ax, by - ay) || 1, nx = -(by - ay) / L * 6, ny = (bx - ax) / L * 6;
+    if (!ruler[1]) g.setLineDash([5, 4]);
+    g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke(); g.setLineDash([]);
+    g.beginPath(); g.moveTo(ax - nx, ay - ny); g.lineTo(ax + nx, ay + ny); g.moveTo(bx - nx, by - ny); g.lineTo(bx + nx, by + ny); g.stroke();
+    const t = rulerText(a, b); g.font = "12px sans-serif";
+    const w = g.measureText(t).width, tx = Math.min(m.W - w - 8, Math.max(4, (ax + bx) / 2 + 8)), ty = Math.max(16, (ay + by) / 2 - 8);
+    g.fillStyle = "rgba(0,0,0,.65)"; g.fillRect(tx - 4, ty - 13, w + 8, 18);
+    g.fillStyle = "#ffd400"; g.fillText(t, tx, ty);
+  }
+  g.restore();
 }
 function imgPoint(ev) {
   const r = $("stage").getBoundingClientRect(), m = mapping();
@@ -822,7 +854,7 @@ function inside(pts, x, y) {                       // even-odd, the same rule th
 $("stage").onmousedown = ev => {
   if (ev.button !== 0 || !unit) return;
   const [x, y] = imgPoint(ev);
-  const hit = tool !== "polygon" || !draft.length ? hitRoi(x, y) : null;
+  const hit = tool === "ruler" ? null : tool !== "polygon" || !draft.length ? hitRoi(x, y) : null;
   down = { x: ev.clientX, y: ev.clientY, moved: false, hit, ix: x, iy: y,
            orig: hit ? ROIS[hit.i].points.map(p => p.slice()) : null,
            ocx: hit ? ROIS[hit.i].cx : 0, ocy: hit ? ROIS[hit.i].cy : 0 };
@@ -850,6 +882,10 @@ $("stage").addEventListener("mousemove", ev => {
   }, 60);
 });
 $("stage").addEventListener("mouseleave", () => { $("pixelRead").style.display = "none"; });
+$("stage").addEventListener("mousemove", ev => {
+  if (!unit || tool !== "ruler" || ruler.length !== 1 || down) return;
+  rulerHover = imgPoint(ev); paint();
+});
 $("stage").onmousemove = ev => {
   if (!down) return;
   const dx = ev.clientX - down.x, dy = ev.clientY - down.y;
@@ -892,6 +928,10 @@ $("stage").onclick = ev => {
   if (lastPress && lastPress.consumed) { lastPress = null; return; }
   const [x, y] = imgPoint(ev).map(Math.round);
   if (x < 0 || y < 0 || x >= unit.width || y >= unit.height) return;
+  if (tool === "ruler") {                          // no wait: a ruler point is not undone by a double-click
+    const p = imgPoint(ev);
+    ruler = ruler.length === 1 ? [ruler[0], p] : [p]; rulerHover = null; paint(); return;
+  }
   clearTimeout(pendingClick);
   pendingClick = setTimeout(() => {
     pendingClick = 0;
@@ -1041,7 +1081,7 @@ window.addEventListener("keydown", e => {
     const row = $("roiList").querySelector(".r.sel"); if (row) row.scrollIntoView({ block: "nearest" });
   } else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); if (V.sel >= 0) delRoi(V.sel); }
   else if (e.key === "Enter") { if (ROIS.length && unit) { e.preventDefault(); $("doTraces").click(); } }
-  else if (e.key === "Escape") { draft = []; paint(); }
+  else if (e.key === "Escape") { draft = []; ruler = []; rulerHover = null; paint(); }
 });
 
 /* ------------------------------------------------------------------------------------------
@@ -1080,7 +1120,7 @@ const nextName = () => { let n = ROIS.length + 1; while (ROIS.some(r => r.name =
 async function loadRois() {
   if (!unit) return;
   const d = await (await fetch(`/api/rois?unit=${encodeURIComponent(unit.path)}`)).json();
-  ROIS = d.rois || []; ROI_UNITS = d.units_with_rois || {}; draft = [];
+  ROIS = d.rois || []; ROI_UNITS = d.units_with_rois || {}; draft = []; ruler = []; rulerHover = null;
   if (V.sel >= ROIS.length) V.sel = -1;
   renderRois(); renderCopyMenu(); paint();
   document.body.dataset.roisFor = unit.path;      // set LAST: a driver waiting on it sees the menu too
@@ -1157,9 +1197,12 @@ $("delRoi").onclick = () => { if (V.sel >= 0) delRoi(V.sel); };
 function setTool(t) {
   tool = t; draft = [];
   $("toolSpot").classList.toggle("on", t === "spot"); $("toolRect").classList.toggle("on", t === "rect"); $("toolPoly").classList.toggle("on", t === "polygon");
+  $("toolRuler").classList.toggle("on", t === "ruler");
+  if (t !== "ruler") { ruler = []; rulerHover = null; }
   syncSizeRow(); paint();
 }
 $("toolSpot").onclick = () => setTool("spot"); $("toolRect").onclick = () => setTool("rect"); $("toolPoly").onclick = () => setTool("polygon");
+$("toolRuler").onclick = () => setTool("ruler");
 /* The size row edits the SELECTED spot or rect when there is one, and otherwise sets the size
    the next click will place. The hint under it says which. */
 function syncSizeRow() {

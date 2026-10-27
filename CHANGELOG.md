@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **ruler**, beside spot/rect/polygon: click two points on the image and the distance between them
+  is drawn and written beside the line — in µm from the file's own pixel size (x and y each by its
+  own, so a non-square pixel still reads true), with Δx, Δy and the length in pixels. The second
+  point follows the cursor until it is placed; a third click starts a new ruler; Esc clears it.
+  It is not an ROI: nothing is saved or exported, and it works the same in the flipped MESc view.
+
 ## 0.3.13 — 2026-10-27
 
 **Motion correction on an 8 GB laptop, and a page that keeps up.**

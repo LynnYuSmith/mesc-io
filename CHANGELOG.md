@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**Measure, export, open in Fiji.**
+
+- **TIFF export is a Fiji hyperstack.** `export … out.tif` now writes every channel (`--channel N` for
+  one): TCYX for a recording, ZCYX for a z-stack, composite mode with each channel in its own colour and
+  its own display range (1–99.8 % of that channel, so a red ten times brighter does not set the green's
+  window), the frame interval or the z spacing, x and y pixel sizes, and the comment, the units and each
+  channel's conversion in the image Info. Frames are streamed. `export <file> all <folder> --tiff` writes
+  every unit. Fiji has no `.mesc` reader of its own; this is the way in until there is a plugin.
+- **PNG export.** **PNG** saves what is on screen, made for a figure: the image at its own pixels, each
+  drawn as a whole block (no blur), with the ROIs, the ruler, a µm scale bar and a caption — file, unit,
+  frame or projection, channels, window, MESc view — on the report's background; with 3D open, the 3D
+  view. **png** beside csv saves the traces as drawn. The file name says what the picture is.
 - **ruler**, beside spot/rect/polygon: click two points on the image and the distance between them
   is drawn and written beside the line — in µm from the file's own pixel size (x and y each by its
   own, so a non-square pixel still reads true), with Δx, Δy and the length in pixels. The second

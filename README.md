@@ -41,12 +41,23 @@ more than one session is refused, not resolved to the first; `MSession_1/MUnit_0
 ```
 mesc-io info      recording.mesc                            # units, rates, pixel sizes
 mesc-io check     recording.mesc                            # what the file disagrees with itself about
-mesc-io export    recording.mesc MUnit_0 u0.h5              # or u0.tif
+mesc-io export    recording.mesc MUnit_0 u0.h5              # or u0.tif — a Fiji hyperstack
+mesc-io export    recording.mesc all out_folder --tiff      # every unit, one .tif each
 mesc-io writeback recording.mesc out.mesc MUnit_0 u0.h5     # processed frames back in
 mesc-io view      recording.mesc                            # the recording in a browser
 ```
 
 `info` and `check` take `--json`.
+
+### Opening a recording in Fiji
+
+Fiji has no reader for `.mesc` (Bio-Formats lists none for Femtonics). `export … .tif` writes what
+Fiji opens with File ▸ Open as a calibrated hyperstack: every channel (`--channel N` for one), in
+composite mode with each channel in its own colour and display range; the frame interval for a
+recording or the slice spacing for a z-stack; x and y pixel sizes in µm; and the unit's comment,
+the units and each channel's conversion under Image ▸ Show Info. Values are in reader units
+(float32), as the native reader shows them; `--stored-units` keeps the file's integers. Frames are
+streamed, so a unit larger than memory exports too.
 
 ### Motion correction
 

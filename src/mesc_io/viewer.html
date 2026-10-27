@@ -18,8 +18,11 @@
   body { font:13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; color:var(--ink);
          background:var(--bg); overflow:hidden }
   #wrap { display:grid; height:100vh;
-          grid-template-columns:230px 1fr var(--tools-w, 260px);
-          grid-template-rows:1fr var(--traces-h, 260px);
+          /* the saved sizes are wishes, not orders: whatever the window, the image keeps at least
+             240 × 200 px and the tools and traces give way (a size saved on a big screen, or a
+             splitter dragged to the edge, used to push panes off the window) */
+          grid-template-columns:230px minmax(240px, 1fr) min(var(--tools-w, 260px), calc(100vw - 470px));
+          grid-template-rows:minmax(200px, 1fr) min(var(--traces-h, 260px), calc(100vh - 200px));
           grid-template-areas:"units image tools" "traces traces traces" }
   h1 { font-size:13px; font-weight:600; margin:0; padding:10px 12px 6px; color:var(--muted);
        letter-spacing:.02em; text-transform:lowercase }
@@ -51,7 +54,7 @@
   .u span { display:block; color:var(--muted); font-size:11px }
   .u i { display:block; color:var(--faint); font-size:11px; font-style:normal;
          white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-  #meta { flex:0 0 var(--meta-h, 300px); overflow-y:auto; border-top:1px solid var(--line); min-height:0 }
+  #meta { flex:0 1 var(--meta-h, 300px); overflow-y:auto; border-top:1px solid var(--line); min-height:0 }
   #metaSplit { height:4px; cursor:row-resize; background:transparent; margin-bottom:-4px; position:relative; z-index:1 }
   #metaSplit:hover { background:var(--accent) }
   #meta h2 { display:flex; align-items:center; gap:8px }
@@ -137,6 +140,7 @@
 
   /* ---- instruments (right) ---- */
   #toolsCol { grid-area:tools; display:flex; flex-direction:column; min-height:0; position:relative;
+              overflow-y:auto; overflow-x:hidden;      /* a short window scrolls the tools, never cuts them */
               background:var(--panel); border-left:1px solid var(--line) }
   #toolsSplit { position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:2 }
   #toolsSplit:hover { background:var(--accent) }
@@ -1863,8 +1867,8 @@ function volCutGrow(src, out, n, stride, step, r, l0, l1) {
     }
   }
 }
-const volCutChans = () => volMeta.ov ? [0, 1] : [0];
-const volCutReady = () => volCutKey() === "raw" || volCutChans().every(j => volCut[j] && volCut[j].key === volKey + "|" + volCutKey());
+const volCutChans = () => volMeta && volMeta.ov ? [0, 1] : [0];
+const volCutReady = () => volCutKey() === "raw" || !!volMeta && volCutChans().every(j => volCut[j] && volCut[j].key === volKey + "|" + volCutKey());
 const yieldToPage = () => new Promise(r => { const mc = new MessageChannel(); mc.port1.onmessage = () => r(); mc.port2.postMessage(0); });
 let volCutRun = "";
 function volCutAsync() {                    // cut in the background; the old texture stays on screen meanwhile

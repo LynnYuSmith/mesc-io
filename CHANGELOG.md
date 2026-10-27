@@ -28,6 +28,24 @@
   now clicks the surface and mosaic controls too.
 - The **surface ↑** button's tooltip no longer says slice 0 is always the surface: in a stack recorded
   upward slice 0 is the deepest.
+- **Gamma per channel in 3D and XYZ.** A number per channel shown (γ ch0, γ ch1 in the overlay),
+  0.3–3, in the 3D bar and over the XYZ views: a brightness b is drawn as b^γ, after the window, the
+  floor and the gain, in the volume shader, in the XYZ panes and so in the 3D PNG (whose caption says
+  so). Below 1 the dim parts come up, a thin axon beside a bright cell. At 1 nothing is computed and
+  the picture is the old one to the bit — checked by hashing every pixel of all three modes, one and
+  two channels, and the XYZ panes against 0.4.0. Values, floors and picks are not touched. Saved with
+  the view.
+- **Objects in 3D.** **object**, beside point and measure: a click picks a seed as point does, then
+  grows the connected region around it (six face neighbours) in that channel's bytes, keeping voxels
+  at least a share of the seed's peak (50 % by default) and within a radius of the seed (15 µm), never
+  more than 250,000 voxels — the radius is what stops a bouton running along its axon. Listed with
+  its volume in µm³, voxel count, centre in µm and slice, extent, and each channel's mean in the
+  recording's units; a numbered diamond at its centre in 3D, its voxels tinted and its edge outlined
+  in XYZ, and in the PNG caption. Only the seed and the two numbers are saved; the region is grown
+  again on load. Changing the share or the radius grows the last object again. Esc removes the last,
+  shift+Esc all. `tests/view_gamma_object_real_chrome.js` checks both on the synthetic stack: the red
+  cell's object is centred within 0.1 voxel of (95, 30, 16) at ~86 µm³, a bouton's stays a bouton,
+  and at 10 % the axon is taken in only as far as the radius allows.
 
 ## 0.4.0 — 2026-10-27
 

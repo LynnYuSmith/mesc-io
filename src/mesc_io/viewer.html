@@ -120,6 +120,10 @@
   #volBar input[type=range] { width:84px }
   #volBar input.vnum { width:72px; font-size:11px; padding:1px 3px }
   #volBar [hidden] { display:none }
+  /* gamma, one number per channel shown: in the 3D bar and over the XYZ views */
+  .vgams { display:flex; gap:6px; align-items:center }
+  .vgams label { display:flex; align-items:center; gap:4px; color:var(--muted) }
+  .vgams input { width:48px; font-size:11px; padding:1px 3px }
   #volBoxRow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; flex-basis:100% }
   #volBoxRow input[type=range] { width:64px }
   /* the two-colour overlay: one row per channel, its switch in its own colour, its own floor */
@@ -267,6 +271,7 @@
         <button id="volAuto" title="the floor back at the stack's own percentile — 99.7 for MIP and depth, 97 for glass: the background empty, what stands out of it kept">auto</button>
         <label title="how much a voxel hides what is behind it (glass only)">density <input type="range" id="volDen" min="0.02" max="1" step="0.01"></label>
         <label title="brightness">gain <input type="range" id="volGain" min="0.5" max="4" step="0.05"></label>
+        <span id="volGam" class="vgams"></span>
         <label title="stretch depth. ×1 is the true proportion; anything else exaggerates it and says so">z ×<input type="range" id="volZ" min="1" max="8" step="0.5"><span id="volZv"></span></label>
         <button id="volReset" title="look straight down the stack again, from the surface (double-click does the same)">reset</button>
         <button id="volAxY" title="look along y: the stack from its side, depth running down">side y</button>
@@ -284,6 +289,8 @@
           <button id="volBoxFull" title="the whole stack again">full</button>
         </span>
         <button id="volMeasure" title="a ruler in 3D: click two points (picked as with point) and read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button>
+        <button id="volObject" title="an object: a click picks a seed as point does, then grows the connected region around it — every voxel of that channel at least the given share of the seed's peak, joined face to face, no further than the radius from the seed. Its volume in µm³, centre, extent and each channel's mean are listed; it is outlined in XYZ. Esc removes the last, shift+Esc all">object</button>
+        <label id="volObjL" hidden title="what the next object keeps: voxels at least this share of the seed's peak (of the window, as the bytes are), within this radius of the seed. Changing either grows the last object again (Enter)">≥<input type="number" id="volObjF" class="vnum" min="5" max="99" step="1" style="width:44px">% of peak · within<input type="number" id="volObjR" class="vnum" min="0.5" step="any" style="width:48px">µm</label>
       </div>
       <canvas id="volMarks" hidden></canvas>
       <div id="volPts" hidden></div>
@@ -297,6 +304,7 @@
           <button id="oSurf" title="mark the surface: each click in a pane puts a mark where the tissue begins (just above the first slice where the green appears), instead of moving the crosshair. One mark: a flat surface; three: a tilted plane; six or more, spread over the stack: a curved one. Shift+click removes the nearest mark, Esc the last, shift+Esc all">surface</button>
           <button id="oSurfTis" hidden title="which side of the surface is the tissue: found by brightness (the brighter side), or set by hand. Depth below the surface is counted into the tissue">tissue: auto</button>
           <button id="oSurfCsv" hidden title="the marks, the fitted surface and every 3D point's depth below it, as a CSV">csv</button>
+          <span id="oGam" class="vgams"></span>
           <span id="oChs" hidden></span>
           <span class="hint" id="oPos"></span>
         </div>
@@ -966,7 +974,10 @@ function exportVolPng() {
   const g = c.getContext("2d"); g.drawImage(src, 0, 0);
   if (volMeta) volMarksOn(g, c.width, c.height, src.clientWidth ? c.width / src.clientWidth : 1);   // the points, as on screen
   withCaption(c, [captionLines()[0], `3D · ${V.vol.mode} · ${volMeta && volMeta.ov ? "two channels" : unit.channels[V.ch]}`]
-                 .concat(volMeta && !volClip(volCam(1).ext).full ? [volClipText()] : [], volMeasure() ? [`measured: ${volMeasText()}`] : []),
+                 .concat(volMeta && !volClip(volCam(1).ext).full ? [volClipText()] : [], volMeasure() ? [`measured: ${volMeasText()}`] : [],
+                         volMeta ? volGamChans().filter(k => V.vol.gam[k] !== 1).map(k => `gamma ${unit.channels[k].replace("Channel_", "ch")} ${V.vol.gam[k]}`) : [],
+                         volMeta ? volObjs().map((o, n) => { const reg = volObjRegion(o); if (!reg) return null; const t = volObjStats(reg);
+                           return `o${n + 1}: ${+t.um3.toPrecision(4)} µm³, ${t.n} voxels, centre slice ${t.slice}`; }).filter(Boolean) : []),
               exportName([FILE.file.replace(/\.mesc$/i, ""), unit.name, "3D", V.vol.mode]));
 }
 function exportTracePng() {
@@ -1733,9 +1744,11 @@ function volState(v) {
   const d = { on: false, ortho: false, oMax: false, oCross: true, cx: -1, cy: -1, cz: -1,
               mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0, deep: false, axes: 2,
               chOn: [true, true], thrC: [0.5, 0.5], thrCFor: "",   // the overlay: each channel shown?, its floor
-              tool: "", pts: {},     // tool: "" | point | measure
+              tool: "", pts: {},     // tool: "" | point | measure | object
               oSurf: false, surf: {}, surfTis: 0,   // surface marks per unit path ([z, y, x] like pts); the tissue side: 0 by brightness, -1 toward slice 0, +1 toward the last
-              box: [0, 1, 0, 1, 0, 1], boxOpen: false, slab: false, slabUm: 10 };   // the clip box: x0 x1 y0 y1 z0 z1 in 0..1 of the file's axes; the thick slab   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
+              box: [0, 1, 0, 1, 0, 1], boxOpen: false, slab: false, slabUm: 10,   // the clip box: x0 x1 y0 y1 z0 z1 in 0..1 of the file's axes; the thick slab   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
+              gam: [1, 1, 1, 1, 1, 1, 1, 1],   // gamma per channel (by the channel's number), 1 = the picture as it was
+              objs: {}, objFrac: .5, objR: 15 };   // objects: unit path -> [{ q: seed (z, y, x), ch, frac, r }, …]; what the next one keeps
   if (!v || typeof v !== "object") return d;
   // Before 0.3.6 the camera's up was the image's y; now it is depth. A view saved then would open
   // on its side, so its camera starts afresh (its mode, floor and the rest are kept).
@@ -1752,7 +1765,7 @@ function volState(v) {
   o.chOn = [0, 1].map(k => !(Array.isArray(v.chOn) && v.chOn[k] === false));
   o.thrC = [0, 1].map(k => cl(Array.isArray(v.thrC) ? v.thrC[k] : NaN, 0, .95, d.thr));
   o.thrCFor = typeof o.thrCFor === "string" ? o.thrCFor : "";
-  o.tool = ["point", "measure"].includes(o.tool) ? o.tool : "";
+  o.tool = ["point", "measure", "object"].includes(o.tool) ? o.tool : "";
   const bx = Array.isArray(v.box) && v.box.length === 6 ? v.box.map(x => cl(x, 0, 1, NaN)) : [];
   o.box = bx.length === 6 && bx.every(Number.isFinite) && bx[0] < bx[1] && bx[2] < bx[3] && bx[4] < bx[5] ? bx : d.box.slice();
   o.boxOpen = !!o.boxOpen; o.slab = !!o.slab; o.slabUm = cl(o.slabUm, .1, 1000, d.slabUm);
@@ -1762,6 +1775,14 @@ function volState(v) {
   o.surf = Object.fromEntries(Object.entries(o.surf && typeof o.surf === "object" && !Array.isArray(o.surf) ? o.surf : {})
     .map(([k, a]) => [k, Array.isArray(a) ? a.filter(okPt) : []]).filter(([, a]) => a.length));
   o.oSurf = !!o.oSurf; o.surfTis = [-1, 0, 1].includes(o.surfTis) ? o.surfTis : 0;
+  // (a typed number only: null is not 0 here, so a gap in the saved list does not become the lowest value)
+  const num = (x, a, b, def) => typeof x === "number" && Number.isFinite(x) ? Math.max(a, Math.min(b, x)) : def;
+  o.gam = d.gam.map((g, k) => num(Array.isArray(v.gam) ? v.gam[k] : NaN, .3, 3, g));
+  o.objFrac = num(v.objFrac, .05, .99, d.objFrac); o.objR = num(v.objR, .5, 500, d.objR);
+  const okObj = b => b && typeof b === "object" && okPt(b.q) && Number.isInteger(b.ch) && b.ch >= 0;
+  o.objs = Object.fromEntries(Object.entries(o.objs && typeof o.objs === "object" && !Array.isArray(o.objs) ? o.objs : {})
+    .map(([k, a]) => [k, Array.isArray(a) ? a.filter(okObj).map(b => ({ q: b.q.slice(), ch: b.ch, frac: num(b.frac, .05, .99, d.objFrac), r: num(b.r, .5, 500, d.objR) })) : []])
+    .filter(([, a]) => a.length));
   return o;
 }
 V.vol = volState(V.vol);
@@ -1776,8 +1797,11 @@ uniform sampler3D vol; uniform vec3 ext, camPos, camR, camU, camF, colA, colB;
 uniform float tanHalf, aspect, thr, gain, den, dt, ceil_, slz, slw; uniform int mode, cut, deep, fy, ov, dch;
 uniform vec2 thr2, ceil2, on2;     // the overlay: each channel's floor, ceiling, and whether it is shown
 uniform vec3 blo, bhi;             // the part of the box the rays march: -ext..ext unless clipped (box, slab)
+uniform float gam; uniform vec2 gam2;   // gamma: of the one channel drawn, of each in the overlay
 in vec2 ndc; out vec4 o;
 vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+// gamma on a brightness of 0..1; at 1 the very number that came in, so the picture is the old one to the bit
+float gm(float x, float e) { return e == 1.0 ? x : pow(max(x, 0.0), e); }
 void main() {
   vec3 rd = normalize(camF + ndc.x * tanHalf * aspect * camR + ndc.y * tanHalf * camU);
   vec3 inv = 1.0 / rd, t0 = (blo - camPos) * inv, t1 = (bhi - camPos) * inv;
@@ -1801,6 +1825,7 @@ void main() {
       if (w.y > ceil2.y) w.y = cut == 1 ? 0.0 : ceil2.y;
       if (mode == 1) {
         vec2 a = clamp((w - thr2) / (ceil2 - thr2), 0.0, 1.0), b = clamp(w / ceil2 * gain, 0.0, 1.0);
+        b = vec2(gm(b.x, gam2.x), gm(b.y, gam2.y));
         float s = 1.0 - exp(-den * (a.x + a.y) * dt * 60.0);
         // the colours add, weighted by how solid each channel is here: both alike -> white
         vec3 c = min((colA * b.x * a.x + colB * b.y * a.y) / max(max(a.x, a.y), 1e-6), vec3(1.0));
@@ -1819,10 +1844,10 @@ void main() {
     if (mode == 1) {
       float a = clamp((v - thr) / (ceil_ - thr), 0.0, 1.0);
       float s = 1.0 - exp(-den * a * dt * 60.0);
-      vec3 c = vec3(0.62, 1.0, 0.70) * clamp(v / ceil_ * gain, 0.0, 1.0);
+      vec3 c = vec3(0.62, 1.0, 0.70) * gm(clamp(v / ceil_ * gain, 0.0, 1.0), gam);
       // the current frame, inside the glass: its voxels turn blue and a little more solid, so
       // stepping through the stack shows which piece of the object each frame is
-      if (slw > 0.0 && abs(uvw.z - slz) < slw) { c = vec3(0.35, 0.72, 1.0) * clamp(v / ceil_ * gain * 1.6, 0.25, 1.0); s = min(1.0, s * 2.5 + 0.02); }
+      if (slw > 0.0 && abs(uvw.z - slz) < slw) { c = vec3(0.35, 0.72, 1.0) * clamp(gm(clamp(v / ceil_ * gain * 1.6, 0.0, 1.0), gam), 0.25, 1.0); s = min(1.0, s * 2.5 + 0.02); }
       acc.rgb += (1.0 - acc.a) * s * c; acc.a += (1.0 - acc.a) * s;
       if (acc.a > 0.985) break;
     } else if (v > m) { m = v; mz = uvw.z; if (m >= ceil_) break; }   // at the ceiling: nothing further can be brighter
@@ -1830,9 +1855,10 @@ void main() {
   if (mode == 1) { o = vec4(acc.rgb, 1.0); return; }
   if (ov == 1 && mode == 0) {                               // each channel's MIP, coloured, added
     vec2 g2 = clamp((m2 - thr2) / (ceil2 - thr2) * gain, 0.0, 1.0);
+    g2 = vec2(gm(g2.x, gam2.x), gm(g2.y, gam2.y));
     o = vec4(min(colA * g2.x + colB * g2.y, vec3(1.0)), 1.0); return;
   }
-  float g = clamp((m - thr) / (ceil_ - thr) * gain, 0.0, 1.0);
+  float g = gm(clamp((m - thr) / (ceil_ - thr) * gain, 0.0, 1.0), gam);
   o = vec4(mode == 2 ? hue(mz * 0.75) * g : vec3(g), 1.0);
 }`;
 const LVS = `#version 300 es
@@ -1876,7 +1902,7 @@ async function volLoad() {
     const one = async ch => {
       const r = await fetch(`/api/volume/${unit.path}/${ch}?` + (ov ? `${winQuery(ch)}&share=2` : `lo=${V.lo}&hi=${V.hi}`));
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
-      return { r, shape: r.headers.get("X-Volume-Shape").split(",").map(Number),
+      return { r, ch, shape: r.headers.get("X-Volume-Shape").split(",").map(Number),
                vox: r.headers.get("X-Voxel-Um").split(",").map(Number), data: new Uint8Array(await r.arrayBuffer()) };
     };
     const got = ov ? await Promise.all([one(0), one(1)]) : [await one(V.ch)];
@@ -2002,11 +2028,11 @@ function volMetaFrom(got) {         // got: one { r, shape, vox, data } per chan
       return { p97: pct(.97), p997: pct(.997), win: (r.headers.get("X-Window") || "0,1").split(",").map(Number) };
     });
     const { r, shape, vox } = got[0];
-    volMeta = { shape, vox, down: +(r.headers.get("X-Downsample") || 1), ov: got.length > 1, chs, ...chs[0] };
+    volMeta = { shape, vox, down: +(r.headers.get("X-Downsample") || 1), ov: got.length > 1, chs, ...chs[0], chans: got.map(g => g.ch) };
     if (V.vol.thrFor !== unit.path) { V.vol.thr = volAutoThr(); $("volThr").value = V.vol.thr; }
     if (volMeta.ov && V.vol.thrCFor !== unit.path) V.vol.thrC = [0, 1].map(k => volAutoThr(k));
     if (volOv()) volChRows();
-    volNums();
+    volNums(); volGamRows();
 }
 function volShow() {
   if ((V.vol.on || V.vol.ortho) && V.mos && V.mos.on) { V.mos.on = false; mosShow(); }   // one view at a time
@@ -2019,8 +2045,7 @@ function volShow() {
   const on = !!(V.vol.on && isStack);
   $("vol").hidden = !on; $("volBar").hidden = !on; $("volInfo").hidden = !on; $("volMarks").hidden = !on;
   if (!on) $("volPts").hidden = true;
-  $("volPoint").classList.toggle("on", V.vol.tool === "point"); $("volMeasure").classList.toggle("on", V.vol.tool === "measure");
-  $("vol").classList.toggle("tool", !!V.vol.tool);
+  volToolUi(); volGamRows();
   volBoxUi();
   $("volBtn").classList.toggle("on", on);
   $("stageHint").hidden = on || ortho;
@@ -2073,6 +2098,38 @@ function volChRows() {
   document.querySelectorAll("#volChs .vchOn, #oChs .vchOn").forEach(b => b.classList.toggle("on", V.vol.chOn[+b.dataset.k]));
   $("volChs").querySelectorAll(".vthr").forEach((sl, k) => { sl.value = V.vol.thrC[k]; });
   volNums();
+}
+/* Gamma, per channel: a brightness b of 0..1 is drawn as b^γ — below 1 the dim parts come up
+   (a thin axon beside a bright cell), above 1 they go down. It is applied to what is drawn, after
+   the window, the floor and the gain, in the 3D shader and in the XYZ views (there to the bytes
+   through a 256-entry table) and so in the 3D PNG; the values read off the stack, the floor and the
+   picks are not touched. At 1 nothing is computed at all, so the picture is the old one to the bit.
+   Kept by the channel's number, as the overlay's floors are, and saved with the view. */
+const volGamChans = () => !unit ? [] : volOv() ? [0, 1] : [V.ch];
+const _gLut = {};
+function volGamLut(g) {                      // byte -> byte at gamma g, null at 1
+  if (!(g > 0) || g === 1) return null;
+  if (_gLut[g]) return _gLut[g];
+  const T = new Uint8Array(256); for (let b = 0; b < 256; b++) T[b] = Math.round(255 * Math.pow(b / 255, g));
+  return (_gLut[g] = T);
+}
+function volGamRows() {
+  const chs = volGamChans(), sig = unit ? unit.path + "|" + chs.join(",") : "";
+  for (const id of ["volGam", "oGam"]) {
+    const el = $(id);
+    if (el.dataset.sig !== sig) {
+      el.dataset.sig = sig;
+      el.innerHTML = chs.map(ch => { const n = unit.channels[ch].replace("Channel_", "ch");
+        return `<label title="${n} gamma, 0.3–3: below 1 the dim parts come up, above 1 they go down; 1 is the picture as it is (Enter)">γ ${n}<input type="number" class="vnum vgam" data-ch="${ch}" min="0.3" max="3" step="0.1"></label>`; }).join("");
+      el.querySelectorAll(".vgam").forEach(nb => {
+        nb.onchange = () => { const x = +nb.value, ch = +nb.dataset.ch;
+          if (nb.value !== "" && Number.isFinite(x)) V.vol.gam[ch] = Math.max(.3, Math.min(3, x));
+          nb.blur(); volGamRows(); volDraw(); orthoDraw(); saveView(); };
+        ["mousedown", "keydown", "wheel"].forEach(t => nb.addEventListener(t, e => e.stopPropagation()));
+      });
+    }
+    el.querySelectorAll(".vgam").forEach(nb => { if (document.activeElement !== nb) nb.value = V.vol.gam[+nb.dataset.ch] ?? 1; });
+  }
 }
 // column-major 4x4, as WebGL wants them
 const m4mul = (a, b) => { const o = new Float32Array(16);
@@ -2138,6 +2195,7 @@ function volDraw() {
   gl.uniform1f(u("ceil_"), ceil); gl.uniform1i(u("cut"), V.vol.cut ? 1 : 0);
   const ov = !!volMeta.ov, dch = V.ch === 1 ? 1 : 0;
   gl.uniform1i(u("ov"), ov ? 1 : 0);
+  gl.uniform1f(u("gam"), V.vol.gam[ov ? dch : V.ch] ?? 1); gl.uniform2f(u("gam2"), V.vol.gam[0], V.vol.gam[1]);
   if (ov) {
     const t = V.vol.thrC, c2 = t.map(x => Math.max(V.vol.ceil, x + 0.01)), cols = volColours();
     gl.uniform2f(u("thr2"), t[0], t[1]); gl.uniform2f(u("ceil2"), c2[0], c2[1]);
@@ -2189,7 +2247,8 @@ function volDraw() {
     + (!ov ? "" : V.vol.mode === "depth" ? `\ndepth colours one channel: ${unit.channels[dch].replace("Channel_", "ch")} (pick it under the image); MIP and glass show both`
        : `\n${[0, 1].map(k => unit.channels[k].replace("Channel_", "ch") + (V.vol.chOn[k] ? "" : " (hidden)")).join(" + ")}, each in its own window`
          + (unit.channels.length > 2 ? ` · the first two of ${unit.channels.length}` : ""))
-    + (V.vol.tool ? `\nclick picks${V.vol.tool === "measure" ? " (shift+click: a path)" : ""} · drag turns · Esc: the last point`
+    + (V.vol.gam.some((g, k) => g !== 1 && volGamChans().includes(k)) ? `\ngamma ${volGamChans().map(k => `${unit.channels[k].replace("Channel_", "ch")} ${V.vol.gam[k]}`).join(" · ")}` : "")
+    + (V.vol.tool ? `\nclick ${V.vol.tool === "object" ? "grows an object from the voxel under it" : "picks"}${V.vol.tool === "measure" ? " (shift+click: a path)" : ""} · drag turns · Esc: the last ${V.vol.tool === "object" ? "object" : "point"}`
        : `\ndrag turns · shift- or right-drag moves · wheel zooms where the cursor is · double-click resets`);
 }
 // turning and zooming
@@ -2447,12 +2506,16 @@ function volGoTo(q) {                          // the XYZ crosshair and the slic
   V.frame = q[0]; $("frame").value = V.frame; $("frame").oninput();
 }
 function volToolClick(e) {
-  const q = volPickAt(e.clientX, e.clientY);
+  let q = volPickAt(e.clientX, e.clientY);
   if (!q) { badge("nothing drawn under the cursor — lower the floor, or click on the object"); return; }
   if (V.vol.tool === "point") volPts().push(q);
   else if (V.vol.tool === "measure") {
     // a click starts a line or finishes it; shift+click goes on from the last point (a path)
     if ((e.shiftKey && volMeas.length) || volMeas.length === 1) volMeas.push(q); else volMeas = [q];
+  } else if (V.vol.tool === "object") {
+    const o = { q, ch: volObjChan(q), frac: V.vol.objFrac, r: V.vol.objR }, reg = volObjRegion(o);
+    volObjs().push(o);
+    if (reg) q = volObjCentre(reg).q;                // the crosshair to the object's centre, not its seed
   }
   volGoTo(q); volDraw(); saveView();
 }
@@ -2505,6 +2568,11 @@ function volPtsList() {
     if (volMeas.length > 1) lines.push(`<b style="color:${VOL_MEAS}">${volMeasText()}</b>`,
       `<span class="h">Δz is the least certain (the PSF is longer along z)</span>`);
   }
+  const objs = volObjs();
+  if (objs.length) {
+    lines.push(`<span class="h">objects (connected, from the seed: ≥ the share of its peak, within the radius; µm from the stack's corner) · Esc removes the last, shift+Esc all</span>`);
+    objs.forEach((o, n) => lines.push(`<b style="color:${VOL_OBJ}">o${n + 1}</b>  ${volObjText(o)}`));
+  }
   const html = lines.join("\n");
   if (box.dataset.html !== html) { box.dataset.html = html; box.innerHTML = html; }
   box.hidden = !V.vol.on || !lines.length;
@@ -2512,9 +2580,20 @@ function volPtsList() {
 /* The markers on a W × H picture of the current camera — the screen's overlay canvas, or a PNG
    being exported at its own size (s: its pixels per CSS pixel, for line widths and type). */
 function volMarksOn(g, W, H, s) {
-  const pts = volPts(); if (!pts.length && !volMeas.length) return;
+  const pts = volPts(), objs = volObjs(); if (!pts.length && !volMeas.length && !objs.length) return;
   const c = volCam(W / H), at = q => volProject(volVoxWorld(q, c.ext), c, W, H);
   g.save();
+  objs.forEach((o, n) => {                      // an object: a diamond at its centre, numbered o1, o2, …
+    const reg = volObjRegion(o); if (!reg) return;
+    const p = at(volObjCentre(reg).f); if (!p) return; const [X, Y] = p, r = 6 * s;
+    const dia = () => { g.beginPath(); g.moveTo(X, Y - r); g.lineTo(X + r, Y); g.lineTo(X, Y + r); g.lineTo(X - r, Y); g.closePath(); };
+    g.strokeStyle = "rgba(0,0,0,.7)"; g.lineWidth = 3.5 * s; dia(); g.stroke();
+    g.strokeStyle = VOL_OBJ; g.lineWidth = 1.5 * s; dia(); g.stroke();
+    g.font = `${Math.round(11 * s)}px sans-serif`; g.textBaseline = "middle";
+    const t = "o" + (n + 1), w = g.measureText(t).width;
+    g.fillStyle = "rgba(0,0,0,.65)"; g.fillRect(X - r - w - 6 * s, Y - 7 * s, w + 4 * s, 14 * s);
+    g.fillStyle = VOL_OBJ; g.fillText(t, X - r - w - 4 * s, Y);
+  });
   if (volMeas.length) {                         // the ruler: a line (a path), its ends, its length
     const P = volMeas.map(at);
     g.lineWidth = 2 * s; g.strokeStyle = VOL_MEAS; g.fillStyle = VOL_MEAS;
@@ -2546,14 +2625,26 @@ function volMarksDraw() {
   volMarksOn(g, cv.width, cv.height, s);
   volPtsList();
 }
+function volToolUi() {
+  for (const [id, t] of [["volPoint", "point"], ["volMeasure", "measure"], ["volObject", "object"]]) $(id).classList.toggle("on", V.vol.tool === t);
+  $("vol").classList.toggle("tool", !!V.vol.tool);
+  $("volObjL").hidden = V.vol.tool !== "object";
+  for (const [id, x] of [["volObjF", Math.round(V.vol.objFrac * 100)], ["volObjR", V.vol.objR]]) if (document.activeElement !== $(id)) $(id).value = x;
+}
 function volSetTool(t) {
   V.vol.tool = V.vol.tool === t ? "" : t;
-  $("volPoint").classList.toggle("on", V.vol.tool === "point"); $("volMeasure").classList.toggle("on", V.vol.tool === "measure");
-  cvol.classList.toggle("tool", !!V.vol.tool);
-  volDraw(); saveView();
+  volToolUi(); volDraw(); saveView();
 }
 $("volPoint").onclick = () => volSetTool("point");
 $("volMeasure").onclick = () => volSetTool("measure");
+$("volObject").onclick = () => volSetTool("object");
+// what the next object keeps; the last one is grown again with it, so the numbers can be tuned on it
+for (const [id, k, f] of [["volObjF", "objFrac", x => Math.max(.05, Math.min(.99, x / 100))], ["volObjR", "objR", x => Math.max(.5, Math.min(500, x))]]) {
+  $(id).onchange = () => { const x = +$(id).value;
+    if ($(id).value !== "" && Number.isFinite(x)) { V.vol[k] = f(x); const o = volObjs()[volObjs().length - 1]; if (o) o[k === "objFrac" ? "frac" : "r"] = V.vol[k]; }
+    $(id).blur(); volToolUi(); volDraw(); saveView(); };
+  ["mousedown", "keydown", "wheel"].forEach(t => $(id).addEventListener(t, e => e.stopPropagation()));
+}
 // Esc in 3D: the last point goes; shift+Esc, all of them — of the ruler when it is the tool, of
 // the points otherwise. True when it took the key.
 function volEscape(all) {
@@ -2563,9 +2654,135 @@ function volEscape(all) {
     orthoDraw(); volShow(); saveView(); return true;
   }
   if (!V.vol.on || !unit) return false;
-  const pts = V.vol.tool === "measure" ? volMeas : volPts(); if (!pts.length) return false;
+  const pts = V.vol.tool === "measure" ? volMeas : V.vol.tool === "object" ? volObjs() : volPts(); if (!pts.length) return false;
   if (all) pts.length = 0; else pts.pop();
   volDraw(); saveView(); return true;
+}
+
+/* ------------------------------------------------------------------------------------------
+   Objects. A click with the object tool picks a seed exactly as point does, then grows the
+   connected region around it in the page's bytes of one channel (the one drawn; in the overlay,
+   the shown channel standing furthest above its own floor at the seed): a breadth-first walk over
+   the six face neighbours of each voxel, keeping those at least `frac` of the seed's peak (the
+   brightest of its 3×3×3, in the window's bytes, so a share of its height above the window's low
+   end) and no further from the seed than `r` µm, and never more than VOL_OBJ_MAX voxels. The
+   radius is what stops it running along an axon from a bouton or into a neighbour that touches.
+   Only the seed and the two numbers are kept and saved; the region is grown again from the bytes
+   whenever it is needed (a new window or reduction regrows it), so nothing stale is stored.
+   The numbers are the reduced grid's: a voxel is pixel × pixel_y × step × down², the means are
+   of the window's bytes taken back to the recording's units — 8 bits, so to about a step of the
+   window, and a voxel held at 255 counts as the window's top.
+   ------------------------------------------------------------------------------------------ */
+const VOL_OBJ = "#3ee8c4", VOL_OBJ_MAX = 250000;
+const volObjCache = new WeakMap();           // object -> { key, reg }
+function volObjs() { if (!unit) return []; return V.vol.objs[unit.path] || (V.vol.objs[unit.path] = []); }
+// the channel an object is grown in, for a seed q (full-resolution voxel)
+function volObjChan(q) {
+  if (!volMeta.ov) return volMeta.chans[0];
+  if (V.vol.mode === "depth") return V.ch === 1 ? 1 : 0;
+  const [D, Hy, Wx] = volMeta.shape, k = volMeta.down, i = (q[0] * Hy + Math.min(Hy - 1, Math.floor(q[1] / k))) * Wx + Math.min(Wx - 1, Math.floor(q[2] / k));
+  let best = 0, bs = -Infinity;
+  for (let j = 0; j < 2; j++) { if (!V.vol.chOn[j]) continue; const f = V.vol.thrC[j] * 255, c = Math.max(V.vol.ceil, V.vol.thrC[j] + .01) * 255;
+    const sc = (volBytes[j][i] - f) / (c - f); if (sc > bs) { bs = sc; best = j; } }
+  return volMeta.chans[best];
+}
+function volObjRegion(o) {                   // the region, grown now or kept from the last time; null if its channel is not on the page
+  if (!volMeta || !unit) return null;
+  const j = volMeta.chans.indexOf(o.ch); if (j < 0 || !volBytes[j]) return null;
+  const key = `${volKey}|${o.q}|${o.ch}|${o.frac}|${o.r}`, c = volObjCache.get(o);
+  if (c && c.key === key) return c.reg;
+  const reg = volGrow(o, j); volObjCache.set(o, { key, reg }); return reg;
+}
+function volGrow(o, j) {
+  const [D, Hy, Wx] = volMeta.shape, k = volMeta.down, a = volBytes[j], S = Hy * Wx;
+  const px = unit.pixel_size_um || 1, py = unit.pixel_size_y_um || px, dz = unit.z_step_um || 1;
+  const ux = px * k, uy = py * k, r2 = o.r * o.r;              // a voxel of the page's bytes, in µm
+  const cl = (x, n) => Math.max(0, Math.min(n - 1, x));
+  // the walk starts on the brightest of the clicked voxel's 3×3×3 in this channel (itself on a tie): the peak
+  const c0 = [cl(o.q[0], D), cl(Math.floor(o.q[1] / k), Hy), cl(Math.floor(o.q[2] / k), Wx)];
+  let [z0, y0, x0] = c0, peak = a[(z0 * Hy + y0) * Wx + x0];
+  for (let dz_ = -1; dz_ <= 1; dz_++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const z = c0[0] + dz_, y = c0[1] + dy, x = c0[2] + dx;
+    if (z < 0 || y < 0 || x < 0 || z >= D || y >= Hy || x >= Wx) continue;
+    const v = a[(z * Hy + y) * Wx + x]; if (v > peak) { peak = v; z0 = z; y0 = y; x0 = x; } }
+  const lim = Math.max(1, o.frac * peak);    // a byte of 0 is at or below the window's low end: never part of an object
+  const seen = new Uint8Array(a.length), Q = new Int32Array(VOL_OBJ_MAX), nch = volBytes.length;
+  const sum = [0, 0, 0], lo = [z0, y0, x0], hi = [z0, y0, x0], csum = new Float64Array(nch);
+  let n = 0, capR = false, capN = false;
+  const take = (i, z, y, x) => { Q[n++] = i; sum[0] += z; sum[1] += y; sum[2] += x;
+    if (z < lo[0]) lo[0] = z; if (y < lo[1]) lo[1] = y; if (x < lo[2]) lo[2] = x;
+    if (z > hi[0]) hi[0] = z; if (y > hi[1]) hi[1] = y; if (x > hi[2]) hi[2] = x;
+    for (let c = 0; c < nch; c++) csum[c] += volBytes[c][i]; };
+  const s0 = (z0 * Hy + y0) * Wx + x0; seen[s0] = 1; take(s0, z0, y0, x0);
+  for (let h = 0; h < n; h++) {
+    const i = Q[h], z = Math.floor(i / S), y = Math.floor((i - z * S) / Wx), x = i - z * S - y * Wx;
+    for (let m = 0; m < 6; m++) {
+      const zz = z + (m === 0 ? -1 : m === 1 ? 1 : 0), yy = y + (m === 2 ? -1 : m === 3 ? 1 : 0), xx = x + (m === 4 ? -1 : m === 5 ? 1 : 0);
+      if (zz < 0 || yy < 0 || xx < 0 || zz >= D || yy >= Hy || xx >= Wx) continue;
+      const ii = (zz * Hy + yy) * Wx + xx; if (seen[ii]) continue; seen[ii] = 1;
+      if (a[ii] < lim) continue;
+      const ex = (xx - x0) * ux, ey = (yy - y0) * uy, ez = (zz - z0) * dz;
+      if (ex * ex + ey * ey + ez * ez > r2) { capR = true; continue; }
+      if (n >= VOL_OBJ_MAX) { capN = true; continue; }
+      take(ii, zz, yy, xx);
+    }
+  }
+  return { idx: Q.slice(0, n), n, peak, lim, seed: [z0, y0, x0], cen: sum.map(x => x / n), lo, hi,
+           mean: Array.from(csum, x => x / n), capR, capN, vox: [dz, uy, ux] };
+}
+// the centre: f in full-resolution voxels as floats (for drawing), q the nearest full-resolution voxel
+function volObjCentre(reg) {
+  const k = volMeta.down, f = [reg.cen[0], (reg.cen[1] + .5) * k - .5, (reg.cen[2] + .5) * k - .5];
+  return { f, q: [Math.round(f[0]), Math.round(f[1]), Math.round(f[2])] };
+}
+function volObjStats(reg) {
+  const [vz, vy, vx] = reg.vox, f = volObjCentre(reg).f;
+  return { n: reg.n, um3: reg.n * vx * vy * vz, centre: volUm(f), slice: Math.round(f[0]),
+           ext: [(reg.hi[2] - reg.lo[2] + 1) * vx, (reg.hi[1] - reg.lo[1] + 1) * vy, (reg.hi[0] - reg.lo[0] + 1) * vz],
+           means: reg.mean.map((m, j) => ({ ch: volMeta.chans[j], v: volVal(m / 255, volMeta.chs[j].win) })) };
+}
+function volObjText(o) {
+  const name = ch => (unit.channels[ch] || "ch" + ch).replace("Channel_", "ch"), reg = volObjRegion(o);
+  if (!reg) return `${name(o.ch)} is not on the page — ${volMeta && !volMeta.ov ? `pick ${name(o.ch)}, or turn the overlay on` : "it is not one of the first two channels"}`;
+  const t = volObjStats(reg), f2 = x => x.toFixed(2), f4 = x => +x.toPrecision(4);
+  return `${f4(t.um3)} µm³ · ${t.n} vox · centre x ${f2(t.centre[0])} · y ${f2(t.centre[1])} · z ${t.centre[2].toFixed(1)} · slice ${t.slice}`
+    + `  · ${t.ext[0].toFixed(1)} × ${t.ext[1].toFixed(1)} × ${t.ext[2].toFixed(1)} µm`
+    + `  · mean ${t.means.map(m => `${name(m.ch)} ≈ ${f4(m.v)}`).join(" · ")}`
+    + `  · ${name(o.ch)} ≥ ${Math.round(o.frac * 100)} % of peak, ≤ ${o.r} µm`
+    + (reg.capR ? " · reached the radius" : "") + (reg.capN ? ` · stopped at ${VOL_OBJ_MAX} voxels` : "");
+}
+// the objects in an XYZ pane: the voxels of each region in the pane's cut (in a projection, all of
+// them) tinted, the region's edge drawn solid, and its number beside it
+function orthoObjs(g, axis, c, dpr) {
+  const objs = volObjs(); if (!objs.length) return;
+  const { D, Hy, Wx } = oGeom, v = V.vol, S = Hy * Wx;
+  const [w, h] = { xy: [Wx, Hy], yz: [D, Hy], xz: [Wx, D] }[axis];
+  const rgb = [0x3e, 0xe8, 0xc4];
+  objs.forEach((o, n) => {
+    const reg = volObjRegion(o); if (!reg) return;
+    const m = new Uint8Array(w * h); let cnt = 0, sx = 0, sy = 0;
+    for (let t = 0; t < reg.n; t++) {
+      const i = reg.idx[t], z = Math.floor(i / S), y = Math.floor((i - z * S) / Wx), x = i - z * S - y * Wx;
+      let p;
+      if (axis === "xy") { if (!v.oMax && z !== v.cz) continue; p = y * w + x; }
+      else if (axis === "yz") { if (!v.oMax && x !== v.cx) continue; p = y * w + z; }
+      else { if (!v.oMax && y !== v.cy) continue; p = z * w + x; }
+      if (!m[p]) { m[p] = 1; cnt++; sx += p % w; sy += Math.floor(p / w); }
+    }
+    if (!cnt) return;
+    const off = document.createElement("canvas"); off.width = w; off.height = h;
+    const og = off.getContext("2d"), im = og.createImageData(w, h);
+    for (let p = 0; p < w * h; p++) { if (!m[p]) continue;
+      const x = p % w, y = (p - x) / w;
+      const edge = x === 0 || y === 0 || x === w - 1 || y === h - 1 || !m[p - 1] || !m[p + 1] || !m[p - w] || !m[p + w];
+      im.data.set([rgb[0], rgb[1], rgb[2], edge ? 235 : 70], 4 * p); }
+    og.putImageData(im, 0, 0);
+    g.save(); g.imageSmoothingEnabled = false; g.drawImage(off, 0, 0, c.width, c.height); g.restore();
+    const X = (sx / cnt + .5) / w * c.width, Y = (sy / cnt + .5) / h * c.height;
+    g.fillStyle = "rgba(0,0,0,.6)"; const t = "o" + (n + 1), tw = g.measureText(t).width;
+    g.fillRect(X + 8 * dpr, Y - 6 * dpr, tw + 4 * dpr, 12 * dpr);
+    g.fillStyle = VOL_OBJ; g.fillText(t, X + 10 * dpr, Y);
+  });
 }
 
 /* ------------------------------------------------------------------------------------------
@@ -2607,11 +2824,13 @@ function orthoPlane(axis, j = 0) {          // Uint8 image of one pane (of chann
    same float sum and the same clamped rounding the per-pixel loop used, so the pixels are equal. */
 let oPane = {};
 const _oLut = {};
-function orthoLut(cols, shown) {
-  const key = JSON.stringify([cols, shown]);
+function orthoLut(cols, shown, gams = []) {
+  const key = JSON.stringify([cols, shown, gams]);
   if (_oLut[key]) return _oLut[key];
+  const G = shown.map((j, n) => volGamLut(gams[n]));   // each channel's gamma, or null at 1 (the byte as it is)
   const q8 = new Uint8ClampedArray(1), word = (a, b) => {
     let w = 255 << 24;
+    if (G[0]) a = G[0][a]; if (G[1]) b = G[1][b];
     for (let ci = 0; ci < 3; ci++) { let s = 0; if (shown.length > 0) s += cols[shown[0]][ci] * a; if (shown.length > 1) s += cols[shown[1]][ci] * b;
       q8[0] = Math.min(255, s); w |= q8[0] << (8 * ci); }
     return w >>> 0;
@@ -2624,25 +2843,27 @@ function orthoLut(cols, shown) {
 function orthoPicture(axis) {
   const v = V.vol, ov = !!volMeta.ov;
   const cols = ov ? volColours() : null, shown = ov ? [0, 1].filter(j => v.chOn[j]) : null;
-  const key = JSON.stringify([volKey, axis, v.oMax ? "M" : v[{ xy: "cz", xz: "cy", yz: "cx" }[axis]], ov, cols, shown]);
+  const gams = ov ? shown.map(j => v.gam[j]) : [v.gam[V.ch] ?? 1], G = ov ? null : volGamLut(gams[0]);
+  const key = JSON.stringify([volKey, axis, v.oMax ? "M" : v[{ xy: "cz", xz: "cy", yz: "cx" }[axis]], ov, cols, shown, gams]);
   if (oPane[axis] && oPane[axis].key === key) return oPane[axis].off;
   const pl = orthoPlane(axis), off = document.createElement("canvas"), N = pl.w * pl.h;
   off.width = pl.w; off.height = pl.h;
   const og = off.getContext("2d"), im = og.createImageData(pl.w, pl.h);
   if (LITTLE) {
     const o32 = new Uint32Array(im.data.buffer);
-    if (!ov) { const px = pl.px; for (let i = 0; i < N; i++) o32[i] = (0xff000000 | px[i] * 0x010101) >>> 0; }
+    if (!ov && G) { const px = pl.px; for (let i = 0; i < N; i++) o32[i] = (0xff000000 | G[px[i]] * 0x010101) >>> 0; }
+    else if (!ov) { const px = pl.px; for (let i = 0; i < N; i++) o32[i] = (0xff000000 | px[i] * 0x010101) >>> 0; }
     else {                                           // the overlay: each channel in its colour, added
-      const T = orthoLut(cols, shown), pls = shown.map(j => orthoPlane(axis, j).px);
+      const T = orthoLut(cols, shown, gams), pls = shown.map(j => orthoPlane(axis, j).px);
       if (shown.length === 0) o32.fill(T[0]);
       else if (shown.length === 1) { const a = pls[0]; for (let i = 0; i < N; i++) o32[i] = T[a[i]]; }
       else { const a = pls[0], b = pls[1]; for (let i = 0; i < N; i++) o32[i] = T[a[i] << 8 | b[i]]; }
     }
-  } else if (!ov) for (let i = 0; i < N; i++) { const q = pl.px[i]; im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = q; im.data[4 * i + 3] = 255; }
+  } else if (!ov) for (let i = 0; i < N; i++) { const q = G ? G[pl.px[i]] : pl.px[i]; im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = q; im.data[4 * i + 3] = 255; }
   else {                                             // a big-endian machine: the plain loop
-    const pls = shown.map(j => orthoPlane(axis, j).px);
+    const pls = shown.map(j => orthoPlane(axis, j).px), Gs = gams.map(volGamLut);
     for (let i = 0; i < N; i++) {
-      for (let ci = 0; ci < 3; ci++) { let s = 0; shown.forEach((j, n) => { s += cols[j][ci] * pls[n][i]; }); im.data[4 * i + ci] = Math.min(255, s); }
+      for (let ci = 0; ci < 3; ci++) { let s = 0; shown.forEach((j, n) => { s += cols[j][ci] * (Gs[n] ? Gs[n][pls[n][i]] : pls[n][i]); }); im.data[4 * i + ci] = Math.min(255, s); }
       im.data[4 * i + 3] = 255; }
   }
   og.putImageData(im, 0, 0);
@@ -2696,6 +2917,7 @@ function orthoDraw() {
 function orthoMarks(g, axis, c, dpr) {
   const { D, Hy, Wx } = oGeom, v = V.vol, k = volMeta.down;
   g.font = `${Math.round(10 * dpr)}px sans-serif`; g.textBaseline = "middle"; g.lineWidth = 1.5 * dpr;
+  orthoObjs(g, axis, c, dpr);
   volMeas.forEach(q => {                       // the ruler's points, as dots
     const z = q[0], y = Math.floor(q[1] / k), x = Math.floor(q[2] / k);
     if (!v.oMax && { xy: Math.abs(z - v.cz), yz: Math.abs(x - v.cx), xz: Math.abs(y - v.cy) }[axis] > 1) return;

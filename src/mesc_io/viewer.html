@@ -264,6 +264,7 @@
       <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button>
       <button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button>
       <button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button>
+      <button id="pngBtn" title="save what is on screen as a PNG: the image at its own pixels (whole pixels, no blur) with the ROIs, the ruler, a µm scale bar and a caption — or the 3D view when it is open">PNG</button>
       <button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button>
       <button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
     </div>
@@ -304,6 +305,7 @@
     <div id="exports">
       <button id="doTraces" title="one pass over the recording (Enter)">traces ⏎</button>
       <a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a>
+      <a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a>
       <button id="dlZip" title="the ROI set as an ImageJ zip — Fiji opens it, the pipeline reads it">export ROIs</button>
       <a id="dlJson" href="#" title="the ROI set as stored">json</a>
       <span id="saveState" title="the view and the ROIs save themselves">saved</span>
@@ -750,7 +752,10 @@ function mapping() {
 }
 function paint() {
   if (!unit) return;
-  const c = $("view"), g = c.getContext("2d"), m = mapping();
+  paintTo($("view"), mapping());
+}
+function paintTo(c, m) {                 // the screen and the PNG export draw through the same path
+  const g = c.getContext("2d");
   c.width = m.W; c.height = m.H;
   g.fillStyle = "#000"; g.fillRect(0, 0, m.W, m.H);
   if (imgEl) { g.imageSmoothingEnabled = false;
@@ -808,6 +813,77 @@ function drawRuler(g, m) {
     g.fillStyle = "#ffd400"; g.fillText(t, tx, ty);
   }
   g.restore();
+}
+/* ---- PNG export: what is on screen, made to be put in a figure ----
+   The image goes out at its own pixels, each drawn as a whole k × k block (no smoothing: a pixel
+   stays a pixel), with the ROIs and the ruler drawn through the same path as the screen, a scale
+   bar in µm and a caption saying exactly what the picture is — file, unit, frame or projection,
+   channels, window. The background is the report's (#16213e), so the two look like one family. */
+const PNG_BG = "#16213e";
+function exportName(parts) {
+  return parts.filter(Boolean).join("_").replace(/[^A-Za-z0-9._+-]+/g, "_").replace(/_+/g, "_") + ".png";
+}
+function savePng(canvas, name) {
+  canvas.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name;
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }, "image/png");
+}
+function captionLines() {
+  const chans = shownChans(), dz = unit.z_step_um;
+  const what = V.proj ? (V.proj === "max" ? "max" : "mean") + " over " + (dz ? "depth" : "the recording")
+    : dz ? `slice ${V.frame} (${((V.frame - (unit.frames - 1) / 2) * dz).toFixed(1)} µm)`
+      : `frame ${V.frame}` + (fs() ? ` (${(V.frame / fs()).toFixed(2)} s)` : "") + (V.avg > 1 ? ` · ×${V.avg} avg` : "");
+  const win = chans.map(c => { const fw = V.win === "fixed" ? fixedWinFor(c) : null;
+    return `${unit.channels[c]} ${fw ? fw.lo + "–" + fw.hi : V.lo + "–" + V.hi + " %"}`; }).join(", ");
+  return [`${FILE.file} · ${unit.name}${unit.comment ? " · " + unit.comment : ""}`,
+          `${what} · ${win}${V.flipY ? " · MESc view (row 0 at the bottom)" : ""}`];
+}
+function scaleBar(g, x1, y1, pxPerUm, maxPx) {
+  const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
+  const um = steps.filter(u => u * pxPerUm <= maxPx).pop();
+  if (!um) return;
+  const L = um * pxPerUm, h = Math.max(3, Math.round(maxPx / 60));
+  g.fillStyle = "#fff"; g.fillRect(x1 - L, y1 - h, L, h);
+  g.font = `${Math.max(11, Math.round(maxPx / 22))}px sans-serif`; g.textAlign = "right"; g.textBaseline = "bottom";
+  g.fillText(`${um} µm`, x1, y1 - h - 3); g.textAlign = "left"; g.textBaseline = "alphabetic";
+}
+function withCaption(src, lines, name) {
+  const fsz = Math.max(12, Math.round(src.width / 70)), pad = Math.round(fsz * 0.7), capH = lines.length * (fsz + 4) + 2 * pad;
+  const out = document.createElement("canvas"); out.width = src.width; out.height = src.height + capH;
+  const g = out.getContext("2d");
+  g.fillStyle = PNG_BG; g.fillRect(0, 0, out.width, out.height);
+  g.drawImage(src, 0, 0);
+  g.fillStyle = "#e6e6e6"; g.font = `${fsz}px sans-serif`;
+  lines.forEach((t, i) => g.fillText(t, pad, src.height + pad + (i + 1) * (fsz + 4) - 4, out.width - 2 * pad));
+  savePng(out, name);
+}
+function exportImagePng() {
+  if (!unit || !imgEl) { badge("nothing to export yet", true); return; }
+  const z = V.zoom.w ? V.zoom : { x: 0, y: 0, w: unit.width, h: unit.height };
+  const k = Math.max(1, Math.round(1024 / Math.max(z.w, z.h)));          // whole pixels, ~1000 px across
+  const W = Math.round(z.w * k), H = Math.round(z.h * k), fy = !!V.flipY, uh = unit.height;
+  const ox = -z.x * k, oy = -(fy ? uh - z.y - z.h : z.y) * k;
+  const m = { k, ox, oy, W, H, fy, sy: y => oy + (fy ? uh - y : y) * k };
+  const c = document.createElement("canvas");
+  paintTo(c, m);
+  const g = c.getContext("2d");
+  if (unit.pixel_size_um) scaleBar(g, W - Math.round(W / 40), H - Math.round(H / 40), k / unit.pixel_size_um, W / 4);
+  const chans = shownChans().map(i => unit.channels[i]).join("+");
+  const what = V.proj ? V.proj : (unit.z_step_um ? "slice" : "frame") + V.frame;
+  withCaption(c, captionLines(), exportName([FILE.file.replace(/\.mesc$/i, ""), unit.name, what, chans, V.flipY && "MESc"]));
+}
+function exportVolPng() {
+  volDraw();                                       // a fresh frame, read back in the same task
+  const src = $("vol"), c = document.createElement("canvas");
+  c.width = src.width; c.height = src.height;
+  c.getContext("2d").drawImage(src, 0, 0);
+  withCaption(c, [captionLines()[0], `3D · ${V.vol.mode} · ${volMeta && volMeta.ov ? "two channels" : unit.channels[V.ch]}`],
+              exportName([FILE.file.replace(/\.mesc$/i, ""), unit.name, "3D", V.vol.mode]));
+}
+function exportTracePng() {
+  const src = $("trace");
+  if (!TR || !src.width) { badge("draw the traces first", true); return; }
+  withCaption(src, [captionLines()[0], `traces · ${V.signal === "dff" ? "dF/F" : "raw"} · ${TR.names.length} ROIs`],
+              exportName([FILE.file.replace(/\.mesc$/i, ""), unit.name, "traces", V.signal]));
 }
 function imgPoint(ev) {
   const r = $("stage").getBoundingClientRect(), m = mapping();
@@ -1231,6 +1307,8 @@ $("clearAll").onclick = () => {
   if (!confirm(`Remove all ${ROIS.length} ROIs of ${unit.name}? Export first if you want to keep them.`)) return;
   ROIS = []; V.sel = -1; V.shown[unit.path] = {}; TR = null; draft = []; renderRois(); paint(); plotTraces(); saveRois(); saveView();
 };
+$("pngBtn").onclick = () => (V.vol && V.vol.on ? exportVolPng() : exportImagePng());
+$("dlTracePng").onclick = e => { e.preventDefault(); exportTracePng(); };
 $("dlJson").onclick = e => { e.preventDefault(); location.href = "/api/export/rois.json"; };
 
 /* ------------------------------------------------------------------------------------------

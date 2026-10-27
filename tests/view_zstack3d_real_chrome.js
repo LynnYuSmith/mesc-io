@@ -317,6 +317,13 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
     if (!(busy[2] && busy[0] < full[0] && busy[1] < full[1])) fail("a moving 3D view was not drawn coarser: " + JSON.stringify([full, busy]));
     if (rest[2] || rest[0] !== full[0] || rest[1] !== full[1]) fail("the 3D view did not come back to full quality at rest: " + JSON.stringify([full, rest]));
   }
+  {
+    await ev("window.__png=null; savePng=(c,n)=>{ const g=c.getContext('2d'), d=g.getImageData(0,0,c.width,c.height-60).data; let lit=0; for(let i=0;i<d.length;i+=4) lit+= (d[i]+d[i+1]+d[i+2])>30; window.__png={w:c.width,h:c.height,name:n,lit}; }; 'ok'");
+    await ev("exportVolPng(); 'ok'"); await sleep(300);
+    const p3 = await ev("window.__png");
+    console.log("  3D png      :", JSON.stringify(p3));
+    if (!p3 || p3.lit < 500 || !/_3D_/.test(p3.name)) fail("the 3D PNG is empty or misnamed: " + JSON.stringify(p3));
+  }
   console.log("  depth       :", JSON.stringify(depth));
   console.log("  glass       :", JSON.stringify(glass));
   console.log("  restored    :", back.mode, "yaw", back.yaw.toFixed(2));

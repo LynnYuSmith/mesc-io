@@ -296,6 +296,16 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (await ev("ruler.length") !== 0) fail("Escape did not clear the ruler");
   await ev("V.flipY=false; setTool('spot'); paint(); 'ok'");
 
+  // 2l. PNG export: the image at whole pixels with a caption strip, named after what it shows
+  await ev("window.__png=null; savePng=(c,n)=>{ const g=c.getContext('2d'); window.__png={w:c.width,h:c.height,name:n,corner:Array.from(g.getImageData(0,c.height-2,1,1).data)}; }; 'ok'");
+  await ev("V.zoom={x:0,y:0,w:0,h:0}; V.proj='mean'; ruler=[[10,10],[40,50]]; exportImagePng(); 'ok'"); await sleep(300);
+  const png = await ev("window.__png"), uw = await ev("unit.width"), uh = await ev("unit.height");
+  console.log("  png export:", JSON.stringify(png));
+  if (!png || png.w % uw !== 0 || png.h <= (png.w / uw) * uh) fail("the image PNG is not whole pixels plus a caption: " + JSON.stringify(png));
+  if (!/MUnit_\d+_mean/.test(png.name) || !png.name.endsWith(".png")) fail("the PNG name does not say what it is: " + png.name);
+  if (png.corner.slice(0, 3).join() !== "22,33,62") fail("the caption strip is not the report's background: " + png.corner);
+  await ev("ruler=[]; V.proj=''; paint(); 'ok'");
+
   // 3. AVG typed as a number
   await ev("const a=document.getElementById('avgN'); a.value='13'; a.dispatchEvent(new Event('change')); 'ok'"); await sleep(400);
   const avg = await ev("V.avg"); const url = await ev("frameUrl()");

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.12 — 2026-10-27
 
 **Faster on old laptops.** Our first user's five-year-old Mac took 15–20 minutes for the traces.
 

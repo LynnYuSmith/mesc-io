@@ -4,6 +4,17 @@
 
 **Measure, export, open in Fiji.**
 
+- **Points in 3D.** **point** in the 3D bar: a click (a drag still turns) marks the brightest voxel
+  under the cursor, snapped to the brightest of its 3×3×3 neighbours, kept in the file's own
+  full-resolution voxels (so a turn, a flip or the 3D downsampling does not move it) and saved with
+  the view. Points are numbered on the picture, in XYZ and in the PNG, with their position in µm, the
+  slice and each channel's value. Esc removes the last, shift+Esc all.
+- **A ruler in 3D.** **measure**: two points give the distance in µm with Δx, Δy, Δz (x and y from
+  their pixel sizes, z from the slice step); shift+click goes on into a path whose length is an
+  axon's. The label says Δz is the least certain — a two-photon PSF is several times longer along z.
+- **A clip box and a thick slab.** **box** keeps six limits of the stack in its own axes; **slab**
+  draws only a thickness in µm around the slider's slice, as MIP, and the slider moves it. Both only
+  move the ends of each ray, so with neither on the 3D picture is the old one to the bit.
 - **TIFF export is a Fiji hyperstack.** `export … out.tif` now writes every channel (`--channel N` for
   one): TCYX for a recording, ZCYX for a z-stack, composite mode with each channel in its own colour and
   its own display range (1–99.8 % of that channel, so a red ten times brighter does not set the green's

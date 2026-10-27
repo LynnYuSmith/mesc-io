@@ -86,7 +86,14 @@ A z-stack is shown in slices and microns, with a max projection, a **3D** view y
 (MIP, semi-transparent, or coloured by depth) and **XYZ** orthogonal views through one crosshair.
 With **overlay** on, a two-channel stack is shown in both: green and magenta, each channel through
 its own window and with its own floor, white where both are bright (depth colouring stays one
-channel).
+channel). In 3D, **point** marks the brightest voxel under a click (numbered, with its µm position,
+slice and each channel's value; also shown in XYZ), **measure** gives the distance between two
+points in µm — shift+click goes on into a path, an axon's length — **box** clips the stack to six
+limits and **slab** draws only a thickness around the current slice, as MIP.
+
+**ruler** (beside the ROI tools) measures in µm between two clicks on the image; **PNG** saves what
+is on screen for a figure — the image at whole pixels with the ROIs, the ruler, a scale bar and a
+caption, or the 3D view — and **png** beside csv the traces.
 
 The picture is drawn in **fixed limits**: by default the display window the recording was
 saved with on the rig (the file's own LUT, typically 0–2000 in reader units), the same for every

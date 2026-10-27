@@ -191,3 +191,29 @@ drawn on MUnit_3 says nothing about MUnit_7. The store is keyed by unit path
 menu appears when another unit has ROIs, for the case where the field really is the same.
 A file in the old flat shape is carried onto the first unit and rewritten, with a line in the
 log saying to check it.
+
+## Two channels in 3D (2026-10-27)
+
+With **overlay** on (the same button
+as in 2D), a two-channel stack goes to the GPU as one RG8 texture — channel 0 in r, channel 1 in
+g — and the shader draws them green and magenta, added: where both are bright the voxel is white.
+The file's own colours (green and red, on our rig) are not used here: their sum is yellow, which
+is hard to tell from green. A palette picked for a channel in instruments still wins.
+
+* **A window each.** The red channel is often ten times brighter than the green; one window
+  would leave the green black. Each channel is fetched on its own through its own window — the
+  fixed limits typed for it, or percentiles of that channel alone — and has its own floor in the
+  3D bar, set from its own histogram when it opens. The ceiling and cut/clip stay shared (a
+  fraction of each window), and the cut works on each channel's bytes, so a red blob does not
+  take the green around it.
+* **One grid.** `?share=2` halves the server's voxel budget for each channel; the block-averaging
+  factor depends only on the unit's size and the share, so both come back voxel for voxel, and
+  the pair costs the GPU what one channel did. The page refuses a pair that does not line up.
+* **Modes.** MIP: each channel's brightest along the ray, coloured, added. Glass: both add light
+  and hide what is behind; a voxel's colour is the two colours weighted by how solid each channel
+  is there. Depth stays one channel — the hue already says how deep, a second colour on top of it
+  would say nothing — and the info line says which.
+* **XYZ** shows the same two colours (each channel's bytes as sent, no floor, as the grey views).
+  A switch per channel hides it in 3D and XYZ.
+* Overlay off, or a one-channel unit, is the old path untouched: same request, same R8 texture,
+  same shader branch. The browser check compares the picture before and after the overlay.

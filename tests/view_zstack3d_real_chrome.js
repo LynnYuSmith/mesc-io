@@ -1,6 +1,7 @@
 /* A z-stack in 3D, in a real Chrome: WebGL2 must come up, the stack must reach the GPU, the
    first picture must be the stack seen from above (not black), dragging must turn it, depth
-   mode must be coloured and glass must show something. Same CDP harness, no puppeteer.
+   mode must be coloured and glass must show something; on a two-channel stack the overlay must
+   be in two colours (tools/make_synthetic.py --stack writes one). Same CDP harness, no puppeteer.
    node tests/view_zstack3d_real_chrome.js <viewer url> <out prefix> */
 const { spawn } = require("node:child_process"); const http = require("node:http"); const fs = require("node:fs");
 const URL_ = process.argv[2], OUT = process.argv[3];
@@ -218,6 +219,66 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   await sleep(600);
   if ((await look()).peak < 100) fail("3D after the XYZ views is black");
   console.log("  ortho       :", JSON.stringify({xz_over_xy: +got.toFixed(3), want: +want.toFixed(3), cross: cr, z_after_wheel: z1, xz_sum: [slice, proj]}));
+
+  // Two channels at once: overlay on, the stack goes up as one RG texture and is drawn green and
+  // magenta, each channel through its own window. Both colours must be on screen, white where both
+  // are bright; hiding a channel must take its colour away; glass must show both; the XYZ views must
+  // be in the same two colours; and overlay off must give back the single-channel picture exactly.
+  if ((await ev(`FILE.units[${stack}].channels.length`)) > 1) {
+    const mode0 = await ev("V.vol.mode");
+    await ev("V.vol.mode = 'mip'; V.vol.thrFor = ''; volShow(); volReset(); 'ok'"); await sleep(500);
+    const single = await look(), knobs = await ev("JSON.stringify({thr: V.vol.thr, ceil: V.vol.ceil, ceilSet: V.vol.ceilSet, cut: V.vol.cut, gain: V.vol.gain, frame: V.frame})");
+    const hues = (id = "vol") => ev(`(()=>{const c=document.getElementById('${id}'); let p;
+      if (c.getContext('webgl2')) { const g=c.getContext('webgl2'); p=new Uint8Array(c.width*c.height*4); g.readPixels(0,0,c.width,c.height,g.RGBA,g.UNSIGNED_BYTE,p); }
+      else p=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+      let green=0, magenta=0, white=0, grey=0; for(let i=0;i<p.length;i+=4){const r=p[i],gg=p[i+1],b=p[i+2];
+        if (r>180&&gg>180&&b>180) white++; else if (gg>100&&r<gg*.4&&b<gg*.4) green++; else if (r>100&&b>100&&gg<.4*Math.min(r,b)) magenta++;
+        else if (r>100&&Math.abs(r-gg)<20&&Math.abs(r-b)<20) grey++; }
+      return JSON.stringify({green, magenta, white, grey});})()`).then(JSON.parse);
+    await click("#ovBtn");
+    for (let i = 0; i < 40 && !(await ev("!!(volMeta && volMeta.ov)")); i++) await sleep(250);
+    if (!(await ev("!!(volMeta && volMeta.ov)"))) fail("the two channels never reached the GPU: " + await ev("document.getElementById('saveState').textContent"));
+    await sleep(500);
+    const ovm = JSON.parse(await ev("JSON.stringify(volMeta)")), mip2 = await hues(); await shot("overlay_mip");
+    if (ovm.chs.length !== 2 || JSON.stringify(ovm.shape) !== JSON.stringify(meta.shape)) fail("the overlay's two channels are not on the stack's grid: " + JSON.stringify(ovm));
+    if (!(ovm.chs[1].win[1] - ovm.chs[1].win[0] > 3 * (ovm.chs[0].win[1] - ovm.chs[0].win[0]))) fail("the channels do not have a window each: " + JSON.stringify(ovm.chs));
+    if (mip2.green < 200 || mip2.magenta < 200) fail("the overlay MIP is not in two colours: " + JSON.stringify(mip2));
+    if (mip2.white < 20) fail("where both channels are bright the overlay is not white: " + JSON.stringify(mip2));
+    if (await ev("document.getElementById('volChs').hidden") || !(await ev("document.getElementById('volThrL').hidden"))) fail("the per-channel rows did not replace the shared floor");
+    // hide the green channel: its colour goes, the magenta stays
+    await ev("document.querySelector('#volChs .vchOn[data-k=\"0\"]').click(); 'ok'"); await sleep(300);
+    const noGreen = await hues(); await shot("overlay_mip_ch1_only");
+    if (noGreen.green > mip2.green * .05 || noGreen.white > mip2.white * .2 || noGreen.magenta < mip2.magenta * .5) fail("hiding ch0 did not take the green away: " + JSON.stringify([mip2, noGreen]));
+    await ev("document.querySelector('#volChs .vchOn[data-k=\"0\"]').click(); 'ok'"); await sleep(300);
+    // each channel's floor is its own: lowering ch1's brings up more magenta and leaves the green
+    const auto2 = JSON.parse(await ev("JSON.stringify(V.vol.thrC)"));
+    await ev("(()=>{const s=document.querySelectorAll('#volChs .vthr')[1]; s.value=V.vol.thrC[1]*0.6; s.oninput(); return 'ok';})()"); await sleep(300);
+    const ch1Floor = await hues(), thr2 = JSON.parse(await ev("JSON.stringify(V.vol.thrC)"));
+    if (thr2[0] !== auto2[0] || !(ch1Floor.magenta + ch1Floor.white > 1.15 * (mip2.magenta + mip2.white)) || Math.abs(ch1Floor.green - mip2.green) > mip2.green * .05)
+      fail("ch1's floor is not its own: " + JSON.stringify([auto2, thr2, mip2, ch1Floor]));
+    await click("#volAuto");
+    await click("#volGlass"); const glass2 = await hues(); await shot("overlay_glass");
+    if (glass2.green < 100 || glass2.magenta < 100) fail("glass does not show both channels: " + JSON.stringify(glass2));
+    await click("#volDepth");
+    if (!(await ev("document.getElementById('volInfo').textContent")).includes("depth colours one channel")) fail("depth does not say it is one channel");
+    await click("#volMip");
+    const oMax0 = await ev("V.vol.oMax");
+    await click("#orthoBtn"); await ev("V.vol.oMax = false; volShow(); 'ok'"); await sleep(400);
+    const xy2 = await hues("oXY"); await shot("overlay_ortho");
+    if (xy2.green < 50 || xy2.magenta < 50) fail("the XYZ views are not in two colours: " + JSON.stringify(xy2));
+    await ev("V.vol.oMax = true; volShow(); 'ok'"); await sleep(400); const xyMax = await hues("oXY"); await shot("overlay_ortho_max");
+    if (xyMax.white < 5) fail("the XY projection has no white where both channels are bright: " + JSON.stringify(xyMax));
+    await ev(`V.vol.oMax = ${oMax0}; volShow(); 'ok'`);
+    await click("#ovBtn"); await click("#volBtn");
+    for (let i = 0; i < 40 && (await ev("!!(volMeta && volMeta.ov)")); i++) await sleep(250);
+    // the same knobs as before (a reload sets the floor afresh from the stack, as it should)
+    await ev(`(()=>{const k=${knobs}; V.frame=k.frame; Object.assign(V.vol, {mode: 'mip', thr: k.thr, ceil: k.ceil, ceilSet: k.ceilSet, cut: k.cut, gain: k.gain}); volShow(); volReset(); return 'ok';})()`); await sleep(500);
+    const back1 = await look();
+    if (back1.sig !== single.sig) fail("overlay off did not give back the single-channel picture");
+    await ev(`V.vol.mode = "${mode0}"; volShow(); volDraw(); 'ok'`);
+    console.log("  overlay     :", JSON.stringify({ floors: auto2, mip: mip2, ch0_hidden: noGreen, ch1_floor_down: ch1Floor, glass: glass2, xy: xy2, xy_max: xyMax,
+                                                     windows: ovm.chs.map(c => c.win) }));
+  }
 
   // the view saves the 3D state and a reload brings it back
   await sleep(600);

@@ -157,3 +157,69 @@ def test_the_crameri_tables_are_whole_and_exact():
     assert b[-6:] == "%02x%02x%02x" % tuple(round(v * 255) for v in (0.981354, 0.800406, 0.981267))
     lic = Path(__file__).resolve().parents[1] / "src" / "mesc_io" / "third_party" / "crameri_LICENSE.txt"
     assert "Fabio Crameri" in lic.read_text(encoding="utf-8")
+
+
+# The two-colour overlay of a z-stack in 3D and XYZ, under the same stub: a unit with two channels
+# and a slice step, a volume endpoint that answers with bytes, the overlay switched on, then 3D and
+# its modes, the XYZ views. Both channels must reach the page on one grid, the per-channel rows
+# must be built, and nothing may throw. Whether the picture is right is the real Chrome's job
+# (tests/view_zstack3d_real_chrome.js).
+TWO_CHANNEL_FETCH = r"""
+const volUrls = [];
+const fetch = (url, opts) => {
+  if (url.startsWith("/api/volume/")) {
+    const ch = +url.split("?")[0].split("/").pop();
+    const hdr = { "X-Volume-Shape": "4,8,8", "X-Voxel-Um": "1,0.5,0.5", "X-Downsample": "1",
+                  "X-Window": ch ? "0,9000" : "0,900" };
+    const bytes = new Uint8Array(4 * 8 * 8); for (let i = 0; i < bytes.length; i++) bytes[i] = (i * (ch ? 7 : 3)) & 255;
+    volUrls.push(url);
+    return Promise.resolve({ ok: true, status: 200, headers: { get: k => hdr[k] || null }, arrayBuffer: () => Promise.resolve(bytes.buffer) });
+  }
+  if (url.startsWith("/api/file")) return json(FILE);
+"""
+
+TWO_CHANNEL_CHECK = r"""
+    for (const id of ["ovBtn", "volBtn"]) byId.get(id).onclick({ preventDefault() {}, stopPropagation() {} });
+    setTimeout(() => {
+      try {
+        for (const id of ["volGlass", "volDepth", "volMip", "volAuto", "volCut", "volCut", "orthoBtn", "oMax"])
+          byId.get(id).onclick({ preventDefault() {}, stopPropagation() {} });
+        const st = JSON.parse(vm.runInContext("JSON.stringify({ov: volMeta && volMeta.ov, n: volBytes.length, chs: volMeta && volMeta.chs.length, thrC: V.vol.thrC, chOn: V.vol.chOn})", sandbox));
+        const urls = volUrls;
+        const rows = byId.get("volChs");
+        if (!st.ov || st.n !== 2 || st.chs !== 2) { console.error("the two channels did not reach the page: " + JSON.stringify(st)); process.exit(8); }
+        if (!urls.some(u => u.includes("/0?") && u.includes("share=2")) || !urls.some(u => u.includes("/1?") && u.includes("share=2")))
+          { console.error("the channels were not asked for with share=2: " + JSON.stringify(urls)); process.exit(9); }
+        if (rows.hidden || !rows.innerHTML.includes("vthr") || !byId.get("volThrL").hidden) { console.error("the per-channel rows are not shown"); process.exit(10); }
+        if (!byId.get("volInfo").innerHTML.includes("depth") && !byId.get("volInfo").innerHTML.includes("ch0")) { console.error("volInfo says nothing of the channels"); process.exit(11); }
+        console.log("two-channel 3D ok " + JSON.stringify(st));
+        process.exit(process.exitCode || 0);
+      } catch (e) { console.error("threw in the overlay: " + (e && e.stack || e)); process.exit(6); }
+    }, 100);
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node is not on this machine; the page-load gate needs it")
+def test_a_two_channel_stack_goes_to_3d_in_two_colours_without_throwing(tmp_path):
+    stub = STUB
+    for a, b in [
+        ('channels: ["Channel_0"], stage_um: null', 'channels: ["Channel_0", "Channel_1"], z_step_um: 1.0, stage_um: null'),
+        ("const fetch = (url, opts) => {\n  if (url.startsWith(\"/api/file\")) return json(FILE);", TWO_CHANNEL_FETCH.strip("\n")),
+        ('    console.log("page loaded, boot() and pick() completed, every button\'s handler ran");\n'
+         '    if (process.exitCode) process.exit(process.exitCode);\n    process.exit(0);', TWO_CHANNEL_CHECK.strip("\n")),
+    ]:
+        assert stub.count(a) == 1, a
+        stub = stub.replace(a, b)
+    path = tmp_path / "two.js"
+    path.write_text(stub, encoding="utf-8")
+    r = subprocess.run([NODE, str(path), str(PAGE)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, f"exit {r.returncode}\n{r.stdout}\n{r.stderr}"
+    assert "two-channel 3D ok" in r.stdout
+
+
+def test_the_two_colour_controls_are_in_the_page():
+    """The overlay's rows in the 3D bar and its switches over the XYZ views, and a shader that
+    reads two channels from one RG texture with a floor and a ceiling each."""
+    src = PAGE.read_text(encoding="utf-8")
+    for needle in ('id="volChs"', 'id="oChs"', 'id="volThrL"', "gl.RG8", "uniform vec2 thr2, ceil2, on2", "share=2"):
+        assert needle in src, needle

@@ -24,7 +24,8 @@ Endpoints:
                                               i omitted = the mean image), for the hover readout
     GET  /api/thumb/{unit}/{ch}             → small PNG of the mean image, for the unit list
     GET  /api/volume/{unit}/{ch}            → a z-stack as raw uint8 (z, y, x) for the 3D view
-                                              (?lo=&hi=); shape and voxel size in the headers
+                                              (?lo=&hi= or ?vmin=&vmax=; ?share=2 when two channels
+                                              go to the GPU together); shape and voxel size in the headers
     GET  /api/view                          → the saved view (unit, frame, zoom, …) or {}
     PUT  /api/view                          → replace the saved view (written beside the ROIs)
     GET  /api/trace/{unit}/{ch}?x=&y=&r=    → JSON time course of a disc, in reader units
@@ -81,8 +82,11 @@ MAX_AVG_FRAMES = 256
 MAX_READ_GB = 2.0
 #: The largest z-stack sent whole to the 3D view, in voxels (one byte each). 32 M is 128
 #: slices of 512x512, and it fits a WebGL 3D texture on any laptop GPU; bigger stacks are
-#: block-averaged in x and y until they fit, and the factor is sent with them.
+#: block-averaged in x and y until they fit, and the factor is sent with them. Two channels
+#: shown together share the budget (``?share=2``): each gets half, so the GPU holds no more.
 MAX_VOLUME_VOXELS = 32 * 1024 * 1024
+#: The most channels one volume may be asked to share the budget with.
+MAX_VOLUME_SHARE = 4
 
 
 def _in_polygon(pts: np.ndarray, h: int, w: int) -> np.ndarray:
@@ -636,15 +640,25 @@ class _Handler(BaseHTTPRequestHandler):
         Only for a z-stack: a recording's third axis is time, and a 5000-frame "volume" of it
         is neither small nor meaningful. Above ``MAX_VOLUME_VOXELS`` the frame is block-averaged
         in x and y by an integer factor, which is returned rather than hidden.
+
+        ``?share=n`` says this channel is one of n going to the GPU together (the two-colour
+        overlay): the budget is divided by n. The factor depends only on the unit's size and n,
+        so every channel asked for with the same n comes back on the same grid, voxel for voxel;
+        each still has its own window, since a red channel ten times brighter than the green
+        would otherwise leave the green black.
         """
         win = self._window(q)
+        share = int(q.get("share", ["1"])[0])
+        if not 1 <= share <= MAX_VOLUME_SHARE:
+            raise ValueError(f"share={share} is outside 1..{MAX_VOLUME_SHARE}")
+        budget = MAX_VOLUME_VOXELS // share
         with self._file() as f:
             u = f.unit(unit)
             if not u.z_step_um:
                 raise ValueError(f"{unit} is not a z-stack — its third axis is time, "
                                  "and there is no volume to show")
             k = 1
-            while u.n_frames * (u.height // k) * (u.width // k) > MAX_VOLUME_VOXELS:
+            while u.n_frames * (u.height // k) * (u.width // k) > budget:
                 k += 1
             hh, ww = (u.height // k) * k, (u.width // k) * k
             vol = np.empty((u.n_frames, hh // k, ww // k), dtype=np.float32)

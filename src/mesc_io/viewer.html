@@ -116,6 +116,12 @@
   #volBar label { display:flex; align-items:center; gap:4px; color:var(--muted) }
   #volBar input[type=range] { width:84px }
   #volBar input.vnum { width:72px; font-size:11px; padding:1px 3px }
+  #volBar [hidden] { display:none }
+  /* the two-colour overlay: one row per channel, its switch in its own colour, its own floor */
+  #volChs { display:flex; flex-wrap:wrap; gap:6px; align-items:center }
+  #volChs .vch { display:flex; align-items:center; gap:4px; color:var(--muted) }
+  button.vchOn { font-weight:600 }
+  button.vchOn:not(.on) { opacity:.4; text-decoration:line-through }
   #volInfo { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted); pointer-events:none;
              background:rgba(18,20,23,.7); padding:2px 6px; border-radius:3px; white-space:pre; text-align:right }
   #volInfo b { color:var(--ink); font-weight:600 }
@@ -209,7 +215,8 @@
         <button id="volMip" title="the brightest voxel along each line of sight">MIP</button>
         <button id="volGlass" title="semi-transparent: every voxel adds light and hides a little of what is behind it">glass</button>
         <button id="volDepth" title="MIP coloured by the depth the brightest voxel sits at — an axon's colour says how deep it runs">depth</button>
-        <label title="below this, a voxel is empty (fraction of the window). Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"><input type="number" id="volThrN" class="vnum" step="any" title="the floor in the recording's own units (type a value, Enter)"></label>
+        <label id="volThrL" title="below this, a voxel is empty (fraction of the window). Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"><input type="number" id="volThrN" class="vnum" step="any" title="the floor in the recording's own units (type a value, Enter)"></label>
+        <span id="volChs" hidden title="overlay: each channel in its own colour, through its own window (instruments), with its own floor; click a channel's name to hide or show it"></span>
         <label title="above this, a voxel is cut away (or held at white, with clip): the brightest blobs stop hiding what is around and behind them">ceiling <input type="range" id="volCeil" min="0.05" max="1" step="0.01"><input type="number" id="volCeilN" class="vnum" step="any" title="the ceiling in the recording's own units (type a value, Enter)"></label>
         <button id="volCut" title="what happens above the ceiling: cut = the voxel is empty, so a bright blob disappears and what is behind it shows; clip = it stays, held at white">cut</button>
         <button id="volAuto" title="the floor back at the stack's own percentile — 99.7 for MIP and depth, 97 for glass: the background empty, what stands out of it kept">auto</button>
@@ -228,6 +235,7 @@
         <div id="orthoBar">
           <button id="oMax" title="each view becomes the brightest along its own depth axis — side projections of the stack">max</button>
           <button id="oCross" class="on" title="show the crosshair">cross</button>
+          <span id="oChs" hidden></span>
           <span class="hint" id="oPos"></span>
         </div>
       </div>
@@ -236,7 +244,7 @@
       <button id="playBtn" title="space">▶</button>
       <input type="range" id="frame" min="0" max="0" value="0">
       <span id="frameLbl" class="hint">—</span>
-      <span id="chans"></span> <button id="ovBtn" hidden title="all channels at once, each in its own colour and window">overlay</button>
+      <span id="chans"></span> <button id="ovBtn" hidden title="all channels at once, each in its own colour and window — in 3D and XYZ too, green and magenta, so where both are bright it reads white">overlay</button>
     </div>
   </section>
 
@@ -939,7 +947,7 @@ function setAvg(n) {
 $("avgN").onchange = () => setAvg($("avgN").value);
 $("avgN").onkeydown = e => { if (e.key === "Enter") { setAvg($("avgN").value); $("avgN").blur(); } e.stopPropagation(); };
 $("flipBtn").onclick = () => { V.flipY = !V.flipY; $("flipBtn").classList.toggle("on", V.flipY); paint(); volDraw(); saveView(); };
-$("ovBtn").onclick = () => { V.overlay = !V.overlay; showWin(); draw(); saveView(); };
+$("ovBtn").onclick = () => { V.overlay = !V.overlay; showWin(); volShow(); draw(); saveView(); };
 $("cmap").onchange = () => { if (!unit) return; V.cmapBy[`${unit.path}|${V.ch}`] = $("cmap").value; draw(); saveView(); };
 $("winFixed").onclick = () => { V.win = "fixed"; showWin(); draw(); saveView(); };
 $("winPct").onclick = () => { V.win = "pct"; showWin(); draw(); saveView(); };
@@ -1380,6 +1388,14 @@ boot();
    The box is scaled by the voxel size — x and y from the pixel, z from the slice step — so the
    proportions on screen are the tissue's. It starts looking straight down the stack, which is
    the picture the max projection already shows; turning it is what adds the depth.
+
+   With overlay on and two channels, both go to the GPU at once as one RG8 texture (channel 0 in
+   r, channel 1 in g), each through its own window and with its own floor, and are drawn in two
+   colours that add: green and magenta, so where both are bright the voxel is white. MIP takes
+   each channel's brightest along the ray and adds the colours; glass lets both add light and
+   hide what is behind. Depth stays one channel (the one picked under the image): a hue already
+   says how deep, and a second colour on top of it would say nothing. The XYZ views show the
+   same two colours. One channel, or a unit with one, is drawn exactly as before.
    ========================================================================================== */
 // how close the wheel may go: well inside the box, for a single bouton. A function, as the saved
 // view is restored (volState) before this part of the script has run.
@@ -1387,7 +1403,8 @@ function volDmin() { return .03; }
 function volTop() { return Math.PI / 2 - 0.02; }   // looking straight down the stack (not exactly: a pole has no "up")
 function volState(v) {
   const d = { on: false, ortho: false, oMax: false, oCross: true, cx: -1, cy: -1, cz: -1,
-              mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0, deep: false, axes: 2 };
+              mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0, deep: false, axes: 2,
+              chOn: [true, true], thrC: [0.5, 0.5], thrCFor: "" };   // the overlay: each channel shown?, its floor
   if (!v || typeof v !== "object") return d;
   // Before 0.3.6 the camera's up was the image's y; now it is depth. A view saved then would open
   // on its side, so its camera starts afresh (its mode, floor and the rest are kept).
@@ -1401,6 +1418,9 @@ function volState(v) {
   o.z = cl(o.z, 1, 8, 1); o.yaw = cl(o.yaw, -1e4, 1e4, 0); o.pitch = cl(o.pitch, -1.5508, 1.5508, volTop());
   o.dist = cl(o.dist, volDmin(), 4, 1);
   for (const k of ["tx", "ty", "tz"]) o[k] = cl(o[k], -1, 1, 0);   // the point it turns about, inside the box
+  o.chOn = [0, 1].map(k => !(Array.isArray(v.chOn) && v.chOn[k] === false));
+  o.thrC = [0, 1].map(k => cl(Array.isArray(v.thrC) ? v.thrC[k] : NaN, 0, .95, d.thr));
+  o.thrCFor = typeof o.thrCFor === "string" ? o.thrCFor : "";
   return o;
 }
 V.vol = volState(V.vol);
@@ -1411,8 +1431,9 @@ void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2
   ndc = p * 2.0 - 1.0; gl_Position = vec4(ndc, 0.0, 1.0); }`;
 const FS = `#version 300 es
 precision highp float; precision highp sampler3D;
-uniform sampler3D vol; uniform vec3 ext, camPos, camR, camU, camF;
-uniform float tanHalf, aspect, thr, gain, den, dt, ceil_, slz, slw; uniform int mode, cut, deep, fy;
+uniform sampler3D vol; uniform vec3 ext, camPos, camR, camU, camF, colA, colB;
+uniform float tanHalf, aspect, thr, gain, den, dt, ceil_, slz, slw; uniform int mode, cut, deep, fy, ov, dch;
+uniform vec2 thr2, ceil2, on2;     // the overlay: each channel's floor, ceiling, and whether it is shown
 in vec2 ndc; out vec4 o;
 vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
 void main() {
@@ -1423,7 +1444,7 @@ void main() {
   if (ta > tb || tb < 0.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
   ta = max(ta, 0.0);
   float jit = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-  float m = 0.0, mz = 0.0; vec4 acc = vec4(0.0);
+  float m = 0.0, mz = 0.0; vec2 m2 = vec2(0.0); vec4 acc = vec4(0.0);
   for (int i = 0; i < 2048; i++) {
     float t = ta + (float(i) + jit) * dt;
     if (t > tb) break;
@@ -1431,7 +1452,24 @@ void main() {
     // the box: x across, DEPTH up (world y; the surface, slice 0, at the top), the image's rows along z
     float ry = (p.z / ext.z + 1.0) * 0.5, dz = (p.y / ext.y + 1.0) * 0.5;
     vec3 uvw = vec3((p.x / ext.x + 1.0) * 0.5, fy == 1 ? 1.0 - ry : ry, deep == 1 ? dz : 1.0 - dz);
-    float v = texture(vol, uvw).r;
+    // two channels (MIP and glass): each against its own floor and ceiling, in its own colour
+    if (ov == 1 && mode != 2) {
+      vec2 w = texture(vol, uvw).rg * on2;
+      if (w.x > ceil2.x) w.x = cut == 1 ? 0.0 : ceil2.x;
+      if (w.y > ceil2.y) w.y = cut == 1 ? 0.0 : ceil2.y;
+      if (mode == 1) {
+        vec2 a = clamp((w - thr2) / (ceil2 - thr2), 0.0, 1.0), b = clamp(w / ceil2 * gain, 0.0, 1.0);
+        float s = 1.0 - exp(-den * (a.x + a.y) * dt * 60.0);
+        // the colours add, weighted by how solid each channel is here: both alike -> white
+        vec3 c = min((colA * b.x * a.x + colB * b.y * a.y) / max(max(a.x, a.y), 1e-6), vec3(1.0));
+        if (slw > 0.0 && abs(uvw.z - slz) < slw) { c = vec3(0.35, 0.72, 1.0) * clamp(max(b.x, b.y) * 1.6, 0.25, 1.0); s = min(1.0, s * 2.5 + 0.02); }
+        acc.rgb += (1.0 - acc.a) * s * c; acc.a += (1.0 - acc.a) * s;
+        if (acc.a > 0.985) break;
+      } else m2 = max(m2, w);
+      continue;
+    }
+    vec4 tv = texture(vol, uvw);
+    float v = ov == 1 && dch == 1 ? tv.g : tv.r;            // depth in the overlay: the one channel picked
     if (v > ceil_) { if (cut == 1) continue; v = ceil_; }   // above the ceiling: gone, or held
     if (mode == 1) {
       float a = clamp((v - thr) / (ceil_ - thr), 0.0, 1.0);
@@ -1445,6 +1483,10 @@ void main() {
     } else if (v > m) { m = v; mz = uvw.z; }
   }
   if (mode == 1) { o = vec4(acc.rgb, 1.0); return; }
+  if (ov == 1 && mode == 0) {                               // each channel's MIP, coloured, added
+    vec2 g2 = clamp((m2 - thr2) / (ceil2 - thr2) * gain, 0.0, 1.0);
+    o = vec4(min(colA * g2.x + colB * g2.y, vec3(1.0)), 1.0); return;
+  }
   float g = clamp((m - thr) / (ceil_ - thr) * gain, 0.0, 1.0);
   o = vec4(mode == 2 ? hue(mz * 0.75) * g : vec3(g), 1.0);
 }`;
@@ -1453,7 +1495,8 @@ in vec3 pos; uniform mat4 mvp; void main() { gl_Position = mvp * vec4(pos, 1.0);
 const LFS = `#version 300 es
 precision mediump float; uniform vec4 col; out vec4 o; void main() { o = col; }`;
 
-let volData = null, volProj = {}, volTexKey = "";
+// volBytes: one Uint8Array per channel on the GPU (two in the overlay); volData is the first of them
+let volData = null, volBytes = [], volProj = {}, volTexKey = "";
 let GL = null, volTex = null, volKey = "", volMeta = null, volLoading = "", volProg = null, lineProg = null, lineBuf = null;
 function glProgram(gl, vs, fs) {
   const mk = (t, src) => { const sh = gl.createShader(t); gl.shaderSource(sh, src); gl.compileShader(sh);
@@ -1471,21 +1514,34 @@ function glInit() {
   lineBuf = gl.createBuffer();
   return (GL = gl);
 }
+// The overlay in 3D: the overlay is on and the unit has a second channel. Only the first two
+// channels go in (one RG texture); a third is left out, and the 3D view says so.
+function volOv() { return !!(unit && V.overlay && unit.channels.length > 1); }
 async function volLoad() {
-  const key = `${unit.path}|${V.ch}|${V.lo}|${V.hi}`;
+  const ov = volOv();
+  // Two channels: each fetched with share=2, which halves the server's voxel budget, so the pair
+  // costs the GPU what one channel did and both come back block-averaged by the same factor. Each
+  // through its own window — the fixed limits typed per channel in instruments, or percentiles of
+  // that channel alone — since red is often ten times brighter than green and one window would
+  // leave the green black.
+  const key = ov ? `${unit.path}|ov|${winQuery(0)}|${winQuery(1)}` : `${unit.path}|${V.ch}|${V.lo}|${V.hi}`;
   if (key === volKey || key === volLoading) return;
-  volLoading = key; badge("loading the stack…");
+  volLoading = key; badge(ov ? "loading the stack, two channels…" : "loading the stack…");
   try {
-    const r = await fetch(`/api/volume/${unit.path}/${V.ch}?lo=${V.lo}&hi=${V.hi}`);
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
-    const shape = r.headers.get("X-Volume-Shape").split(",").map(Number);
-    const vox = r.headers.get("X-Voxel-Um").split(",").map(Number);
-    const data = new Uint8Array(await r.arrayBuffer());
+    const one = async ch => {
+      const r = await fetch(`/api/volume/${unit.path}/${ch}?` + (ov ? `${winQuery(ch)}&share=2` : `lo=${V.lo}&hi=${V.hi}`));
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
+      return { r, shape: r.headers.get("X-Volume-Shape").split(",").map(Number),
+               vox: r.headers.get("X-Voxel-Um").split(",").map(Number), data: new Uint8Array(await r.arrayBuffer()) };
+    };
+    const got = ov ? await Promise.all([one(0), one(1)]) : [await one(V.ch)];
     if (volLoading !== key) return;                   // a newer request took over
+    if (got.some(g => g.shape.join() !== got[0].shape.join() || g.r.headers.get("X-Downsample") !== got[0].r.headers.get("X-Downsample")))
+      throw new Error("the two channels came back on different grids");
     // The bytes are kept: the XYZ views cut them here, and 3D puts them on the GPU only when it
     // is actually shown (volDraw -> volUpload), so the orthogonal views never need WebGL.
-    volData = data; volProj = {}; volCut = null; volCutFor = "";
-    volMetaFrom(r, shape, vox, data);
+    volBytes = got.map(g => g.data); volData = volBytes[0]; volProj = {}; volCut = {};
+    volMetaFrom(got);
     volKey = key; badge("stack loaded");
   } catch (e) {
     badge("3D: " + e.message, true); V.vol.on = false; V.vol.ortho = false; volShow();
@@ -1497,7 +1553,11 @@ function volUpload() {             // the bytes are here from an XYZ view; 3D wa
   const gl = glInit(), [D, Hy, Wx] = volMeta.shape;
   if (!volTex) volTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_3D, volTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, Wx, Hy, D, 0, gl.RED, gl.UNSIGNED_BYTE, volCutData());
+  if (volMeta.ov) {                // two channels, interleaved voxel by voxel: r = channel 0, g = channel 1
+    const a = volCutData(0), b = volCutData(1), rg = new Uint8Array(2 * a.length);
+    for (let i = 0; i < a.length; i++) { rg[2 * i] = a[i]; rg[2 * i + 1] = b[i]; }
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RG8, Wx, Hy, D, 0, gl.RG, gl.UNSIGNED_BYTE, rg);
+  } else gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, Wx, Hy, D, 0, gl.RED, gl.UNSIGNED_BYTE, volCutData());
   for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
     [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]])
     gl.texParameteri(gl.TEXTURE_3D, k, v);
@@ -1507,19 +1567,20 @@ function volUpload() {             // the bytes are here from an XYZ view; 3D wa
    each blob as a hollow shell just under it, which the window then stretched back to white —
    the blob stayed, as a ring. So a cut takes every voxel above the ceiling and everything within
    BLOB_RIM_UM of one, in all three axes at the stack's own voxel size, and leaves the rest as it
-   was. Computed on the CPU (a separable max filter, then a mask) when the ceiling is set. */
+   was. Computed on the CPU (a separable max filter, then a mask) when the ceiling is set; in the
+   overlay, for each channel on its own bytes, so a red blob does not take the green around it. */
 const BLOB_RIM_UM = 1.5;
-let volCut = null, volCutFor = "";
+let volCut = {};                   // per channel: { key, out }
 // The window follows the slider as it moves; the mask follows it when it is let go (ceilSet),
 // since cutting a 125-slice stack is a second of work and should not run on every step.
 function volCutKey() { return V.vol.cut && V.vol.ceilSet < 1 ? `cut${V.vol.ceilSet.toFixed(2)}` : "raw"; }
-function volCutData() {
-  const key = volKey + "|" + volCutKey();
-  if (volCutKey() === "raw") return volData;
-  if (volCutFor === key && volCut) return volCut;
+function volCutData(j = 0) {
+  const key = volKey + "|" + volCutKey(), src = volBytes[j];
+  if (volCutKey() === "raw") return src;
+  if (volCut[j] && volCut[j].key === key) return volCut[j].out;
   const [D, Hy, Wx] = volMeta.shape, [vz, vy, vx] = volMeta.vox, lim = Math.floor(V.vol.ceilSet * 255);
-  let m = new Uint8Array(volData.length);
-  for (let i = 0; i < m.length; i++) m[i] = volData[i] > lim ? 1 : 0;
+  let m = new Uint8Array(src.length);
+  for (let i = 0; i < m.length; i++) m[i] = src[i] > lim ? 1 : 0;
   // grow the seeds by r voxels along one axis: a running count of seeds in the window
   const grow = (src, n, stride, count, step, r) => {
     const out = new Uint8Array(src.length);
@@ -1541,21 +1602,26 @@ function volCutData() {
   m = grow(m, Wx, 1, D * Hy, 1, rx);                 // along x: lines are rows
   m = grow(m, Hy, Wx, D * Wx, Wx, ry);               // along y: stride one row
   m = grow(m, D, Wx * Hy, Wx * Hy, Wx * Hy, rz);     // along z: stride one slice
-  const out = new Uint8Array(volData.length);
-  for (let i = 0; i < out.length; i++) out[i] = m[i] ? 0 : volData[i];
-  volCut = out; volCutFor = key;
+  const out = new Uint8Array(src.length);
+  for (let i = 0; i < out.length; i++) out[i] = m[i] ? 0 : src[i];
+  volCut[j] = { key, out };
   return out;
 }
-function volMetaFrom(r, shape, vox, data) {
-    const hist = new Uint32Array(256); for (let i = 0; i < data.length; i += 7) hist[data[i]]++;
-    const total = Math.ceil(data.length / 7), pct = q => { let acc = 0;
-      for (let k = 0; k < 256; k++) { acc += hist[k]; if (acc >= q * total) return Math.min(.95, k / 255); } return .95; };
-    // A MIP keeps the brightest of dozens of voxels along each ray, and the brightest of dozens
-    // of background voxels is well above the 97th percentile of one — so the MIP modes start
-    // higher, at 99.7, and glass (where each voxel only adds a little) at 97.
-    volMeta = { shape, vox, down: +(r.headers.get("X-Downsample") || 1), p97: pct(.97), p997: pct(.997),
-                win: (r.headers.get("X-Window") || "0,1").split(",").map(Number) };
+function volMetaFrom(got) {         // got: one { r, shape, vox, data } per channel, all on one grid
+    const chs = got.map(({ r, data }) => {
+      const hist = new Uint32Array(256); for (let i = 0; i < data.length; i += 7) hist[data[i]]++;
+      const total = Math.ceil(data.length / 7), pct = q => { let acc = 0;
+        for (let k = 0; k < 256; k++) { acc += hist[k]; if (acc >= q * total) return Math.min(.95, k / 255); } return .95; };
+      // A MIP keeps the brightest of dozens of voxels along each ray, and the brightest of dozens
+      // of background voxels is well above the 97th percentile of one — so the MIP modes start
+      // higher, at 99.7, and glass (where each voxel only adds a little) at 97.
+      return { p97: pct(.97), p997: pct(.997), win: (r.headers.get("X-Window") || "0,1").split(",").map(Number) };
+    });
+    const { r, shape, vox } = got[0];
+    volMeta = { shape, vox, down: +(r.headers.get("X-Downsample") || 1), ov: got.length > 1, chs, ...chs[0] };
     if (V.vol.thrFor !== unit.path) { V.vol.thr = volAutoThr(); $("volThr").value = V.vol.thr; }
+    if (volMeta.ov && V.vol.thrCFor !== unit.path) V.vol.thrC = [0, 1].map(k => volAutoThr(k));
+    if (volOv()) volChRows();
     volNums();
 }
 function volShow() {
@@ -1574,8 +1640,48 @@ function volShow() {
   $("volDen").value = V.vol.den; $("volGain").value = V.vol.gain; $("volZ").value = V.vol.z;
   $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z;
   $("volDen").disabled = V.vol.mode !== "glass";
+  const ov = volOv();
+  $("volThrL").hidden = ov; $("volCeilN").hidden = ov; $("volChs").hidden = !ov; $("oChs").hidden = !ov;
+  if (ov) volChRows();
   if (on || ortho) volLoad();
   if (ortho) orthoDraw();
+}
+// The overlay's colours, as [r, g, b] in 0..1: green and magenta, which add up to white where both
+// channels are bright — unless a palette was picked for the channel in instruments; then its
+// brightest colour, so 3D agrees with what was chosen. (The file's own colours, green and red here,
+// are not used: green + red makes yellow, and yellow is hard to tell from green.)
+function volColours() {
+  return [0, 1].map(k => { const p = V.cmapBy && V.cmapBy[`${unit.path}|${k}`];
+    return p && p !== "file" ? lutOf(p)[255].map(x => x / 255) : (k === 0 ? [0, 1, 0] : [1, 0, 1]); });
+}
+const volCss = c => `rgb(${c.map(x => Math.round(x * 255)).join(",")})`;
+// One row per channel in the 3D bar (its switch, in its own colour, and its floor), and the
+// switches alone over the XYZ views. Built once per unit and colours, so typing is not interrupted.
+function volChRows() {
+  const cols = volColours(), sig = unit.path + "|" + cols.map(volCss).join(" ");
+  const name = k => unit.channels[k].replace("Channel_", "ch");
+  const btn = k => `<button class="vchOn" data-k="${k}" style="color:${volCss(cols[k])}" title="show or hide ${unit.channels[k]} in 3D and XYZ">${name(k)}</button>`;
+  if ($("volChs").dataset.sig !== sig) {
+    $("volChs").dataset.sig = sig;
+    $("volChs").innerHTML = [0, 1].map(k => `<span class="vch" data-k="${k}">${btn(k)} floor`
+      + `<input type="range" class="vthr" min="0" max="0.95" step="0.01" title="${name(k)} floor: below this, a voxel of this channel is empty (fraction of its own window). Set from the channel itself when it opens">`
+      + `<input type="number" class="vnum vthrN" step="any" title="${name(k)} floor in the recording's own units (type a value, Enter)"></span>`).join("");
+    $("oChs").innerHTML = [0, 1].map(btn).join(" ");
+    document.querySelectorAll("#volChs .vchOn, #oChs .vchOn").forEach(b => b.onclick = () => {
+      const k = +b.dataset.k; V.vol.chOn[k] = !V.vol.chOn[k]; volShow(); volDraw(); orthoDraw(); saveView(); });
+    $("volChs").querySelectorAll(".vch").forEach(r => {
+      const k = +r.dataset.k, sl = r.querySelector(".vthr"), nb = r.querySelector(".vthrN");
+      sl.oninput = () => { V.vol.thrC[k] = +sl.value; V.vol.thrCFor = unit.path; volNums(); volDraw(); saveView(); };
+      nb.onchange = () => { const x = +nb.value, c = volMeta && volMeta.ov && volMeta.chs[k];
+        if (!c || !Number.isFinite(x)) return volNums();
+        V.vol.thrC[k] = Math.max(0, Math.min(.95, volFrac(x, c.win))); V.vol.thrCFor = unit.path;
+        nb.blur(); volNums(); volDraw(); saveView(); };
+      ["mousedown", "keydown", "wheel"].forEach(t => nb.addEventListener(t, e => e.stopPropagation()));
+    });
+  }
+  document.querySelectorAll("#volChs .vchOn, #oChs .vchOn").forEach(b => b.classList.toggle("on", V.vol.chOn[+b.dataset.k]));
+  $("volChs").querySelectorAll(".vthr").forEach((sl, k) => { sl.value = V.vol.thrC[k]; });
+  volNums();
 }
 // column-major 4x4, as WebGL wants them
 const m4mul = (a, b) => { const o = new Float32Array(16);
@@ -1622,6 +1728,15 @@ function volDraw() {
   const ceil = Math.max(V.vol.ceil, V.vol.thr + 0.01);
   gl.uniform1f(u("thr"), V.vol.thr); gl.uniform1f(u("gain"), V.vol.gain); gl.uniform1f(u("den"), V.vol.den);
   gl.uniform1f(u("ceil_"), ceil); gl.uniform1i(u("cut"), V.vol.cut ? 1 : 0);
+  const ov = !!volMeta.ov, dch = V.ch === 1 ? 1 : 0;
+  gl.uniform1i(u("ov"), ov ? 1 : 0);
+  if (ov) {
+    const t = V.vol.thrC, c2 = t.map(x => Math.max(V.vol.ceil, x + 0.01)), cols = volColours();
+    gl.uniform2f(u("thr2"), t[0], t[1]); gl.uniform2f(u("ceil2"), c2[0], c2[1]);
+    gl.uniform2f(u("on2"), V.vol.chOn[0] ? 1 : 0, V.vol.chOn[1] ? 1 : 0);
+    gl.uniform3fv(u("colA"), cols[0]); gl.uniform3fv(u("colB"), cols[1]); gl.uniform1i(u("dch"), dch);
+    gl.uniform1f(u("thr"), t[dch]); gl.uniform1f(u("ceil_"), c2[dch]);   // depth: the one channel, its own floor
+  }
   gl.uniform1f(u("dt"), 1.0 / Math.max(Wx, Hy, D * V.vol.z * vz / Math.min(vx, vy)));
   gl.uniform1i(u("mode"), { mip: 0, glass: 1, depth: 2 }[V.vol.mode]);
   gl.uniform1i(u("deep"), V.vol.deep ? 1 : 0); gl.uniform1i(u("fy"), V.flipY ? 1 : 0);
@@ -1655,6 +1770,9 @@ function volDraw() {
   $("volInfo").innerHTML = `<b>${(Wx * vx).toFixed(0)} × ${(Hy * vy).toFixed(0)} × ${tz.toFixed(0)} µm</b>`
     + (V.vol.z !== 1 ? `  · depth drawn ×${V.vol.z}` : "") + (volMeta.down > 1 ? `  · xy ÷${volMeta.down} to fit` : "")
     + (V.vol.deep ? `\nthe deepest slice on top, as MESc` : `\nthe surface (slice 0) on top`) + (V.vol.mode === "depth" ? " · red = slice 0 → blue = the last" : "")
+    + (!ov ? "" : V.vol.mode === "depth" ? `\ndepth colours one channel: ${unit.channels[dch].replace("Channel_", "ch")} (pick it under the image); MIP and glass show both`
+       : `\n${[0, 1].map(k => unit.channels[k].replace("Channel_", "ch") + (V.vol.chOn[k] ? "" : " (hidden)")).join(" + ")}, each in its own window`
+         + (unit.channels.length > 2 ? ` · the first two of ${unit.channels.length}` : ""))
     + `\ndrag turns · shift- or right-drag moves · wheel zooms where the cursor is · double-click resets`;
 }
 // turning and zooming
@@ -1702,15 +1820,24 @@ function volPick(c, rd) {
   if (!(ta < tb) || !volData) return null;
   const step = Math.min(...e.map((x, i) => 2 * x / [Wx, D, Hy][i])) * .5;
   const floor = V.vol.thr * 255, ceil = Math.max(V.vol.ceil, V.vol.thr + .01) * 255;
-  let best = floor, bt = -1;
+  // the overlay: each shown channel against its own floor and ceiling, the one furthest above
+  // its floor wins; in depth, the one channel that is drawn
+  const ov = !!volMeta.ov, two = ov && V.vol.mode !== "depth", dch = V.ch === 1 ? 1 : 0;
+  const fl = V.vol.thrC.map(t => t * 255), cl = V.vol.thrC.map(t => Math.max(V.vol.ceil, t + .01) * 255);
+  let best = ov ? fl[dch] : floor, bt = -1, bs = 0;
   for (let t = ta; t <= tb; t += step) {
     const p = [o[0] + rd[0] * t, o[1] + rd[1] * t, o[2] + rd[2] * t];
     const ix = Math.max(0, Math.min(Wx - 1, Math.floor((p[0] / e[0] + 1) / 2 * Wx)));
     const ry = (p[2] / e[2] + 1) / 2, dz = (p[1] / e[1] + 1) / 2;
     const iy = Math.max(0, Math.min(Hy - 1, Math.floor((V.flipY ? 1 - ry : ry) * Hy)));
     const iz = Math.max(0, Math.min(D - 1, Math.floor((V.vol.deep ? dz : 1 - dz) * D)));
-    const v = volData[(iz * Hy + iy) * Wx + ix];
-    if (v > best && !(V.vol.cut && v > ceil)) { best = v; bt = t; }
+    const i = (iz * Hy + iy) * Wx + ix;
+    if (two) { for (let j = 0; j < 2; j++) { const v = volBytes[j][i];
+        if (!V.vol.chOn[j] || (V.vol.cut && v > cl[j])) continue;
+        const sc = (v - fl[j]) / (cl[j] - fl[j]); if (sc > bs) { bs = sc; bt = t; } }
+      continue; }
+    const v = ov ? volBytes[dch][i] : volData[i];
+    if (v > best && !(V.vol.cut && v > (ov ? cl[dch] : ceil))) { best = v; bt = t; }
   }
   return bt < 0 ? null : [o[0] + rd[0] * bt, o[1] + rd[1] * bt, o[2] + rd[2] * bt];
 }
@@ -1734,9 +1861,11 @@ $("volDeep").onclick = () => { V.vol.deep = !V.vol.deep; volShow(); volDraw(); s
 for (const [id, mode] of [["volMip", "mip"], ["volGlass", "glass"], ["volDepth", "depth"]])
   $(id).onclick = () => { V.vol.mode = mode;
     if (volMeta && V.vol.thrFor !== unit.path) V.vol.thr = volAutoThr();   // a hand-set floor stays
+    if (volMeta && volMeta.ov && V.vol.thrCFor !== unit.path) V.vol.thrC = [0, 1].map(k => volAutoThr(k));
     volShow(); volDraw(); saveView(); };
-function volAutoThr() { return V.vol.mode === "glass" ? volMeta.p97 : volMeta.p997; }
+function volAutoThr(k) { const c = k == null ? volMeta : volMeta.chs[k]; return V.vol.mode === "glass" ? c.p97 : c.p997; }
 $("volAuto").onclick = () => { if (!volMeta) return; V.vol.thr = volAutoThr(); V.vol.thrFor = "";
+  if (volMeta.ov) { V.vol.thrC = [0, 1].map(k => volAutoThr(k)); V.vol.thrCFor = ""; volChRows(); }
   $("volThr").value = V.vol.thr; volNums(); volDraw(); saveView(); };
 $("volCut").onclick = () => { V.vol.cut = !V.vol.cut; volShow(); volDraw(); saveView(); };
 $("volCeil").onchange = () => { V.vol.ceilSet = V.vol.ceil;         // let go: now cut the blobs
@@ -1747,13 +1876,15 @@ for (const [id, k] of [["volThr", "thr"], ["volCeil", "ceil"], ["volDen", "den"]
 // Floor and ceiling as numbers in the recording's own units. The sliders are fractions of the
 // stack's window (the bytes on the GPU span lo..hi), so a typed value is mapped into it; one
 // outside the window is held at its edge, and the box then shows where it really landed.
-const volFrac = x => { const [lo, hi] = volMeta.win; return (x - lo) / (hi - lo); };
-const volVal = f => { const [lo, hi] = volMeta.win; return lo + f * (hi - lo); };
+const volFrac = (x, win = volMeta.win) => { const [lo, hi] = win; return (x - lo) / (hi - lo); };
+const volVal = (f, win = volMeta.win) => { const [lo, hi] = win; return lo + f * (hi - lo); };
 function volNums() {
   if (!volMeta) return;
   const fmt = x => +x.toPrecision(5);
   if (document.activeElement !== $("volThrN")) $("volThrN").value = fmt(volVal(V.vol.thr));
   if (document.activeElement !== $("volCeilN")) $("volCeilN").value = fmt(volVal(V.vol.ceil));
+  if (volMeta.ov) $("volChs").querySelectorAll(".vthrN").forEach((nb, k) => {     // each in its own window
+    if (document.activeElement !== nb) nb.value = fmt(volVal(V.vol.thrC[k], volMeta.chs[k].win)); });
 }
 $("volThrN").onchange = () => { const x = +$("volThrN").value; if (!volMeta || !Number.isFinite(x)) return volNums();
   V.vol.thr = Math.max(0, Math.min(.95, volFrac(x))); V.vol.thrFor = unit.path; $("volThr").value = V.vol.thr;
@@ -1778,9 +1909,9 @@ function orthoCross() {
   v.cz = Math.max(0, Math.min(D - 1, V.frame));
   return [D, Hy, Wx];
 }
-function orthoPlane(axis) {                 // Uint8 image of one pane, and its size in voxels
-  const [D, Hy, Wx] = volMeta.shape, a = volData, v = V.vol, max = v.oMax;
-  const key = axis + (max ? "M" : v[{ xy: "cz", xz: "cy", yz: "cx" }[axis]]);
+function orthoPlane(axis, j = 0) {          // Uint8 image of one pane (of channel j's bytes), and its size in voxels
+  const [D, Hy, Wx] = volMeta.shape, a = volBytes[j], v = V.vol, max = v.oMax;
+  const key = j + axis + (max ? "M" : v[{ xy: "cz", xz: "cy", yz: "cx" }[axis]]);
   if (volProj[key]) return volProj[key];
   let w, h, px;
   if (axis === "xy") { w = Wx; h = Hy; px = new Uint8Array(w * h);
@@ -1815,7 +1946,13 @@ function orthoDraw() {
     const pl = orthoPlane(axis), off = document.createElement("canvas");
     off.width = pl.w; off.height = pl.h;
     const og = off.getContext("2d"), im = og.createImageData(pl.w, pl.h);
-    for (let i = 0; i < pl.px.length; i++) { const q = pl.px[i]; im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = q; im.data[4 * i + 3] = 255; }
+    if (!volMeta.ov) for (let i = 0; i < pl.px.length; i++) { const q = pl.px[i]; im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = q; im.data[4 * i + 3] = 255; }
+    else {                                           // the overlay: each channel in its colour, added
+      const cols = volColours(), shown = [0, 1].filter(j => v.chOn[j]), pls = shown.map(j => orthoPlane(axis, j).px);
+      for (let i = 0; i < pl.px.length; i++) {
+        for (let ci = 0; ci < 3; ci++) { let s = 0; shown.forEach((j, n) => { s += cols[j][ci] * pls[n][i]; }); im.data[4 * i + ci] = Math.min(255, s); }
+        im.data[4 * i + 3] = 255; }
+    }
     og.putImageData(im, 0, 0);
     const g = c.getContext("2d");
     g.imageSmoothingEnabled = axis !== "xy";        // depth is resampled ~7x; xy stays pixel-true
@@ -1833,7 +1970,8 @@ function orthoDraw() {
   lab("lXY", xy, v.oMax ? "XY · brightest over depth" : `XY · z ${v.cz} (${um(v.cz, D, dz)} µm)`);
   lab("lYZ", yz, v.oMax ? "YZ · brightest over x" : `YZ · x ${v.cx}`);
   lab("lXZ", xz, v.oMax ? "XZ · brightest over y" : `XZ · y ${v.cy}`);
-  $("oPos").textContent = `x ${v.cx} · y ${v.cy} · z ${v.cz}` + (volMeta.down > 1 ? ` · xy ÷${volMeta.down}` : "");
+  $("oPos").textContent = `x ${v.cx} · y ${v.cy} · z ${v.cz}` + (volMeta.down > 1 ? ` · xy ÷${volMeta.down}` : "")
+    + (volMeta.ov ? " · each channel in its own window" : "");
   $("frameLbl").textContent = `slice ${v.cz} / ${D - 1} · ${um(v.cz, D, dz)} µm`;
 }
 function orthoHit(ev) {                      // which pane, and the voxel under the pointer

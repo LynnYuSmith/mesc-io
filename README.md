@@ -73,6 +73,9 @@ unit they were drawn on and are saved as you go, in one folder, `~/mesc-viewer/`
 the raw file; so is the view itself, so reopening the file puts you back where you were.
 A z-stack is shown in slices and microns, with a max projection, a **3D** view you can turn
 (MIP, semi-transparent, or coloured by depth) and **XYZ** orthogonal views through one crosshair.
+With **overlay** on, a two-channel stack is shown in both: green and magenta, each channel through
+its own window and with its own floor, white where both are bright (depth colouring stays one
+channel).
 
 The picture is drawn in **fixed limits**: by default the display window the recording was
 saved with on the rig (the file's own LUT, typically 0–2000 in reader units), the same for every

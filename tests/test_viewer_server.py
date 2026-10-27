@@ -394,7 +394,8 @@ def test_a_unit_that_is_not_there_says_so(server):
 @pytest.fixture
 def stack_server(tmp_path):
     """A 5-slice stack with one bright 'axon' running diagonally through depth: in slice z it
-    sits at y = 2, x = z. Plus a recording beside it, which has no volume to give."""
+    sits at y = 2, x = z. Its second channel is the red one: ten times brighter, with its own
+    axon at y = 4, x = 7 - z. Plus a recording beside it, which has no volume to give."""
     path = tmp_path / "stack.mesc"
     with h5py.File(path, "w") as f:
         sess = f.create_group("MSession_0")
@@ -405,6 +406,12 @@ def stack_server(tmp_path):
         u.create_dataset("Channel_0", data=data)
         u.attrs["Channel_0_Conversion_ConversionLinearOffset"] = OFFSET
         u.attrs["Channel_0_Conversion_ConversionLinearScale"] = 1.0
+        red = np.full((5, 6, 8), 10000, dtype=np.uint16)
+        for z in range(5):
+            red[z, 4, 7 - z] = 30000
+        u.create_dataset("Channel_1", data=red)
+        u.attrs["Channel_1_Conversion_ConversionLinearOffset"] = OFFSET
+        u.attrs["Channel_1_Conversion_ConversionLinearScale"] = 1.0
         u.attrs["ZAxisGeomRole"] = 3
         u.attrs["ZAxisConversionConversionLinearScale"] = 2.0
         u.attrs["XAxisConversionConversionLinearScale"] = 0.25
@@ -453,6 +460,40 @@ def test_a_big_stack_is_shrunk_in_xy_and_says_by_how_much(stack_server, monkeypa
     assert h["X-Volume-Shape"] == "5,3,4" and h["X-Downsample"] == "2"
     assert [float(v) for v in h["X-Voxel-Um"].split(",")] == [2.0, 0.5, 0.5]
     assert len(body) == 5 * 3 * 4
+
+
+def test_two_channels_come_back_on_one_grid_each_in_its_own_window(stack_server, monkeypatch):
+    """The two-colour overlay asks for each channel with share=2: the budget is halved, so the
+    pair costs the GPU what one channel did, and both come back block-averaged by the SAME
+    factor (the voxels line up). Each keeps its own window: the red channel is ten times
+    brighter and must not push the green one into black."""
+    import mesc_io.viewer as viewer
+    monkeypatch.setattr(viewer, "MAX_VOLUME_VOXELS", 5 * 6 * 8)       # one channel fits whole
+    _, h1 = _volume(f"{stack_server}/api/volume/MSession_0/MUnit_0/0?lo=0&hi=100")
+    assert h1["X-Downsample"] == "1"
+    got = [_volume(f"{stack_server}/api/volume/MSession_0/MUnit_0/{ch}?lo=0&hi=100&share=2") for ch in (0, 1)]
+    for body, h in got:
+        assert h["X-Volume-Shape"] == "5,3,4" and h["X-Downsample"] == "2" and len(body) == 5 * 3 * 4
+        assert [float(v) for v in h["X-Voxel-Um"].split(",")] == [2.0, 0.5, 0.5]
+    green, red = (np.frombuffer(b, dtype=np.uint8).reshape(5, 3, 4) for b, _ in got)
+    wins = [[float(v) for v in h["X-Window"].split(",")] for _, h in got]
+    assert wins[1][1] > 5 * wins[0][1]                                  # a window each
+    for z in range(5):
+        assert np.unravel_index(int(np.argmax(green[z])), (3, 4)) == (1, z // 2)
+        assert np.unravel_index(int(np.argmax(red[z])), (3, 4)) == (2, (7 - z) // 2)
+    assert green.max() == 255 and red.max() == 255
+
+
+def test_a_fixed_window_is_kept_per_channel(stack_server):
+    body, h = _volume(f"{stack_server}/api/volume/MSession_0/MUnit_0/1?vmin=0&vmax=60000&share=2")
+    assert h["X-Window"] == "0.0,60000.0"
+    assert np.frombuffer(body, dtype=np.uint8).max() < 255           # 30000 - offset sits mid-window
+
+
+def test_share_is_bounded(stack_server):
+    with pytest.raises(urllib.error.HTTPError) as err:
+        _volume(f"{stack_server}/api/volume/MSession_0/MUnit_0/0?share=0")
+    assert err.value.code == 400 and b"share" in err.value.read()
 
 
 # --- the fixed display window -------------------------------------------------------------

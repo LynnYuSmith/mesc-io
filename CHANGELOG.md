@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+**Two channels at once in 3D, in two colours.**
+
+- **3D and XYZ: the overlay shows both channels.** With **overlay** on, a two-channel z-stack goes
+  to the GPU as one RG texture and is drawn green (Channel_0) and magenta (Channel_1); the colours
+  add, so where both channels are bright the voxel is white. MIP takes each channel's brightest
+  along the ray and adds the colours; glass lets both add light and hide what is behind. The XYZ
+  views show the same two colours. Depth stays one channel (the one picked under the image) and
+  says so.
+- **A window and a floor per channel.** Each channel is fetched through its own window — the fixed
+  limits typed for it in instruments, or percentiles of that channel alone — since a red channel
+  is often ten times brighter than the green and one window would leave the green black. In the
+  3D bar each channel has its own floor (slider and number, in its own units) and a switch that
+  hides it; the switches sit over the XYZ views too. A palette picked for a channel in instruments
+  gives its colour in 3D as well.
+- **The same voxel budget for two channels.** `/api/volume` takes `?share=2`: the 32 M-voxel cap
+  is split between the channels, so the pair costs the GPU what one channel did, and both come
+  back block-averaged by the same factor, voxel for voxel. On a 149-slice 512 × 512 stack that
+  is ÷2 in x and y, as it was for one channel.
+- One channel, and a unit with one channel, are drawn exactly as before (pixel for pixel in the
+  browser check). A unit with more than two channels overlays the first two, and says so.
+- `tools/make_synthetic.py --stack` writes a two-channel z-stack (three axons with boutons in
+  green, two cells ten times brighter in red, one on a bouton) for the 3D browser check.
+
 ## 0.3.10 — 2026-10-15
 
 **A private window on Windows too.**

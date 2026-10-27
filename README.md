@@ -89,7 +89,11 @@ its own window and with its own floor, white where both are bright (depth colour
 channel). In 3D, **point** marks the brightest voxel under a click (numbered, with its µm position,
 slice and each channel's value; also shown in XYZ), **measure** gives the distance between two
 points in µm — shift+click goes on into a path, an axon's length — **box** clips the stack to six
-limits and **slab** draws only a thickness around the current slice, as MIP.
+limits and **slab** draws only a thickness around the current slice, as MIP. **object** grows a
+connected region from a clicked seed (voxels at least a share of its peak, within a radius) and
+gives its volume in µm³, centre, extent and each channel's mean; it is outlined in XYZ. A **γ** per
+channel brightens the dim parts (below 1) or darkens them (above 1) in 3D, XYZ and the 3D PNG; at 1
+the picture is unchanged.
 
 **ruler** (beside the ROI tools) measures in µm between two clicks on the image; **PNG** saves what
 is on screen for a figure — the image at whole pixels with the ROIs, the ruler, a scale bar and a

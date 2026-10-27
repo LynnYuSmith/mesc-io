@@ -201,6 +201,12 @@ TWO_CHANNEL_CHECK = r"""
         const meas = vm.runInContext("volSetTool('measure'); volMeas = [[0, 0, 0], [2, 4, 6]]; volPtsList(); volMeasText()", sandbox);
         if (!meas.startsWith(Math.hypot(3, 2, 2).toFixed(2) + " µm") || !byId.get("volPts").innerHTML.includes("PSF"))
           { console.error("the 3D ruler reads wrong: " + meas); process.exit(13); }
+        // the clip box and the slab: the full box is exactly -ext..ext; a box and a slab narrow it
+        const clip = JSON.parse(vm.runInContext("(() => { const e = volCam(1).ext, f = volClip(e); V.vol.box = [0, .5, 0, 1, 0, 1]; const h = volClip(e);"
+          + " V.vol.box = VOL_FULL.slice(); V.vol.slab = true; V.vol.slabUm = 1; V.frame = 1; const s = volClipFr(); V.vol.slab = false; volBoxUi();"
+          + " return JSON.stringify({ full: f.full, lo: f.lo.map((x, i) => x === -e[i]), hi: f.hi.map((x, i) => x === e[i]), half: h.hi[0], s: [s[4], s[5]] }); })()", sandbox));
+        if (!clip.full || !clip.lo.every(Boolean) || !clip.hi.every(Boolean) || clip.half !== 0 || clip.s[0] !== .25 || clip.s[1] !== .5)
+          { console.error("the clip box or the slab is wrong: " + JSON.stringify(clip)); process.exit(14); }
         console.log("two-channel 3D ok " + JSON.stringify(st));
         process.exit(process.exitCode || 0);
       } catch (e) { console.error("threw in the overlay: " + (e && e.stack || e)); process.exit(6); }
@@ -234,12 +240,13 @@ def test_the_two_colour_controls_are_in_the_page():
         assert needle in src, needle
 
 
-def test_the_3d_point_and_measure_tools_are_in_the_page():
+def test_the_3d_tools_are_in_the_page():
     """The point tool's button and marker layer, a pick that snaps and stores full-resolution
-    voxels, points saved with the view (volState keeps them, per unit), and the 3D ruler with
-    its z caveat."""
+    voxels, points saved with the view (volState keeps them, per unit), the 3D ruler with its z
+    caveat, and the clip box / slab as two corner uniforms of the ray segment."""
     src = PAGE.read_text(encoding="utf-8")
     for needle in ('id="volPoint"', 'id="volMarks"', 'id="volPts"', "function volSnap(", "function volPickAt(",
                    "y * k + h, x * k + h", 'tool: "", pts: {}', 'id="volMeasure"', "function volMeasure(",
-                   "the PSF is longer along z"):
+                   "the PSF is longer along z", 'id="volBox"', 'id="volSlab"', "uniform vec3 blo, bhi",
+                   "t0 = (blo - camPos) * inv, t1 = (bhi - camPos) * inv"):
         assert needle in src, needle

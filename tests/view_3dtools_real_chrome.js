@@ -69,6 +69,7 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const u = await J(`(()=>{const x=FILE.units[${stack}]; return {px:x.pixel_size_um, py:x.pixel_size_y_um||x.pixel_size_um, dz:x.z_step_um};})()`);
 
   // ---- 1. point: a click on a bouton marks its brightest voxel --------------------------------
+  await ev("volDraw(); 'ok'"); await sleep(400);         // settled: no coarse frame, no cut in flight
   const pic0 = await ev("(()=>{const c=document.getElementById('vol'),g=c.getContext('webgl2'),p=new Uint8Array(c.width*c.height*4);g.readPixels(0,0,c.width,c.height,g.RGBA,g.UNSIGNED_BYTE,p);let s=0;for(let i=0;i<p.length;i+=4*89)s=(s*31+p[i])>>>0;return s;})()");
   await ev("$('volPoint').click(); 'ok'");
   if (await ev("V.vol.tool") !== "point") fail("the point button did not switch the tool on");
@@ -216,6 +217,84 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   await send("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,modifiers:8}); await sleep(150);
   if ((await J("volMeas")).length !== 0) fail("shift+Esc did not clear the line");
   console.log("  measure     :", JSON.stringify({ line: M.length && shown2, analytic_line: +ana2.toFixed(2), path: shownP, analytic_path: +anaP.toFixed(2), yellow_px: yellow }));
+
+  // ---- 3. the clip box and the thick slab ------------------------------------------------------
+  await ev("V.overlay = false; V.vol = volState(null); V.vol.on = true; V.vol.mode = 'mip'; V.frame = 0; $('frame').value = 0; volShow(); volReset(); 'ok'");
+  for (let i = 0; i < 40 && (await ev("!!(volMeta && volMeta.ov)") || !(await ev("!!(volMeta && volKey.endsWith('|0|1|100'))"))); i++) await sleep(250);
+  await sleep(500);
+  const GREY = "((r,g,b)=>Math.min(r,g,b)>150&&Math.abs(r-g)<15&&Math.abs(r-b)<15)";
+  // lit pixels of the GL picture (grey-white: the stack, not the coloured box and slice lines): all,
+  // left / right of a screen x, and within R px of a point
+  const lit = (splitX = null, margin = 6) => J(`(()=>{const grey=${GREY}, c=document.getElementById('vol'),g=c.getContext('webgl2'),r=c.getBoundingClientRect(),sx=c.width/r.width;
+    const p=new Uint8Array(c.width*c.height*4); g.readPixels(0,0,c.width,c.height,g.RGBA,g.UNSIGNED_BYTE,p);
+    const X=${splitX === null ? "null" : `(${splitX}-r.left)*sx`}; let all=0,left=0,right=0;
+    for(let i=0;i<p.length;i+=4){ if(!grey(p[i],p[i+1],p[i+2])) continue; all++; if(X===null) continue; const x=(i/4)%c.width;
+      if(x<X-${margin}*sx) left++; else if(x>X+${margin}*sx) right++; }
+    let s=0; for(let i=0;i<p.length;i+=4*89) s=(s*31+p[i]+p[i+1]*7)>>>0; return {all,left,right,sig:s};})()`);
+  const litNear = (q, R = 12) => ev(`(()=>{const grey=${GREY}, c=document.getElementById('vol'),g=c.getContext('webgl2'),r=c.getBoundingClientRect(),sx=c.width/r.width;
+    const x=Math.round((${q.x}-r.left)*sx), y=c.height-1-Math.round((${q.y}-r.top)*sx), R=Math.round(${R}*sx);
+    const p=new Uint8Array(4*4*R*R); g.readPixels(x-R,y-R,2*R,2*R,g.RGBA,g.UNSIGNED_BYTE,p); let n=0; for(let i=0;i<p.length;i+=4) if(grey(p[i],p[i+1],p[i+2])) n++; return n;})()`);
+  const full0 = await lit();
+  // the default box: the rays' corners are exactly -ext and ext, and the picture does not change
+  const corners = await J(`(()=>{const gl=GL, k=volCam(1), lo=gl.getUniform(volProg, gl.getUniformLocation(volProg,'blo')), hi=gl.getUniform(volProg, gl.getUniformLocation(volProg,'bhi'));
+    const e=new Float32Array(k.ext); return {lo:[...lo], hi:[...hi], ext:[...e]};})()`);
+  if (corners.lo.some((x, i) => x !== -corners.ext[i]) || corners.hi.some((x, i) => x !== corners.ext[i])) fail("the default box is not exactly -ext..ext: " + JSON.stringify(corners));
+  await ev("$('volBox').click(); 'ok'"); await sleep(200);
+  if (await ev("document.getElementById('volBoxRow').hidden")) fail("the box's sliders did not open");
+  if ((await lit()).sig !== full0.sig) fail("opening the box's sliders changed the picture");
+  // x from 0 to 0.5: nothing right of the stack's middle is left; the left half is as it was
+  const midX = (await screenOf([0, 64, 64])).x;    // x = 64.5 px: the plane x = 0.5 sits half a pixel left of it
+  const before = await lit(midX);
+  await ev("$('volBx1').value = 0.5; $('volBx1').oninput(); 'ok'");
+  const busyX = await ev("volBusy");
+  await sleep(400);
+  const halfX = await lit(midX); await shot("box_x_half");
+  if (!busyX) fail("moving a box slider did not draw coarse");
+  if (!(before.right > 300) || halfX.right !== 0) fail(`the box did not remove the right half: ${before.right} -> ${halfX.right} lit px`);
+  if (Math.abs(halfX.left - before.left) > before.left * .01) fail(`the box changed the half it keeps: ${before.left} -> ${halfX.left}`);
+  if (!(await ev("volClipText()")).startsWith("box: x 0.0–32.0 µm")) fail("the box's numbers are wrong: " + await ev("volClipText()"));
+  // a pick does not reach into what is clipped away: the bouton at slice 40 (x 88) is gone
+  await ev("$('volPoint').click(); 'ok'");
+  const s40b = await screenOf(bouton(40).map(Math.round)); await clickAt(s40b.x, s40b.y);
+  const pk = await pts();
+  if (pk.some(q => q[2] >= 64)) fail("a pick reached a voxel the box clips away: " + JSON.stringify(pk));
+  await send("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,modifiers:8}); await ev("$('volPoint').click(); 'ok'");
+  // z from 0 to 0.5 (slices 0-23): the boutons at 4 and 16 stay, those at 28 and 40 go
+  await ev("$('volBoxFull').click(); $('volBz1').value = 0.5; $('volBz1').oninput(); 'ok'"); await sleep(400);
+  const bS = {}; for (const bz of [4, 16, 28, 40]) bS[bz] = await screenOf(bouton(bz).map(Math.round));
+  const zHalf = {}; for (const bz of [4, 16, 28, 40]) zHalf[bz] = await litNear(bS[bz]);
+  await shot("box_z_half");
+  await ev("$('volBoxFull').click(); 'ok'"); await sleep(400);
+  const zFull = {}; for (const bz of [4, 16, 28, 40]) zFull[bz] = await litNear(bS[bz]);
+  if (zFull[28] < 50 || zFull[40] < 50 || zHalf[28] > zFull[28] * .05 || zHalf[40] > zFull[40] * .05) fail("the box in z did not remove the deep boutons: " + JSON.stringify([zFull, zHalf]));
+  if (zHalf[4] < zFull[4] * .9 || zHalf[16] < zFull[16] * .9) fail("the box in z took the shallow boutons too: " + JSON.stringify([zFull, zHalf]));
+  if ((await lit()).sig !== full0.sig) fail("'full' did not give back the picture as it was");
+  // the slab: 4 µm around the slider's slice, as MIP; at slice 16 that bouton shows and 40 does not, at 40 the other way
+  await ev("V.vol.mode = 'glass'; volShow(); 'ok'");
+  await ev("$('volSlab').click(); $('volSlabN').value = 4; $('volSlabN').onchange(); 'ok'");
+  if (await ev("V.vol.mode") !== "mip") fail("the slab did not switch glass to MIP");
+  const slabAt = async f => { await ev(`$('frame').value=${f}; $('frame').oninput(); 'ok'`); await sleep(350);
+    const o = {}; for (const bz of [16, 40]) o[bz] = await litNear(bS[bz]); return o; };
+  const sl16 = await slabAt(16); await shot("slab_16"); const sl40 = await slabAt(40); await shot("slab_40");
+  if (sl16[16] < 50 || sl16[40] > 5 || sl40[40] < 50 || sl40[16] > 5) fail("the slab does not follow the slice: " + JSON.stringify({ sl16, sl40 }));
+  if (!(await ev("document.getElementById('volBoxTxt').textContent")).includes("slab 4 µm around slice 40 · z 38.5–42.5 µm")) fail("the slab's numbers are wrong: " + await ev("document.getElementById('volBoxTxt').textContent"));
+  // in the PNG: the slab's picture, and its caption says so
+  await ev(`window.__cap = null; window.__vc = null; withCaption = (src, lines) => { const grey=${GREY}; window.__cap = lines; const g=src.getContext('2d'), d=g.getImageData(0,0,src.width,src.height).data; let n=0; for(let i=0;i<d.length;i+=4) if(grey(d[i],d[i+1],d[i+2])) n++; window.__vc = n; }; exportVolPng(); 'ok'`);
+  const capS = await J("window.__cap"), litPng = await ev("window.__vc"), litNow = (await lit()).all;
+  if (!capS.some(l => l.includes("slab 4 µm")) || Math.abs(litPng - litNow) > litNow * .02 + 5) fail("the PNG is not the slab's picture or does not say so: " + JSON.stringify([capS, litPng, litNow]));
+  // two channels: the box keeps x < 0.5, so the red cell at x 95 goes and the green on the left stays
+  await ev("$('volSlab').click(); V.overlay = true; volShow(); volReset(); 'ok'");
+  for (let i = 0; i < 40 && !(await ev("!!(volMeta && volMeta.ov)")); i++) await sleep(250);
+  await sleep(500);
+  const mag = () => ev(`(()=>{const c=document.getElementById('vol'),g=c.getContext('webgl2'),p=new Uint8Array(c.width*c.height*4); g.readPixels(0,0,c.width,c.height,g.RGBA,g.UNSIGNED_BYTE,p);
+    let m=0,gr=0; for(let i=0;i<p.length;i+=4){const r=p[i],gg=p[i+1],b=p[i+2]; if(r>100&&b>100&&gg<.4*Math.min(r,b)) m++; else if(gg>100&&r<gg*.4&&b<gg*.4) gr++;} return JSON.stringify({m,gr});})()`).then(JSON.parse);
+  const ov0 = await mag();
+  await ev("$('volBx0').value = 0; $('volBx1').value = 0.5; $('volBx1').oninput(); 'ok'"); await sleep(400);
+  const ov1 = await mag(); await shot("box_overlay");
+  if (!(ov0.m > 200) || ov1.m > ov0.m * .05 || !(ov1.gr > 100)) fail("the box in the overlay did not take the red cell (or took the green): " + JSON.stringify([ov0, ov1]));
+  await ev("$('volBoxFull').click(); 'ok'");
+  console.log("  box & slab  :", JSON.stringify({ corners_ok: true, x_half: { right: [before.right, halfX.right], left: [before.left, halfX.left] }, z_half: { full: zFull, half: zHalf },
+                                                  slab16: sl16, slab40: sl40, png_lit: [litPng, litNow], overlay: [ov0, ov1] }));
 
   await ev("V.overlay = false; V.lo = 1; V.hi = 99.5; V.vol = volState(null); saveView(); 'ok'"); await sleep(700);
 

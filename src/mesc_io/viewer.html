@@ -117,6 +117,8 @@
   #volBar input[type=range] { width:84px }
   #volBar input.vnum { width:72px; font-size:11px; padding:1px 3px }
   #volBar [hidden] { display:none }
+  #volBoxRow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; flex-basis:100% }
+  #volBoxRow input[type=range] { width:64px }
   /* the two-colour overlay: one row per channel, its switch in its own colour, its own floor */
   #volChs { display:flex; flex-wrap:wrap; gap:6px; align-items:center }
   #volChs .vch { display:flex; align-items:center; gap:4px; color:var(--muted) }
@@ -240,6 +242,16 @@
         <button id="volAxX" title="look along x: the stack from its other side, depth running down">side x</button>
         <button id="volDeep" title="which end of the stack is up. Femtonics records from the surface down (slice 0 = surface) and MESc draws the deepest slice at the top; here the surface is on top unless this is on">surface ↑</button>
         <button id="volPoint" title="mark points: a click (not a drag — a drag still turns) puts a numbered point on the brightest voxel under the cursor, snapped to the brightest of its 3×3×3 neighbours; the XYZ crosshair goes there. Esc removes the last, shift+Esc all">point</button>
+        <button id="volBox" title="clip the stack to a box: six limits, x y z from and to (fractions of the stack, in the file's own axes — a flip or deepest-up does not change which part is kept). The box is drawn in yellow; full brings the whole stack back">box</button>
+        <button id="volSlab" title="a thick-slab MIP: only the slices within the thickness around the slider's slice are drawn, as MIP; the slider moves the slab through the stack">slab</button>
+        <label id="volSlabL" hidden title="the slab's thickness in µm, centred on the slider's slice (Enter)"><input type="number" id="volSlabN" class="vnum" min="0.1" step="any" style="width:52px">µm</label>
+        <span id="volBoxRow" hidden>
+          <label title="x from / to: fractions of the stack's width">x <input type="range" id="volBx0" min="0" max="1" step="0.01"><input type="range" id="volBx1" min="0" max="1" step="0.01"></label>
+          <label title="y (rows) from / to: fractions of the stack's height, in the file's rows">y <input type="range" id="volBy0" min="0" max="1" step="0.01"><input type="range" id="volBy1" min="0" max="1" step="0.01"></label>
+          <label title="z from / to: fractions of the stack's depth, slice 0 = 0">z <input type="range" id="volBz0" min="0" max="1" step="0.01"><input type="range" id="volBz1" min="0" max="1" step="0.01"></label>
+          <span id="volBoxTxt" class="hint"></span>
+          <button id="volBoxFull" title="the whole stack again">full</button>
+        </span>
         <button id="volMeasure" title="a ruler in 3D: click two points (picked as with point) and read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button>
       </div>
       <canvas id="volMarks" hidden></canvas>
@@ -479,7 +491,8 @@ function pick(i, restoring) {
   if (playing) togglePlay();
   unit = FILE.units[i]; ruler = []; rulerHover = null; volMeas = [];   // a ruler is in one unit's pixels
   document.querySelectorAll(".u").forEach((d, k) => d.classList.toggle("on", k === i));
-  if (!restoring) { V.ch = 0; V.frame = 0; V.zoom = { x: 0, y: 0, w: 0, h: 0 }; V.traceZoom = null; V.valueZoom = null; TR = null; }
+  if (!restoring) { V.ch = 0; V.frame = 0; V.zoom = { x: 0, y: 0, w: 0, h: 0 }; V.traceZoom = null; V.valueZoom = null; TR = null;
+    if (V.vol) { V.vol.box = [0, 1, 0, 1, 0, 1]; V.vol.slab = false; } }   // a box is cut for one stack
   V.ch = Math.min(V.ch, unit.channels.length - 1);
   $("chans").innerHTML = unit.channels.map((c, k) =>
     `<button class="chan ${k === V.ch ? "on" : ""}" data-c="${k}">${c.replace("Channel_", "ch")}</button>`).join(" ")
@@ -893,7 +906,7 @@ function exportVolPng() {
   const g = c.getContext("2d"); g.drawImage(src, 0, 0);
   if (volMeta) volMarksOn(g, c.width, c.height, src.clientWidth ? c.width / src.clientWidth : 1);   // the points, as on screen
   withCaption(c, [captionLines()[0], `3D · ${V.vol.mode} · ${volMeta && volMeta.ov ? "two channels" : unit.channels[V.ch]}`]
-                 .concat(volMeasure() ? [`measured: ${volMeasText()}`] : []),
+                 .concat(volMeta && !volClip(volCam(1).ext).full ? [volClipText()] : [], volMeasure() ? [`measured: ${volMeasText()}`] : []),
               exportName([FILE.file.replace(/\.mesc$/i, ""), unit.name, "3D", V.vol.mode]));
 }
 function exportTracePng() {
@@ -1659,7 +1672,8 @@ function volState(v) {
   const d = { on: false, ortho: false, oMax: false, oCross: true, cx: -1, cy: -1, cz: -1,
               mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0, deep: false, axes: 2,
               chOn: [true, true], thrC: [0.5, 0.5], thrCFor: "",   // the overlay: each channel shown?, its floor
-              tool: "", pts: {} };   // tool: "" | point | measure   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
+              tool: "", pts: {},     // tool: "" | point | measure
+              box: [0, 1, 0, 1, 0, 1], boxOpen: false, slab: false, slabUm: 10 };   // the clip box: x0 x1 y0 y1 z0 z1 in 0..1 of the file's axes; the thick slab   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
   if (!v || typeof v !== "object") return d;
   // Before 0.3.6 the camera's up was the image's y; now it is depth. A view saved then would open
   // on its side, so its camera starts afresh (its mode, floor and the rest are kept).
@@ -1677,6 +1691,9 @@ function volState(v) {
   o.thrC = [0, 1].map(k => cl(Array.isArray(v.thrC) ? v.thrC[k] : NaN, 0, .95, d.thr));
   o.thrCFor = typeof o.thrCFor === "string" ? o.thrCFor : "";
   o.tool = ["point", "measure"].includes(o.tool) ? o.tool : "";
+  const bx = Array.isArray(v.box) && v.box.length === 6 ? v.box.map(x => cl(x, 0, 1, NaN)) : [];
+  o.box = bx.length === 6 && bx.every(Number.isFinite) && bx[0] < bx[1] && bx[2] < bx[3] && bx[4] < bx[5] ? bx : d.box.slice();
+  o.boxOpen = !!o.boxOpen; o.slab = !!o.slab; o.slabUm = cl(o.slabUm, .1, 1000, d.slabUm);
   const okPt = q => Array.isArray(q) && q.length === 3 && q.every(x => Number.isInteger(x) && x >= 0);
   o.pts = Object.fromEntries(Object.entries(o.pts && typeof o.pts === "object" && !Array.isArray(o.pts) ? o.pts : {})
     .map(([k, a]) => [k, Array.isArray(a) ? a.filter(okPt) : []]).filter(([, a]) => a.length));
@@ -1693,11 +1710,12 @@ precision highp float; precision highp sampler3D;
 uniform sampler3D vol; uniform vec3 ext, camPos, camR, camU, camF, colA, colB;
 uniform float tanHalf, aspect, thr, gain, den, dt, ceil_, slz, slw; uniform int mode, cut, deep, fy, ov, dch;
 uniform vec2 thr2, ceil2, on2;     // the overlay: each channel's floor, ceiling, and whether it is shown
+uniform vec3 blo, bhi;             // the part of the box the rays march: -ext..ext unless clipped (box, slab)
 in vec2 ndc; out vec4 o;
 vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
 void main() {
   vec3 rd = normalize(camF + ndc.x * tanHalf * aspect * camR + ndc.y * tanHalf * camU);
-  vec3 inv = 1.0 / rd, t0 = (-ext - camPos) * inv, t1 = (ext - camPos) * inv;
+  vec3 inv = 1.0 / rd, t0 = (blo - camPos) * inv, t1 = (bhi - camPos) * inv;
   vec3 lo = min(t0, t1), hi = max(t0, t1);
   float ta = max(max(lo.x, lo.y), lo.z), tb = min(min(hi.x, hi.y), hi.z);
   if (ta > tb || tb < 0.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
@@ -1935,6 +1953,7 @@ function volShow() {
   if (!on) $("volPts").hidden = true;
   $("volPoint").classList.toggle("on", V.vol.tool === "point"); $("volMeasure").classList.toggle("on", V.vol.tool === "measure");
   $("vol").classList.toggle("tool", !!V.vol.tool);
+  volBoxUi();
   $("volBtn").classList.toggle("on", on);
   $("stageHint").hidden = on || ortho;
   ["volMip", "volGlass", "volDepth"].forEach(id => $(id).classList.toggle("on", "vol" + V.vol.mode[0].toUpperCase() + V.vol.mode.slice(1) === id));
@@ -2043,6 +2062,8 @@ function volDraw() {
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_3D, volTex); gl.uniform1i(u("vol"), 0);
   gl.uniform3fv(u("ext"), ext); gl.uniform3fv(u("camPos"), eye); gl.uniform3fv(u("camR"), R);
   gl.uniform3fv(u("camU"), U); gl.uniform3fv(u("camF"), F);
+  const clip = volClip(ext);
+  gl.uniform3fv(u("blo"), clip.lo); gl.uniform3fv(u("bhi"), clip.hi);
   gl.uniform1f(u("tanHalf"), tanHalf); gl.uniform1f(u("aspect"), aspect);
   const ceil = Math.max(V.vol.ceil, V.vol.thr + 0.01);
   gl.uniform1f(u("thr"), V.vol.thr); gl.uniform1f(u("gain"), V.vol.gain); gl.uniform1f(u("den"), V.vol.den);
@@ -2083,13 +2104,20 @@ function volDraw() {
   const lines = (arr, rgba) => { gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STREAM_DRAW);
     gl.uniform4fv(gl.getUniformLocation(lineProg, "col"), rgba); gl.drawArrays(gl.LINES, 0, arr.length / 3); };
   lines(edges, [.55, .6, .66, .35]);
+  if (!clip.full) {                          // the part of the box that is drawn: the clip box, the slab
+    const ce = [], { lo, hi } = clip, q = (a, b, c) => [a ? hi[0] : lo[0], b ? hi[1] : lo[1], c ? hi[2] : lo[2]];
+    for (const a of [0, 1]) for (const b of [0, 1]) ce.push(...q(0, a, b), ...q(1, a, b), ...q(a, 0, b), ...q(a, 1, b), ...q(a, b, 0), ...q(a, b, 1));
+    lines(ce, [1, .83, 0, .55]);
+  }
   if (!V.proj) lines(slice, V.vol.mode === "glass" ? [.45, .8, 1, 1] : [.31, .64, .87, .8]);
   gl.disable(gl.BLEND);
   volMarksDraw();
+  if (!$("volBoxRow").hidden) $("volBoxTxt").textContent = volClipText();   // the slab follows the slider
   const tz = D * vz;
   $("volInfo").innerHTML = `<b>${(Wx * vx).toFixed(0)} × ${(Hy * vy).toFixed(0)} × ${tz.toFixed(0)} µm</b>`
     + (V.vol.z !== 1 ? `  · depth drawn ×${V.vol.z}` : "") + (volMeta.down > 1 ? `  · xy ÷${volMeta.down} to fit` : "")
-    + (V.vol.deep ? `\nthe deepest slice on top, as MESc` : `\nthe surface (slice 0) on top`) + (V.vol.mode === "depth" ? " · red = slice 0 → blue = the last" : "")
+    + (V.vol.deep ? `\nthe deepest slice on top, as MESc` : `\nthe surface (slice 0) on top`)
+    + (clip.full ? "" : `\n${volClipText()}`) + (V.vol.mode === "depth" ? " · red = slice 0 → blue = the last" : "")
     + (!ov ? "" : V.vol.mode === "depth" ? `\ndepth colours one channel: ${unit.channels[dch].replace("Channel_", "ch")} (pick it under the image); MIP and glass show both`
        : `\n${[0, 1].map(k => unit.channels[k].replace("Channel_", "ch") + (V.vol.chOn[k] ? "" : " (hidden)")).join(" + ")}, each in its own window`
          + (unit.channels.length > 2 ? ` · the first two of ${unit.channels.length}` : ""))
@@ -2136,10 +2164,10 @@ cvol.addEventListener("pointerup", volEnd); cvol.addEventListener("pointercancel
 // nothing). The camera and the target are both scaled about that point, so it stays exactly under
 // the cursor, and the target closes in on it — the next turn is about what you zoomed into.
 function volPick(c, rd) {
-  const [D, Hy, Wx] = volMeta.shape, e = c.ext, o = c.eye;
+  const [D, Hy, Wx] = volMeta.shape, e = c.ext, o = c.eye, { lo, hi } = volClip(e);   // only what is drawn: the clip box, the slab
   let ta = -Infinity, tb = Infinity;
   for (let i = 0; i < 3; i++) {
-    const a = (-e[i] - o[i]) / rd[i], b = (e[i] - o[i]) / rd[i];
+    const a = (lo[i] - o[i]) / rd[i], b = (hi[i] - o[i]) / rd[i];
     ta = Math.max(ta, Math.min(a, b)); tb = Math.min(tb, Math.max(a, b));
   }
   ta = Math.max(ta, 0);
@@ -2220,6 +2248,64 @@ $("volCeilN").onchange = () => { const x = +$("volCeilN").value; if (!volMeta ||
   V.vol.ceil = Math.max(.05, Math.min(1, volFrac(x))); $("volCeil").value = V.vol.ceil;
   $("volCeilN").blur(); volNums(); $("volCeil").onchange(); };
 ["volThrN", "volCeilN"].forEach(id => ["mousedown", "keydown", "wheel"].forEach(t => $(id).addEventListener(t, e => e.stopPropagation())));
+
+/* ------------------------------------------------------------------------------------------
+   A clip box and a thick slab. The box is six limits — x, y (rows) and z (slices) from and to,
+   as fractions of the stack in the file's own axes, so a flip or deepest-up keeps the same part.
+   The slab narrows z further to a thickness in µm around the slider's slice; with it the slider
+   moves a thick-slab MIP through the stack. Both only move the two corners of the box the rays
+   are clipped to (uniforms blo, bhi); at the full box those are exactly -ext and ext, the very
+   numbers the shader used before, so the default picture is the same to the bit and costs the
+   same. The wheel's and the tools' pick march the same clipped segment.
+   ------------------------------------------------------------------------------------------ */
+const VOL_FULL = [0, 1, 0, 1, 0, 1];
+function volClipFr() {                      // the fractions in force: the box, narrowed by the slab
+  const b = V.vol.box.slice();
+  if (V.vol.slab && volMeta && unit) {
+    const D = volMeta.shape[0], half = V.vol.slabUm / (unit.z_step_um || 1) / 2, c = V.frame + .5;
+    const s0 = Math.max(0, (c - half) / D), s1 = Math.min(1, (c + half) / D);
+    // outside the box in z, the slab alone (an empty box would draw nothing and say nothing)
+    if (Math.min(b[5], s1) > Math.max(b[4], s0)) { b[4] = Math.max(b[4], s0); b[5] = Math.min(b[5], s1); } else { b[4] = s0; b[5] = s1; }
+  }
+  return b;
+}
+function volClip(ext) {                     // ... as the box's two corners in world coordinates
+  const b = volClipFr(), [ex, ey, ez] = ext;
+  const X = [(2 * b[0] - 1) * ex, (2 * b[1] - 1) * ex];
+  const Z = V.flipY ? [(1 - 2 * b[3]) * ez, (1 - 2 * b[2]) * ez] : [(2 * b[2] - 1) * ez, (2 * b[3] - 1) * ez];
+  const Y = V.vol.deep ? [(2 * b[4] - 1) * ey, (2 * b[5] - 1) * ey] : [(1 - 2 * b[5]) * ey, (1 - 2 * b[4]) * ey];
+  return { lo: [X[0], Y[0], Z[0]], hi: [X[1], Y[1], Z[1]], full: b.every((x, i) => x === VOL_FULL[i]) };
+}
+function volClipText() {
+  const b = volClipFr(), D = volMeta.shape[0], px = unit.pixel_size_um || 0, py = unit.pixel_size_y_um || px;
+  const r = (f0, f1, n, um) => um ? `${(f0 * n * um).toFixed(1)}–${(f1 * n * um).toFixed(1)} µm` : `${+(f0 * n).toFixed(1)}–${+(f1 * n).toFixed(1)} px`;
+  const sl = `z ${r(b[4], b[5], D, unit.z_step_um || 0)}`;   // from the top of slice 0, as x and y from the corner
+  const box = V.vol.box.every((x, i) => x === VOL_FULL[i]) ? "" : `box: x ${r(b[0], b[1], unit.width, px)} · y ${r(b[2], b[3], unit.height, py)}`;
+  const slab = V.vol.slab ? `slab ${V.vol.slabUm} µm around slice ${V.frame}` : "";
+  return [box, slab, sl].filter(Boolean).join(" · ");
+}
+const VOL_BOX_IDS = ["volBx0", "volBx1", "volBy0", "volBy1", "volBz0", "volBz1"];
+function volBoxUi() {
+  const full = V.vol.box.every((x, i) => x === VOL_FULL[i]);
+  $("volBoxRow").hidden = !V.vol.boxOpen; $("volBox").classList.toggle("on", V.vol.boxOpen || !full);
+  VOL_BOX_IDS.forEach((id, i) => { $(id).value = V.vol.box[i]; });
+  $("volBoxTxt").textContent = volMeta && unit ? volClipText() : "";
+  $("volSlab").classList.toggle("on", V.vol.slab); $("volSlabL").hidden = !V.vol.slab;
+  if (document.activeElement !== $("volSlabN")) $("volSlabN").value = V.vol.slabUm;
+}
+VOL_BOX_IDS.forEach((id, i) => $(id).oninput = () => {
+  const b = V.vol.box, v = Math.max(0, Math.min(1, +$(id).value));
+  b[i] = i % 2 === 0 ? Math.min(v, b[i + 1] - .01) : Math.max(v, b[i - 1] + .01);   // from stays below to
+  volBoxUi(); volInteract(); volDraw(); saveView(); });
+$("volBox").onclick = () => { V.vol.boxOpen = !V.vol.boxOpen; volBoxUi(); saveView(); };
+$("volBoxFull").onclick = () => { V.vol.box = VOL_FULL.slice(); volBoxUi(); volDraw(); saveView(); };
+$("volSlab").onclick = () => { V.vol.slab = !V.vol.slab;
+  if (V.vol.slab && V.vol.mode === "glass") V.vol.mode = "mip";     // a thick slab is a MIP
+  volShow(); volDraw(); saveView(); };
+$("volSlabN").onchange = () => { const x = +$("volSlabN").value;
+  if (Number.isFinite(x) && x > 0) V.vol.slabUm = Math.min(1000, Math.max(.1, x));
+  $("volSlabN").blur(); volBoxUi(); volDraw(); saveView(); };
+["mousedown", "keydown", "wheel"].forEach(t => $("volSlabN").addEventListener(t, e => e.stopPropagation()));
 
 /* ------------------------------------------------------------------------------------------
    Points in 3D. With the point tool on, a click (a press that does not travel — a drag still

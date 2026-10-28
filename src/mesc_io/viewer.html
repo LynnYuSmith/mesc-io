@@ -969,8 +969,13 @@ function inside(pts, x, y) {                       // even-odd, the same rule th
   }
   return c;
 }
+// The 2D image's gestures (an ROI put down, dragged or selected, a zoom box) belong to the 2D image:
+// not while a 3D, XYZ view covers it, and never from a button or a field. The 3D toolbar
+// sits inside the stage, so its clicks reached the hidden image and left spot ROIs in the ROI file.
+const view2D = () => !((V.vol && (V.vol.on || V.vol.ortho)));
+const onControl = ev => !!(ev.target && ev.target.closest && ev.target.closest("button, input, select, textarea, label"));
 $("stage").onmousedown = ev => {
-  if (ev.button !== 0 || !unit) return;
+  if (ev.button !== 0 || !unit || !view2D() || onControl(ev)) return;
   const [x, y] = imgPoint(ev);
   const hit = tool === "ruler" ? null : tool !== "polygon" || !draft.length ? hitRoi(x, y) : null;
   down = { x: ev.clientX, y: ev.clientY, moved: false, hit, ix: x, iy: y,
@@ -1042,7 +1047,7 @@ window.addEventListener("mouseup", ev => {
    double-click within it cancels the wait: one gesture, one meaning. */
 let lastPress = null, pendingClick = 0;
 $("stage").onclick = ev => {
-  if (!unit) return;
+  if (!unit || !view2D() || onControl(ev)) return;
   if (lastPress && lastPress.consumed) { lastPress = null; return; }
   const [x, y] = imgPoint(ev).map(Math.round);
   if (x < 0 || y < 0 || x >= unit.width || y >= unit.height) return;
@@ -1059,6 +1064,7 @@ $("stage").onclick = ev => {
   }, 230);
 };
 $("stage").ondblclick = ev => {
+  if (!view2D() || onControl(ev)) return;
   clearTimeout(pendingClick); pendingClick = 0;
   if (tool === "polygon" && draft.length >= 3) { addRoi({ name: nextName(), points: draft.slice() }); draft = []; return; }
   draft = [];
@@ -1197,7 +1203,8 @@ window.addEventListener("keydown", e => {
     V.sel = V.sel < 0 ? 0 : (V.sel + (e.key === "ArrowDown" ? 1 : -1) + ROIS.length) % ROIS.length;
     renderRois(); paint(); plotTraces(); saveView();
     const row = $("roiList").querySelector(".r.sel"); if (row) row.scrollIntoView({ block: "nearest" });
-  } else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); if (V.sel >= 0) delRoi(V.sel); }
+  } else if (e.key === "Delete" || e.key === "Backspace") {   // only where the ROIs are seen: not under a 3D or XYZ view
+    if (!view2D()) return; e.preventDefault(); if (V.sel >= 0) delRoi(V.sel); }
   else if (e.key === "Enter") { if (ROIS.length && unit) { e.preventDefault(); $("doTraces").click(); } }
   else if (e.key === "Escape") { draft = []; ruler = []; rulerHover = null; paint(); volEscape(e.shiftKey); }
 });

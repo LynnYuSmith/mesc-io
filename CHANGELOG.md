@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.3 — 2026-10-28
+
+- **No ROIs from the 3D bar.** The 3D toolbar sits inside the image's stage, and a click on its
+  buttons (reset, side y, side x among them) reached the hidden 2D image underneath: a spot ROI was
+  put down there and saved to the ROI file, unseen. While a 3D or XYZ view covers the image, the
+  image's click, press and double-click do nothing, and no button or field ever counts as a click
+  on it. If you used 3D in 0.4.0–0.4.2, look in the ROI list for spots you did not draw.
+- **Backspace and Delete remove an ROI only where ROIs are shown** — not under a 3D or XYZ view,
+  where the selected ROI was deleted without being seen.
+
 ## 0.4.2 — 2026-10-28
 
 - **In the overlay each channel has its own ceiling**, by slider or typed as a number in that

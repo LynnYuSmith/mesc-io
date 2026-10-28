@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.1 — 2026-10-28
+
+**The 3D view says what it does.** Improvements to what 0.4.0 has; nothing new besides.
+
+- **The 3D ruler measures on the plane you chose.** A ruler click puts its point exactly where the
+  cursor meets the current plane (the slice selected by the slider or the XYZ crosshair), with no
+  snap to the brightest voxel along the ray; change the plane between clicks to measure across
+  depth, Δz from the planes chosen. A click off the plane puts nothing down and says so.
+- **The current plane is lit blue in MIP and slab views too**, not only in glass: a pixel whose
+  brightest voxel lies on the selected plane is blue.
+- **Floor and ceiling only decide what is shown.** They were also the black and white points, so
+  moving either rescaled the brightness of every voxel between them. Brightness now comes from the
+  window (contrast) and gain alone; below the floor a voxel is not drawn, above the ceiling (when it
+  cuts) neither, and the rest keeps its grey. The ceiling's toggle reads "ceiling: cut / off".
+- **One floor per channel.** A floor set for a channel in the overlay was a separate setting from the
+  one-channel floor, so leaving the overlay showed a floor nobody had set; it now carries across, and
+  across a switch of channel.
+- **Display modes are transparent.** A click on a 3D or XYZ control that changes something besides
+  itself — the auto floor following the mode, a slab drawing glass as a MIP, a stack reduced further
+  for two channels — says what changed, from what to what, and why, in a note over the view.
+- **The readout over the 3D view no longer swallows clicks** on the stack beneath it.
+
 ## 0.4.0 — 2026-10-27
 
 **Measure, export, open in Fiji.**

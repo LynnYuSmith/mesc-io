@@ -459,8 +459,8 @@ class _Handler(BaseHTTPRequestHandler):
             if what == "register":
                 return _mosaic.register(f, ts, layout, channel=int(payload.get("channel", 0)),
                                         fixed=payload.get("fixed"))
-            planes = payload.get("planes")
-            planes = list(range(int(planes[0]), int(planes[1]) + 1)) if planes else None
+            planes = payload.get("planes")      # from–to, either way round
+            planes = list(range(min(int(planes[0]), int(planes[1])), max(int(planes[0]), int(planes[1])) + 1)) if planes else None
             crop = payload.get("crop")
             crop = [int(round(float(v))) for v in crop] if crop else None
             chans = payload.get("channels")
@@ -468,7 +468,7 @@ class _Handler(BaseHTTPRequestHandler):
             out = self.view_path.parent / f"{self.mesc_path.stem}_mosaic_{stamp}.tif"
             # refuse a cut the disk cannot take, before writing half of it
             nch = len(chans) if chans else len(f.unit(ts[0].path).channels)
-            need = _mosaic.tiff_bytes(ts, layout, nch, payload.get("planes"), crop)
+            need = _mosaic.tiff_bytes(ts, layout, nch, planes, crop)
             out.parent.mkdir(parents=True, exist_ok=True)
             free = shutil.disk_usage(out.parent).free
             if need > 0.9 * free:

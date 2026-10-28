@@ -243,12 +243,19 @@ def test_a_tile_with_nothing_in_it_is_not_moved_by_chance(mos_blank):
         assert e["dz"] == ez and abs(e["dx"] - ex * MOSAIC_PX) < 0.5 and abs(e["dy"] - ey * MOSAIC_PX) < 0.5
 
 
-def test_the_bar_comes_from_tiles_that_do_not_overlap(mos):
+def test_a_link_is_believed_by_its_own_correlation_map(mos):
+    # each pair's peak against all the other shifts it tried (peak-to-sidelobe ratio): a strong one
+    # is used, a softer one only when the other links confirm it, nothing below the soft level
     with MescFile(mos) as f:
         r = M.register(f, M.tiles(f))
-    assert len(r["null"]) >= 3 and r["threshold"] == max(0.15, max(r["null"]))
-    used = [p for p in r["pairs"] if p["status"] == "used"]
-    assert min(p["score"] for p in used) > r["threshold"] and all(p["loop"] for p in used)
+    assert r["threshold"] == 6.0 and "null" not in r
+    for p in r["pairs"]:
+        if p["status"] in ("used", "doubt"):
+            assert p["psr"] >= 4.0 and p["score"] >= 0.1
+        if p["status"] == "used" and p["psr"] < 6.0:
+            assert p["loop"], p                      # a soft link is used only inside a loop
+        if p["psr"] < 4.0:
+            assert p["status"] in ("weak", "edge"), p
 
 
 @pytest.mark.parametrize("seed", range(20))
@@ -304,10 +311,19 @@ def test_a_tile_further_off_than_the_overlap_allows_does_not_drag_the_others(tmp
     with MescFile(out) as f:
         ts = M.tiles(f)
         r = M.register(f, ts)
-    for t, (ex, ey, ez) in zip(ts, errs):
-        e = r["layout"]["tiles"][t.path]
-        assert e["dz"] == ez and abs(e["dx"] - ex * MOSAIC_PX) < 0.5 and abs(e["dy"] - ey * MOSAIC_PX) < 0.5, (t.name, e)
-    assert all(p["status"] in ("weak", "edge") for p in r["pairs"] if p["residual"][2] != 0 or abs(p["residual"][0]) > 1)
+    # no tile is put in a wrong place: within every group of tiles joined by used links, each sits
+    # where it really is relative to the others (a group not joined to tile 0 is held where the
+    # stage put it) — a far tile neither drags the others nor is guessed
+    used = [(p["a"], p["b"]) for p in r["pairs"] if p["used"]]
+    groups = M._components([t.path for t in ts], [{"a": a, "b": b} for a, b in used])
+    E = {t.path: np.array(e, float) * [MOSAIC_PX, MOSAIC_PX, 1] for t, e in zip(ts, errs)}
+    L = {t.path: np.array([r["layout"]["tiles"][t.path][k] for k in ("dx", "dy", "dz")], float) for t in ts}
+    for gr in groups:
+        gr = sorted(gr)
+        for q in gr[1:]:
+            d = (L[q] - L[gr[0]]) - (E[q] - E[gr[0]])
+            assert abs(d[0]) < 0.5 and abs(d[1]) < 0.5 and d[2] == 0, (gr[0], q, d)
+    assert all(p["status"] in ("weak", "edge", "unconfirmed") for p in r["pairs"] if p["residual"][2] != 0 or abs(p["residual"][0]) > 1)
 
 
 def test_refining_moves_a_tile_back_from_where_it_was_left(mos):
@@ -412,3 +428,93 @@ def test_a_tile_commented_ignore_starts_hidden_until_the_layout_shows_it(mos, tm
     assert ts[2].path in M.geometry(ts, {"tiles": {ts[2].path: {"hidden": False}}})["place"]
     # "ignored" or a longer word is not the rig's mark
     assert not M._IGNORE.search("not ignored here")
+
+
+# -- what the red team of 2026-10-28 found ------------------------------------------------------
+
+def test_refining_a_layout_off_by_a_fraction_of_a_pixel_returns_to_the_truth(mos):
+    # the shift is measured between tiles as drawn (whole pixels): a start between pixels kept up
+    # to half a pixel of error, on the side the rounding went, and auto never settled
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+        for off in (0.24, 0.26, -0.24, -0.26):
+            start = truth(ts)
+            start["tiles"][ts[1].path]["dx"] += off
+            e = M.register(f, ts, start)["layout"]["tiles"][ts[1].path]
+            assert abs(e["dx"] - MOSAIC_ERRORS[1][0] * MOSAIC_PX) < 0.1, (off, e)
+
+
+def test_auto_settles(mos):
+    # from a start off by a fraction of a pixel everywhere: the first auto lands near the truth, the
+    # second refines it, and a third changes nothing — before, every auto moved tiles again
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+        start = {"tiles": {t.path: {"dx": 0.13 * i, "dy": -0.07 * i} for i, t in enumerate(ts)}}
+        a = M.register(f, ts, start)["layout"]
+        b = M.register(f, ts, a)["layout"]
+        c = M.register(f, ts, b)["layout"]
+    for t, (ex, ey, ez) in zip(ts, MOSAIC_ERRORS):
+        ea, eb, ec = a["tiles"][t.path], b["tiles"][t.path], c["tiles"][t.path]
+        assert abs(ea["dx"] - ex * MOSAIC_PX) < 0.25 and abs(ea["dy"] - ey * MOSAIC_PX) < 0.25 and ea["dz"] == ez, (t.name, ea)
+        assert abs(eb["dx"] - ex * MOSAIC_PX) < 0.1 and abs(eb["dy"] - ey * MOSAIC_PX) < 0.1, (t.name, eb)
+        assert abs(eb["dx"] - ec["dx"]) < 0.02 and abs(eb["dy"] - ec["dy"]) < 0.02 and eb["dz"] == ec["dz"], (t.name, eb, ec)
+
+
+def test_a_repeated_tile_in_the_order_counts_once_at_its_first_place(mos):
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+        p0, p1 = ts[0].path, ts[1].path
+        g = M.geometry(ts, {"order": [p1, p0, p1], "seams": "order"})
+        a = M.compose(f, ts, {"order": [p1, p0, p1], "seams": "order"}, planes=[5])[0]
+        b = M.compose(f, ts, {"order": [p1, p0], "seams": "order"}, planes=[5])[0]
+    assert g["order"][:2] == [p1, p0] and g["order"].count(p1) == 1
+    assert np.array_equal(a, b, equal_nan=True)
+
+
+def test_compose_takes_planes_in_any_order(mos):
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+        m = M.compose(f, ts, {}, planes=[5, 3, 5])
+        s3, s5 = M.compose(f, ts, {}, planes=[3])[0], M.compose(f, ts, {}, planes=[5])[0]
+    assert np.array_equal(m[0], s5, equal_nan=True) and np.array_equal(m[1], s3, equal_nan=True) and np.array_equal(m[2], s5, equal_nan=True)
+
+
+def test_tiff_bytes_counts_the_planes_it_is_given(mos):
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+    g = M.geometry(ts)
+    assert M.tiff_bytes(ts, {}, 1, [3, 4, 5]) == 3 * g["width"] * g["height"] * 4
+
+
+def test_a_hand_edited_layout_with_odd_values_opens(mos):
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+    lay = {"tiles": {ts[0].path: {"dx": None, "dy": "abc", "dz": "nan"}, ts[1].path: "junk"}, "order": "x"}
+    g = M.geometry(ts, lay)
+    assert g["place"][ts[0].path]["z0"] == 0 and len(g["place"]) == 6
+    assert M.geometry(ts, {"tiles": [1, 2]})["width"] == M.geometry(ts)["width"]
+
+
+def test_a_nan_stage_position_leaves_that_tile_out(mos, tmp_path):
+    def nan_pos(u):
+        a = u["MUnit_3"].attrs
+        xml = bytes(a["MeasurementParamsXML"]).decode("latin-1")
+        for ax in ("VirtX", "SlowX"):                          # absolute and from the zero: neither usable
+            i = xml.index(f'id="{ax}" value="') + len(f'id="{ax}" value="')
+            xml = xml[:i] + "nan" + xml[xml.index('"', i):]
+        a["MeasurementParamsXML"] = np.frombuffer(xml.encode("latin-1"), dtype=np.uint8)
+    p = _edited(mos, tmp_path / "nan.mesc", nan_pos)
+    with MescFile(p) as f:
+        ts = M.tiles(f)
+    assert "MUnit_3" not in [t.name for t in ts] and len(ts) == 5
+    M.geometry(ts)
+
+
+def test_a_tile_without_depth_among_tiles_with_it_is_said(mos, tmp_path):
+    lay = {f"MUnit_{i}": -27200.0 for i in range(5)}         # MUnit_5 carries no geometry
+    p = _edited(mos, tmp_path / "half.mesc", lambda u: _geom_z(u, lay))
+    with MescFile(p) as f:
+        ts = M.tiles(f)
+    g = M.geometry(ts)
+    assert g["z_um"] is None and g["warnings"] and "MUnit_5" in g["warnings"][0]
+    assert M.geometry(ts, {"tiles": {ts[5].path: {"hidden": True}}})["z_um"] == pytest.approx(-27200.0)

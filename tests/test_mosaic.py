@@ -518,3 +518,14 @@ def test_a_tile_without_depth_among_tiles_with_it_is_said(mos, tmp_path):
     g = M.geometry(ts)
     assert g["z_um"] is None and g["warnings"] and "MUnit_5" in g["warnings"][0]
     assert M.geometry(ts, {"tiles": {ts[5].path: {"hidden": True}}})["z_um"] == pytest.approx(-27200.0)
+
+
+def test_a_stack_without_the_axis_offset_takes_no_depth_from_its_centre(mos, tmp_path):
+    # GeomTransTransl without ZAxisConversion…Offset is the stack's CENTRE: taken for slice 0 it put every
+    # slice half a stack off; such a stack has no z0 at all
+    def centre_only(u):
+        for i in range(6):
+            u[f"MUnit_{i}"].attrs["GeomTransTransl"] = np.array([0.0, 0.0, -27100.0])
+    p = _edited(mos, tmp_path / "centre.mesc", centre_only)
+    with MescFile(p) as f:
+        assert all(u.z0_um is None for u in f.units())

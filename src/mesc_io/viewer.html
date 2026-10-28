@@ -3338,7 +3338,7 @@ function mosState(m) {
     && Number.isFinite(q.score) && fin(q.residual, 3)) : null;
   o.zr = Array.isArray(o.zr) && o.zr.length === 2 && o.zr.every(Number.isFinite) ? o.zr.map(Math.round) : null;
   o.chan = o.chan === 0 || o.chan === 1 ? o.chan : "ov";
-  o.slab = Math.max(1, Math.min(64, Math.round(num(o.slab, 1)))); o.mini = o.mini !== false;
+  o.slab = Math.max(1, Math.min(63, Math.round(num(o.slab, 1)))); o.slab += o.slab % 2 ? 0 : 1; o.mini = o.mini !== false;
   return o;
 }
 V.mos = mosState(V.mos);
@@ -3786,7 +3786,11 @@ $("mosMarksBtn").onclick = () => { V.mos.marks = !V.mos.marks; mosDraw(); saveVi
 $("mosListBtn").onclick = () => { V.mos.list = !V.mos.list; mosDraw(); saveView(); };
 $("mosFitBtn").onclick = () => { V.mos.view = null; mosDraw(); saveView(); };
 $("mosPlane").oninput = e => { V.mos.plane = +e.target.value; mosDraw(); saveView(); };
-$("mosSlab").onchange = e => { V.mos.slab = Math.max(1, Math.min(64, Math.round(+e.target.value || 1))); mosDraw(); saveView(); };
+// an odd number of slices, so the slab is centred on the plane (an even one sat half a slice off)
+$("mosSlab").onchange = e => { const typed = +e.target.value, n = Math.max(1, Math.min(63, Math.round(typed || 1)));
+  V.mos.slab = n % 2 ? n : n + 1; e.target.value = V.mos.slab;
+  if (V.mos.slab !== typed) mosMsg(`slab: ${V.mos.slab} slices, not ${typed} — odd (centred on the plane), 1 to 63`);
+  mosDraw(); saveView(); };
 $("mosMiniBtn").onclick = () => { V.mos.mini = !V.mos.mini; mosDraw(); saveView(); };
 let mosMiniDrag = false;
 function mosMiniGo(e) {

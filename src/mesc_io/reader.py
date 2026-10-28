@@ -436,8 +436,10 @@ class MescFile:
         z0 = z_origin = None
         if z_step:
             g, zoff = _vec(a, "GeomTransTransl", 3), _float_or_none(_attr(a, "ZAxisConversionConversionLinearOffset"))
-            if g is not None and np.isfinite(g[2]):
-                z0 = float(g[2]) + (zoff or 0.0)
+            # both or neither: without the axis offset the translation is the stack's centre, and
+            # taking it for slice 0 would put every slice half a stack off
+            if g is not None and np.isfinite(g[2]) and zoff is not None:
+                z0 = float(g[2]) + zoff
             o = _vec(a, "LabelingOriginTransl", 3)
             z_origin = float(o[2]) if o is not None and np.isfinite(o[2]) else None
         return Unit(name=name, session=session, n_frames=int(n), height=int(h), width=int(w),

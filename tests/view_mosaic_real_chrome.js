@@ -104,8 +104,12 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const L = await J("mosTiles().map(u => mosEntry(u.path))");
   L.forEach((e, i) => { if (e.dz !== ERR[i][2] || Math.abs(e.dx - ERR[i][0] * .5) > .5 || Math.abs(e.dy - ERR[i][1] * .5) > .5) fail(`auto put tile ${i} at ${JSON.stringify(e)}, it is at ${ERR[i]}`); });
   // every tile where it is (above); the report counts what was used and names what was not believed
-  { const rep = await ev("$('mosInfo').textContent"), m = rep.match(/stitched: (\d+) of 11/);
-    if (!m || +m[1] < 7 || (+m[1] < 11 && !/not believed/.test(rep))) fail("the stitch report: " + rep); }
+  // the report stays where it is when the pointer moves over the map (it used to be the hover line)
+  { const c = await J("(()=>{const r=$('mosCv').getBoundingClientRect(); return {x: r.left + r.width / 2, y: r.top + r.height / 2};})()");
+    await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: c.x, y: c.y}); await sleep(200);
+    await send("Input.dispatchMouseEvent", {type: "mouseMoved", x: c.x + 30, y: c.y + 20}); await sleep(200); }
+  { const rep = await ev("$('mosReport').querySelector('span').textContent"), m = rep.match(/stitched: (\d+) of 11/);
+    if (!m || +m[1] < 7 || (+m[1] < 11 && !/not used|unconfirmed/.test(rep))) fail("the stitch report: " + rep); }
   if ((await ev("V.mos.pairs.length")) !== 11) fail("the pairs are not kept for the seams");
   await ev("V.mos.plane = 25; mosDraw(); 'ok'"); await settled(); await shot("stitched");
   // undo goes back to the stage layout; ⌘Z too
@@ -172,7 +176,7 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   if (JSON.stringify(await J("V.mos.zr")) !== "[10,12]") fail("the planes from–to");
   await ev("$('mosTif').click(); 'ok'");
   for (let i = 0; i < 50 && (await ev("$('mosTif').disabled")); i++) await sleep(200);
-  const info = await ev("$('mosInfo').textContent");
+  const info = await ev("$('mosReport').querySelector('span').textContent");
   const m = /written: (\S+\.tif) \(([\d.]+) MB, planes 10–12, the crop\)/.exec(info);
   if (!m) fail("the TIFF was not written: " + info);
   if (!fs.existsSync(m[1]) || fs.statSync(m[1]).size < (crop[2] - crop[0]) * (crop[3] - crop[1]) * 3 * 2 * 4) fail("the TIFF on disk is too small: " + m[1]);
@@ -193,7 +197,7 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const fl = await J("mosTiles().map(u => mosEntry(u.path).dz)");
   const tgt = 6 + dz1;
   if (fl[0] !== tgt - 9 || fl[1] !== tgt - 6 || fl[3] !== tgt - 12 || fl[2] !== ERR[2][2] || await ev("V.mos.plane") !== tgt) fail(`flatten: ${JSON.stringify(fl)} for the plane ${tgt}`);
-  if (!/flattened: the surface of 3 tiles on plane/.test(await ev("$('mosInfo').textContent"))) fail("the flatten report");
+  if (!/flattened: the surface of 3 tiles on plane/.test(await ev("$('mosReport').querySelector('span').textContent"))) fail("the flatten report");
   // the hover tells where a tile's surface is
   const h0 = await J("(()=>{const p=mosGeom().place[mosTiles()[0].path]; return [p.cx, p.cy];})()");
   const sh = await scr(h0[0], h0[1]);

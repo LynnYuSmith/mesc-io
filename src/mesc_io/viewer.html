@@ -153,7 +153,8 @@
               background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
   #orthoBar button { padding:2px 8px; font-size:11px }
   #oSurfInfo { position:absolute; right:8px; bottom:8px; max-width:calc(100% - 16px); font-size:11px; color:var(--ink);
-               background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px; white-space:pre-wrap }
+               background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px; white-space:pre-wrap;
+               pointer-events:none; opacity:.9 }   /* a readout: a mark under it can still be clicked or removed */
   #oSurfInfo[hidden] { display:none }
   #ortho.surf canvas { cursor:cell }
   /* ---- the mosaic: every stack tile of the file in one field ---- */
@@ -184,6 +185,12 @@
   #mosInfo { position:absolute; right:8px; bottom:8px; max-width:calc(100% - 16px); font-size:11px; color:var(--ink);
              background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px; white-space:pre-wrap }
   #mosInfo:empty { display:none }
+  /* what an action said (auto, TIFF, go, flatten): stays until closed or replaced — the hover line
+     below is overwritten by the next mouse move, and the reports used to live there */
+  #mosReport { position:absolute; right:8px; max-width:min(620px, calc(100% - 16px)); font-size:11px; color:var(--ink); z-index:6;
+               background:rgba(18,20,23,.92); border:1px solid var(--line); border-radius:4px; padding:4px 22px 4px 8px; white-space:pre-wrap }
+  #mosReport[hidden] { display:none }
+  #mosReport button { position:absolute; right:3px; top:2px; padding:0 5px; font-size:11px; line-height:14px }
   #mosMini { position:absolute; right:8px; bottom:40px; border:1px solid var(--line); border-radius:3px; background:#000;
              cursor:pointer; box-shadow:0 1px 6px rgba(0,0,0,.6) }
   #mosMini[hidden] { display:none }
@@ -325,7 +332,7 @@
         <canvas id="mosCv"></canvas>
         <div id="mosBar">
           <button id="mosEdit" title="move tiles by hand: drag one, or select it and use the arrows (shift: ten pixels), [ and ] a slice, h hides it; ⌘Z undoes (also: the e key)">edit</button>
-          <button id="mosAuto" title="stitch: every overlapping pair matched in 3D (x, y and the slice), one correction per tile by least squares, the selected tile (or the first) held still. Starts from the layout as it is, so a hand-made one is refined, not thrown away; each pair's correlation and what is left of it are shown on its seam">auto</button>
+          <button id="mosAuto" title="stitch: every overlapping pair matched across (on its projection) and in depth, one correction per tile by least squares; held still: the tile selected in edit, else the first. Starts from the layout as it is, so a hand-made one is refined, not thrown away; each pair's correlation and what is left of it are shown on its seam">auto</button>
           <button id="mosFlat" title="put every tile's surface (marked in XYZ ▸ surface) on one plane — the selected tile's, else the median — by moving tiles in depth">flatten</button>
           <button id="mosUndo" title="undo the last change to the layout (⌘Z)">undo</button>
           <button id="mosSeams" title="hard seams: each pixel from the tile whose centre is nearest, or from the last in the order (top puts a tile last)">seams: nearest</button>
@@ -347,12 +354,14 @@
         <div id="mosList"></div>
         <canvas id="mosMini"></canvas>
         <div id="mosInfo"></div>
+        <div id="mosReport" hidden><span></span><button title="close">×</button></div>
       </div>
     </div>
     <div id="player">
       <button id="playBtn" title="space">▶</button>
       <input type="range" id="frame" min="0" max="0" value="0">
       <span id="frameLbl" class="hint">—</span>
+      <span id="mosPlayerHint" class="hint" hidden>the mosaic has its own depth (slider) and channel button in its top bar</span>
       <span id="chans"></span> <button id="ovBtn" hidden title="all channels at once, each in its own colour and window — in 3D and XYZ too, green and magenta, so where both are bright it reads white">overlay</button>
     </div>
   </section>
@@ -572,7 +581,8 @@ function applyStatic() {                 // controls that reflect V without a un
 
 function pick(i, restoring) {
   if (playing) togglePlay();
-  unit = FILE.units[i]; ruler = []; rulerHover = null; volMeas = [];   // a ruler is in one unit's pixels
+  unit = FILE.units[i]; ruler = []; rulerHover = null;   // a ruler is in one unit's pixels
+  volMeas = V.vol.measBy[unit.path] || (V.vol.measBy[unit.path] = []);   // the 3D ruler: this unit's, kept with the view
   document.querySelectorAll(".u").forEach((d, k) => d.classList.toggle("on", k === i));
   if (!restoring) { V.ch = 0; V.frame = 0; V.zoom = { x: 0, y: 0, w: 0, h: 0 }; V.traceZoom = null; V.valueZoom = null; TR = null;
     if (V.vol) { V.vol.box = [0, 1, 0, 1, 0, 1]; V.vol.slab = false; } }   // a box is cut for one stack
@@ -820,6 +830,7 @@ function frameUrl(ch = V.ch) {
 const shownChans = () => V.overlay && unit.channels.length > 1 ? unit.channels.map((_, k) => k) : [V.ch];
 function draw() {
   if (V.vol && (V.vol.on || V.vol.ortho)) { volLoad(); volDraw(); orthoDraw(); }   // a new window or channel reloads the stack
+  if (V.mos && V.mos.on) mosDrawSoon();          // a new window: the mosaic's tiles are drawn through it too
   if (!unit) return;
   const chans = shownChans(), urls = chans.map(c => frameUrl(c));
   const url = urls.join(" + ") + " | " + chans.map(paletteFor).join(",");
@@ -1771,7 +1782,7 @@ function volState(v) {
               oSurf: false, surf: {}, surfTis: 0,   // surface marks per unit path ([z, y, x] like pts); the tissue side: 0 by brightness, -1 toward slice 0, +1 toward the last
               box: [0, 1, 0, 1, 0, 1], boxOpen: false, slab: false, slabUm: 10,   // the clip box: x0 x1 y0 y1 z0 z1 in 0..1 of the file's axes; the thick slab   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
               gam: [1, 1, 1, 1, 1, 1, 1, 1],   // gamma per channel (by the channel's number), 1 = the picture as it was
-              objs: {}, objFrac: .5, objR: 15 };   // objects: unit path -> [{ q: seed (z, y, x), ch, frac, r }, …]; what the next one keeps
+              objs: {}, objFrac: .5, objR: 15, measBy: {} };   // measBy: the 3D ruler's points per unit path   // objects: unit path -> [{ q: seed (z, y, x), ch, frac, r }, …]; what the next one keeps
   if (!v || typeof v !== "object") return d;
   // Before 0.3.6 the camera's up was the image's y; now it is depth. A view saved then would open
   // on its side, so its camera starts afresh (its mode, floor and the rest are kept).
@@ -1799,6 +1810,8 @@ function volState(v) {
   o.surf = Object.fromEntries(Object.entries(o.surf && typeof o.surf === "object" && !Array.isArray(o.surf) ? o.surf : {})
     .map(([k, a]) => [k, Array.isArray(a) ? a.filter(okPt) : []]).filter(([, a]) => a.length));
   o.oSurf = !!o.oSurf; o.surfTis = [-1, 0, 1].includes(o.surfTis) ? o.surfTis : 0;
+  o.measBy = Object.fromEntries(Object.entries(o.measBy && typeof o.measBy === "object" && !Array.isArray(o.measBy) ? o.measBy : {})
+    .map(([k, a]) => [k, Array.isArray(a) ? a.filter(okPt) : []]).filter(([, a]) => a.length));
   // (a typed number only: null is not 0 here, so a gap in the saved list does not become the lowest value)
   const num = (x, a, b, def) => typeof x === "number" && Number.isFinite(x) ? Math.max(a, Math.min(b, x)) : def;
   o.gam = d.gam.map((g, k) => num(Array.isArray(v.gam) ? v.gam[k] : NaN, .3, 3, g));
@@ -2134,6 +2147,7 @@ function volNote(text) {
   clearTimeout(volNoteT); volNoteT = setTimeout(() => { el.hidden = true; }, 9000);
 }
 function volWatchStart(el) {
+  $("volNote").hidden = true;                 // the last note was about the last click, not this one
   const before = volSettings(); if (!before) return;
   volWatch = { before, own: volOwnKeys(el), what: (el.textContent || el.id || "").trim().slice(0, 24) || el.id, told: new Set(), t: Date.now() };
   setTimeout(() => volWatchCheck(false), 0);
@@ -2673,7 +2687,8 @@ function volToolClick(e) {
   if (V.vol.tool === "measure") {
     const z = Math.max(0, Math.min(volMeta.shape[0] - 1, V.frame | 0)), q = volPlanePickAt(e.clientX, e.clientY, z);
     if (!q) { badge(`the cursor is off plane z ${z} (the blue one) — click inside it, or turn the stack so the plane faces you`, true); return; }
-    if ((e.shiftKey && volMeas.length) || volMeas.length === 1) volMeas.push(q); else volMeas = [q];
+    if (!((e.shiftKey && volMeas.length) || volMeas.length === 1)) volMeas.length = 0;   // the same list, kept in the view
+    volMeas.push(q);
     volDraw(); saveView(); return;
   }
   let q = volPickAt(e.clientX, e.clientY);
@@ -2681,7 +2696,8 @@ function volToolClick(e) {
   if (V.vol.tool === "point") volPts().push(q);
   else if (V.vol.tool === "measure") {
     // a click starts a line or finishes it; shift+click goes on from the last point (a path)
-    if ((e.shiftKey && volMeas.length) || volMeas.length === 1) volMeas.push(q); else volMeas = [q];
+    if (!((e.shiftKey && volMeas.length) || volMeas.length === 1)) volMeas.length = 0;   // the same list, kept in the view
+    volMeas.push(q);
   } else if (V.vol.tool === "object") {
     const o = { q, ch: volObjChan(q), frac: V.vol.objFrac, r: V.vol.objR }, reg = volObjRegion(o);
     volObjs().push(o);
@@ -3325,14 +3341,14 @@ $("oCross").onclick = () => { V.vol.oCross = !V.vol.oCross; volShow(); saveView(
    ------------------------------------------------------------------------------------------ */
 function mosState(m) {
   const d = { on: false, layout: { tiles: {}, order: [], seams: "nearest" }, plane: 0, view: null, sel: "", edit: false,
-              cropUm: null, zr: null, chan: "ov", pairs: null, list: true, marks: true, slab: 1, mini: true };   // the crop in stage µm: it stays on the tissue when tiles move
+              cropUm: null, zr: null, chan: "ov", pairs: null, list: false, marks: true, slab: 1, mini: true };   // the crop in stage µm: it stays on the tissue when tiles move
   if (!m || typeof m !== "object") return d;
   const o = { ...d, ...m }, L = o.layout && typeof o.layout === "object" ? o.layout : {};
   const num = (x, def) => (Number.isFinite(+x) ? +x : def);
   o.layout = { tiles: {}, order: Array.isArray(L.order) ? L.order.filter(p => typeof p === "string") : [], seams: L.seams === "order" ? "order" : "nearest" };
   for (const [p, e] of Object.entries(L.tiles && typeof L.tiles === "object" ? L.tiles : {}))
     if (e && typeof e === "object") o.layout.tiles[p] = { dx: num(e.dx, 0), dy: num(e.dy, 0), dz: Math.round(num(e.dz, 0)), ...("hidden" in e ? { hidden: !!e.hidden } : {}) };
-  o.on = !!o.on; o.edit = !!o.edit; o.list = o.list !== false; o.marks = o.marks !== false; o.plane = Math.round(num(o.plane, 0)); o.sel = typeof o.sel === "string" ? o.sel : "";
+  o.on = !!o.on; o.edit = !!o.edit; o.list = o.list === true; o.marks = o.marks !== false; o.plane = Math.round(num(o.plane, 0)); o.sel = typeof o.sel === "string" ? o.sel : "";
   o.view = o.view && [o.view.x, o.view.y, o.view.k].every(Number.isFinite) && o.view.k > 0 ? o.view : null;
   o.cropUm = Array.isArray(o.cropUm) && o.cropUm.length === 4 && o.cropUm.every(Number.isFinite) ? o.cropUm : null;
   delete o.crop;                                  // a crop saved in mosaic pixels (before 0.5) moved with the layout
@@ -3399,9 +3415,14 @@ function mosDepth(G, q) {
 const mosDepthT = (G, q) => { const z = mosDepth(G, q); return z === null ? "" : `z ${z >= 0 ? "+" : ""}${z.toFixed(1)} µm${G.zZero === null ? " (rig)" : ""}`; };
 // the channels drawn, and one window for every tile (the first tile's: typed here, or the file's)
 function mosChans(G) { const n = G.ref.channels.length; return V.mos.chan === "ov" ? (n > 1 ? [0, 1] : [0]) : [Math.min(V.mos.chan, n - 1)]; }
+// The window every tile is drawn through: the unit picked in the list when it is a tile of the
+// mosaic (so the contrast panel, which edits that unit, edits the mosaic), else the first tile —
+// said in the bar. It came from the first tile always, and a number typed for the unit picked
+// (the injection-zero stack, by default) changed nothing on the map.
+const mosWinUnit = G => (unit && G.place[unit.path] ? unit : G.ref);
 function mosWinQ(G, ch) {
-  const t = V.fixBy[`${G.ref.path}|${ch}`], f = Array.isArray(t) && t[1] > t[0] ? t : fileLut(G.ref, ch);
-  return f ? `vmin=${f[0]}&vmax=${f[1]}` : `lo=${V.lo}&hi=${V.hi}&win_unit=${encodeURIComponent(G.ref.path)}`;
+  const u = mosWinUnit(G), t = V.fixBy[`${u.path}|${ch}`], f = Array.isArray(t) && t[1] > t[0] ? t : fileLut(u, ch);
+  return f ? `vmin=${f[0]}&vmax=${f[1]}` : `lo=${V.lo}&hi=${V.hi}&win_unit=${encodeURIComponent(u.path)}`;
 }
 const mosImgs = new Map(), mosPics = new Map();
 let mosRaf = 0;
@@ -3481,9 +3502,10 @@ function mosPlanePic(G, live, pics) {
   return c;
 }
 // screen <-> mosaic pixels; with flipY the mosaic is drawn upside down, as MESc draws an image
-function mosFit(G) {
-  const st = $("stage"), W = st.clientWidth, H = st.clientHeight, k = Math.min(W / G.W, (H - 70) / G.H) * .96;
-  return { k, x: G.W / 2 - W / 2 / k, y: G.H / 2 - (H + 36) / 2 / k };
+function mosFit(G) {                           // the whole field below the bar, however many rows it wraps to
+  const st = $("stage"), W = st.clientWidth, H = st.clientHeight, top = $("mosBar").offsetHeight + 16;
+  const k = Math.min(W / G.W, (H - top - 30) / G.H) * .96;
+  return { k, x: G.W / 2 - W / 2 / k, y: G.H / 2 - (H + top - 30) / 2 / k };
 }
 function mosView(G) { if (!V.mos.view) V.mos.view = mosFit(G); return V.mos.view; }
 const mosFy = (G, y) => (V.flipY ? G.H - y : y);
@@ -3533,6 +3555,7 @@ function mosDraw() {
   g.fillStyle = "#fff"; g.fillRect(16, H - 22, L, 3); g.font = "11px sans-serif"; g.textBaseline = "bottom"; g.fillText(`${step} µm`, 16, H - 25);
   $("mosWait").textContent = waiting ? `loading ${waiting} tile${waiting > 1 ? "s" : ""}…` : "";
   mosMiniDraw(G, live.length ? mosPlaneCv : null);
+  if (mosLastHover && !mosDragS) mosHover(G, mosLastHover);   // a key or the slider changed the plane: say the new one
 }
 // the overview: the whole field at this plane, small, with the part on screen framed
 function mosMiniGeom(G) {
@@ -3611,8 +3634,10 @@ function mosUi(G) {
   $("mosListBtn").classList.toggle("on", V.mos.list); $("mosMarksBtn").classList.toggle("on", V.mos.marks);
   if (!G) { $("mosInfo").textContent = "every tile is hidden — tick one in the list"; mosList(null); return; }
   const pl = $("mosPlane"); pl.min = G.z0; pl.max = G.z1 - 1; pl.value = V.mos.plane;
+  const wu = mosWinUnit(G);
+  $("mosPlaneL").title = `contrast: ${wu.name}'s window${wu === unit ? " (the contrast panel edits it)" : " — pick a tile in the unit list to set it from the contrast panel"}`;
   $("mosPlaneL").textContent = (G.zUm !== null ? `${mosDepthT(G, V.mos.plane)} · ` : "")
-    + `plane ${V.mos.plane} of ${G.z0}…${G.z1 - 1}` + (V.mos.slab > 1 ? ` · max of ${V.mos.slab} sl` : "");
+    + `plane ${V.mos.plane} of ${G.z0}…${G.z1 - 1}` + (V.mos.slab > 1 ? ` · max of ${V.mos.slab} sl` : "") + ` · contrast ${wu.name}`;
   if (document.activeElement !== $("mosSlab")) $("mosSlab").value = V.mos.slab;
   $("mosMiniBtn").classList.toggle("on", V.mos.mini);
   if (document.activeElement !== $("mosZ0")) $("mosZ0").value = V.mos.zr ? V.mos.zr[0] : "";
@@ -3642,11 +3667,22 @@ function mosShow() {
   $("mosBtn").hidden = !can;
   if (!can) V.mos.on = false;
   $("mosaic").hidden = !V.mos.on; $("mosBtn").classList.toggle("on", V.mos.on);
+  // the unit's frame slider and channel buttons do nothing to the mosaic: not shown while it is
+  $("player").querySelectorAll(":scope > *").forEach(el => { if (el.id !== "mosPlayerHint") el.style.visibility = V.mos.on ? "hidden" : ""; });
+  $("mosPlayerHint").hidden = !V.mos.on;
   if (V.mos.on) mosDraw();
 }
 function mosInfo(text) { $("mosInfo").textContent = text; }
+function mosMsg(text) {                        // an action's report: kept until closed or replaced
+  const r = $("mosReport"); r.querySelector("span").textContent = text; r.hidden = !text;
+  r.style.top = ($("mosBar").offsetHeight + 16) + "px";
+}
+$("mosReport").querySelector("button").onclick = e => { e.stopPropagation(); mosMsg(""); };
+["mousedown", "click", "wheel"].forEach(t => $("mosReport").addEventListener(t, e => e.stopPropagation()));
 // what is under the pointer: where in the field, which tile and slice, and its surface there
+let mosLastHover = null;                     // the last point under the pointer, re-read when the plane changes
 function mosHover(G, m) {
+  mosLastHover = m;
   const [x, y] = m, p = mosOwner(G, x, y);
   const xs = G.ox + x * G.px, ys = G.oy + y * G.py;
   let t = `x ${xs.toFixed(1)} · y ${ys.toFixed(1)} µm${mosRel() ? " from the zero" : " (stage)"}` + (G.zUm !== null ? ` · ${mosDepthT(G, V.mos.plane)}` : "");
@@ -3708,6 +3744,7 @@ const mosUp = e => {
   if (!d.moved) V.mos.sel = d.hit;         // a click selects (or, on nothing, lets go)
   mosDraw(); saveView();
 };
+$("mosCv").addEventListener("pointerleave", () => { if (!mosDragS) { mosLastHover = null; mosInfo(""); } });
 $("mosCv").addEventListener("pointerup", mosUp); $("mosCv").addEventListener("pointercancel", mosUp);
 $("mosCv").addEventListener("dblclick", e => {
   e.stopPropagation(); const G = mosGeom(); if (!G) return;
@@ -3788,8 +3825,14 @@ $("mosGo").addEventListener("keydown", e => {
   e.stopPropagation();
   if (e.key !== "Enter") return;
   const G = mosGeom(); if (!G) return;
-  const n = e.target.value.replace(/[,;]/g, " ").trim().split(/\s+/).map(Number);
-  if (n.length < 2 || !n.slice(0, 3).every(Number.isFinite)) { mosInfo("go: type x y, or x y z, in µm"); return; }
+  const raw = e.target.value.replace(/[,;]/g, " ").trim(), zOnly = raw.match(/^z?\s*(-?\d+(\.\d+)?)$/i);
+  if (zOnly && G.zUm !== null) {                // a depth alone: go there, where the view is
+    const want = +zOnly[1], q = Math.round((want + (G.zZero === null ? 0 : G.zZero) - G.zUm) / G.dz);
+    V.mos.plane = Math.max(G.z0, Math.min(G.z1 - 1, q)); mosDraw(); saveView();
+    mosMsg(q === V.mos.plane ? `to ${mosDepthT(G, q)}` : `z ${want} is outside the stacks: at the nearest plane, ${mosDepthT(G, V.mos.plane)}`); return;
+  }
+  const n = raw.split(/\s+/).map(Number);
+  if (n.length < 2 || !n.slice(0, 3).every(Number.isFinite)) { mosMsg("go: type x y, x y z, or z alone, in µm"); return; }
   mosCentre(G, (n[0] - G.ox) / G.px, (n[1] - G.oy) / G.py);
   let t = `centred on x ${n[0]} · y ${n[1]} µm`;
   if (n.length >= 3 && G.zUm !== null) {
@@ -3797,7 +3840,7 @@ $("mosGo").addEventListener("keydown", e => {
     V.mos.plane = Math.max(G.z0, Math.min(G.z1 - 1, q));
     t += q === V.mos.plane ? ` · ${mosDepthT(G, q)}` : ` · z ${n[2]} is outside the stacks: at the nearest plane, ${mosDepthT(G, V.mos.plane)}`;
   } else if (n.length >= 3) t += " · this file carries no stack depths: z not used";
-  mosDraw(); saveView(); mosInfo(t);
+  mosDraw(); saveView(); mosMsg(t);
 });
 const mosZr = () => { const a = $("mosZ0").value, b = $("mosZ1").value;
   V.mos.zr = a === "" || b === "" ? null : [Math.min(+a, +b), Math.max(+a, +b)]; saveView(); };
@@ -3814,25 +3857,30 @@ $("mosList").addEventListener("click", e => {
 // stitch from the overlaps, on the server, starting from the layout as it is
 $("mosAuto").onclick = async () => {
   const b = $("mosAuto"); if (b.disabled) return;
-  b.disabled = true; b.textContent = "stitching…"; mosInfo("matching every overlapping pair in 3D…");
+  b.disabled = true; b.textContent = "stitching…"; mosMsg("matching every overlapping pair in 3D…");
   try {
     const G = mosGeom(), ch = V.mos.chan === "ov" ? 0 : V.mos.chan;
     const r = await (await fetch("/api/mosaic/register", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ layout: V.mos.layout, channel: ch, fixed: V.mos.sel && G && G.place[V.mos.sel] ? V.mos.sel : null }) })).json();
+      // the tile held still: the one picked in edit, never just the last one clicked while looking
+      body: JSON.stringify({ layout: V.mos.layout, channel: ch, fixed: V.mos.edit && V.mos.sel && G && G.place[V.mos.sel] ? V.mos.sel : null }) })).json();
     if (r.error) throw new Error(r.error);
     mosPush(); V.mos.layout = mosState({ layout: r.layout }).layout; V.mos.pairs = r.pairs;
     const used = r.pairs.filter(p => p.used), worst = used.reduce((a, p) => Math.max(a, Math.hypot(p.residual[0], p.residual[1])), 0);
     const n = st => r.pairs.filter(p => p.status === st).length, nm = p => p.split("/").pop();
-    mosInfo(`stitched: ${used.length} of ${r.pairs.length} overlapping pairs used (correlation above ${r.threshold}, the best chance match between tiles that do not overlap), ${nm(r.fixed)} held still`
-      + (used.length ? ` · the worst seam is off by ${worst.toFixed(2)} µm after the solve` : "")
-      + (n("weak") + n("edge") + n("ambiguous") ? ` · ${n("weak") + n("edge") + n("ambiguous")} not believed (below chance, too far, or another place fits as well)` : "")
-      + (n("outlier") ? ` · ${n("outlier")} dropped as disagreeing with the rest` : "")
-      + (n("doubt") ? ` · ${n("doubt")} in DOUBT: a loop does not close and cannot say which seam is wrong — look at the red ones` : "")
-      + (used.some(p => !p.loop) ? ` · ${used.filter(p => !p.loop).length} unchecked (no loop)` : "")
-      + (r.unmatched.length ? ` · no match for ${r.unmatched.map(nm).join(", ")} (left where they were)` : "")
-      + " · ⌘Z undoes");
+    const lines = [`stitched${r.passes > 1 ? " (two passes)" : ""}: ${used.length} of ${r.pairs.length} overlapping pairs used — each believed by its own correlation map (peak ≥ ${r.threshold} spreads above every other shift it tried, or ≥ 4 when other links confirm it) · ${nm(r.fixed)} held still`
+        + (used.length ? ` · worst seam after the solve ${worst.toFixed(2)} µm` : "")];
+    if (n("weak") + n("edge")) lines.push(`${n("weak") + n("edge")} pair(s) not used: below their own chance level, or the best match on the edge of the search`);
+    if (n("unconfirmed")) lines.push(`${n("unconfirmed")} pair(s) unconfirmed: a modest match no loop of other links agrees with, or a lone link whose upper and lower halves disagree`);
+    if (n("outlier")) lines.push(`${n("outlier")} dropped as disagreeing with the rest`);
+    if (n("doubt")) lines.push(`${n("doubt")} in DOUBT: a loop does not close and cannot say which seam is wrong — look at the red ones`);
+    if (used.some(p => !p.loop)) lines.push(`${used.filter(p => !p.loop).length} used without a loop to check them`);
+    if (r.unmatched.length) lines.push(`not joined to ${nm(r.fixed)}: ${r.unmatched.map(nm).join(", ")} — each group of these is placed among itself, the group held where the stage put it`);
+    if ((r.depth_held || []).length) lines.push(`depth not confirmed for ${r.depth_held.map(nm).join(", ")}: placed across, kept at the depth their geometry gives`);
+    if ((r.far || []).length) lines.push(`moved further than one pair may (${r.far.map(nm).join(", ")}): the corrections added up along a chain — check these by eye`);
+    lines.push("⌘Z undoes");
+    mosMsg(lines.join("\n"));
     mosDraw(); saveView();
-  } catch (err) { mosInfo("stitching failed: " + err.message); badge("stitching failed", true); }
+  } catch (err) { mosMsg("stitching failed: " + err.message); badge("stitching failed", true); }
   finally { b.disabled = false; b.textContent = "auto"; }
 };
 // every marked surface onto one plane: the selected tile's, else the median of them
@@ -3840,14 +3888,14 @@ $("mosFlat").onclick = () => {
   const G = mosGeom(); if (!G) return;
   const at = Object.values(G.place).map(p => { const f = surfFitOf(p.u.path), py = p.u.pixel_size_y_um || p.u.pixel_size_um;
     return f ? { p, zs: f.z(p.u.width / 2 * p.u.pixel_size_um, p.u.height / 2 * py) / p.u.z_step_um } : null; }).filter(Boolean);
-  if (!at.length) { mosInfo("no tile has its surface marked yet — open one in XYZ (double-click it), turn on surface, a few clicks"); return; }
+  if (!at.length) { mosMsg("no tile has its surface marked yet — open one in XYZ (double-click it), turn on surface, a few clicks"); return; }
   const s = at.find(a => a.p.u.path === V.mos.sel), P = at.map(a => a.zs + a.p.z0).sort((a, b) => a - b);
   const target = s ? s.zs + s.p.z0 : P[(P.length - 1) >> 1];
   mosPush();
   // dz is the correction on top of where the tile's geometry put it (p.z0 − its dz)
   at.forEach(a => mosSet(a.p.u.path, { dz: Math.round(target - a.zs - (a.p.z0 - mosEntry(a.p.u.path).dz)) }));
   V.mos.plane = Math.round(target);
-  mosInfo(`flattened: the surface of ${at.length} tile${at.length > 1 ? "s" : ""} on plane ${Math.round(target)} (at each tile's centre)`
+  mosMsg(`flattened: the surface of ${at.length} tile${at.length > 1 ? "s" : ""} on plane ${Math.round(target)} (at each tile's centre)`
     + (Object.keys(G.place).length > at.length ? ` · ${Object.keys(G.place).length - at.length} without surface marks left as they were` : "") + " · ⌘Z undoes");
   mosDraw(); saveView();
 };
@@ -3860,8 +3908,8 @@ $("mosTif").onclick = async () => {
     const r = await (await fetch("/api/mosaic/export", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ layout: V.mos.layout, channels: mosChans(G), planes: zr, crop: mosCropPx(G) }) })).json();
     if (r.error) throw new Error(r.error);
-    mosInfo(`written: ${r.path} (${(r.bytes / 1e6).toFixed(1)} MB, planes ${zr[0]}–${zr[1]}${mosCropPx(G) ? ", the crop" : ", the whole field"})`); badge("TIFF written");
-  } catch (err) { mosInfo("TIFF failed: " + err.message); badge("TIFF failed", true); }
+    mosMsg(`written: ${r.path} (${(r.bytes / 1e6).toFixed(1)} MB, planes ${zr[0]}–${zr[1]}${mosCropPx(G) ? ", the crop" : ", the whole field"})`); badge("TIFF written");
+  } catch (err) { mosMsg("TIFF failed: " + err.message); badge("TIFF failed", true); }
   finally { b.disabled = false; b.textContent = "TIFF"; }
 };
 $("mosPng").onclick = () => savePng($("mosCv"), exportName([FILE.file.replace(/\.mesc$/i, ""), "mosaic", "plane" + V.mos.plane]));

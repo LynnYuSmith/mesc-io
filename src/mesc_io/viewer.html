@@ -2716,7 +2716,7 @@ function volToolClick(e) {
     if (!((e.shiftKey && volMeas.length) || volMeas.length === 1)) volMeas.length = 0;   // the same list, kept in the view
     volMeas.push(q);
   } else if (V.vol.tool === "object") {
-    const o = { q, ch: volObjChan(q), frac: V.vol.objFrac, r: V.vol.objR }, reg = volObjRegion(o);
+    const o = { q, ch: volObjChan(q), frac: V.vol.objFrac, r: V.vol.objR }, reg = (Object.defineProperty(o, "goto", { value: true, writable: true, configurable: true, enumerable: false }), volObjRegion(o));
     volObjs().push(o);
     if (reg) q = volObjCentre(reg).q;                // the crosshair to the object's centre, not its seed
   }
@@ -2863,21 +2863,18 @@ function volEscape(all) {
 }
 
 /* ------------------------------------------------------------------------------------------
-   Objects. A click with the object tool picks a seed exactly as point does, then grows the
-   connected region around it in the page's bytes of one channel (the one drawn; in the overlay,
-   the shown channel standing furthest above its own floor at the seed): a breadth-first walk over
-   the six face neighbours of each voxel, keeping those at least `frac` of the seed's peak (the
-   brightest of its 3×3×3, in the window's bytes, so a share of its height above the window's low
-   end) and no further from the seed than `r` µm, and never more than VOL_OBJ_MAX voxels. The
-   radius is what stops it running along an axon from a bouton or into a neighbour that touches.
-   Only the seed and the two numbers are kept and saved; the region is grown again from the bytes
-   whenever it is needed (a new window or reduction regrows it), so nothing stale is stored.
-   The numbers are the reduced grid's: a voxel is pixel × pixel_y × step × down², the means are
-   of the window's bytes taken back to the recording's units — 8 bits, so to about a step of the
-   window, and a voxel held at 255 counts as the window's top.
+   Objects. A click with the object tool picks a seed exactly as point does; the server grows the
+   connected region around it (mesc_io.objects.grow) on the recording's own values at full
+   resolution, in one channel (the one drawn; in the overlay, the shown channel standing furthest
+   above its own floor at the seed): face neighbours at least `frac` of the way from the stack's
+   background to the peak (the brightest of the seed's 3×3×3), within `r` µm of the peak. Grown on
+   the page's 8-bit window bytes, the same seed was 86 µm³ under one window and 834 µm³ under
+   another — a peak held at 255 lowered every threshold — and its means were of clipped bytes.
+   Only the seed and the two numbers are kept and saved; the answer is asked for again when they
+   change, kept in the page meanwhile, and the region drawn on the page's grid.
    ------------------------------------------------------------------------------------------ */
-const VOL_OBJ = "#3ee8c4", VOL_OBJ_MAX = 250000;
-const volObjCache = new WeakMap();           // object -> { key, reg }
+const VOL_OBJ = "#3ee8c4";
+const volObjCache = new Map();               // unit|seed|channel|share|radius|reduction -> the server's answer, or "pending"
 function volObjs() { if (!unit) return []; return V.vol.objs[unit.path] || (V.vol.objs[unit.path] = []); }
 // the channel an object is grown in, for a seed q (full-resolution voxel)
 function volObjChan(q) {
@@ -2889,70 +2886,37 @@ function volObjChan(q) {
     const sc = (volBytes[j][i] - f) / (c - f); if (sc > bs) { bs = sc; best = j; } }
   return volMeta.chans[best];
 }
-function volObjRegion(o) {                   // the region, grown now or kept from the last time; null if its channel is not on the page
+function volObjRegion(o) {                   // the server's region (null while it is on its way, or on an error)
   if (!volMeta || !unit) return null;
-  const j = volMeta.chans.indexOf(o.ch); if (j < 0 || !volBytes[j]) return null;
-  const key = `${volKey}|${o.q}|${o.ch}|${o.frac}|${o.r}`, c = volObjCache.get(o);
-  if (c && c.key === key) return c.reg;
-  const reg = volGrow(o, j); volObjCache.set(o, { key, reg }); return reg;
-}
-function volGrow(o, j) {
-  const [D, Hy, Wx] = volMeta.shape, k = volMeta.down, a = volBytes[j], S = Hy * Wx;
-  const px = unit.pixel_size_um || 1, py = unit.pixel_size_y_um || px, dz = unit.z_step_um || 1;
-  const ux = px * k, uy = py * k, r2 = o.r * o.r;              // a voxel of the page's bytes, in µm
-  const cl = (x, n) => Math.max(0, Math.min(n - 1, x));
-  // the walk starts on the brightest of the clicked voxel's 3×3×3 in this channel (itself on a tie): the peak
-  const c0 = [cl(o.q[0], D), cl(Math.floor(o.q[1] / k), Hy), cl(Math.floor(o.q[2] / k), Wx)];
-  let [z0, y0, x0] = c0, peak = a[(z0 * Hy + y0) * Wx + x0];
-  for (let dz_ = -1; dz_ <= 1; dz_++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-    const z = c0[0] + dz_, y = c0[1] + dy, x = c0[2] + dx;
-    if (z < 0 || y < 0 || x < 0 || z >= D || y >= Hy || x >= Wx) continue;
-    const v = a[(z * Hy + y) * Wx + x]; if (v > peak) { peak = v; z0 = z; y0 = y; x0 = x; } }
-  const lim = Math.max(1, o.frac * peak);    // a byte of 0 is at or below the window's low end: never part of an object
-  const seen = new Uint8Array(a.length), Q = new Int32Array(VOL_OBJ_MAX), nch = volBytes.length;
-  const sum = [0, 0, 0], lo = [z0, y0, x0], hi = [z0, y0, x0], csum = new Float64Array(nch);
-  let n = 0, capR = false, capN = false;
-  const take = (i, z, y, x) => { Q[n++] = i; sum[0] += z; sum[1] += y; sum[2] += x;
-    if (z < lo[0]) lo[0] = z; if (y < lo[1]) lo[1] = y; if (x < lo[2]) lo[2] = x;
-    if (z > hi[0]) hi[0] = z; if (y > hi[1]) hi[1] = y; if (x > hi[2]) hi[2] = x;
-    for (let c = 0; c < nch; c++) csum[c] += volBytes[c][i]; };
-  const s0 = (z0 * Hy + y0) * Wx + x0; seen[s0] = 1; take(s0, z0, y0, x0);
-  for (let h = 0; h < n; h++) {
-    const i = Q[h], z = Math.floor(i / S), y = Math.floor((i - z * S) / Wx), x = i - z * S - y * Wx;
-    for (let m = 0; m < 6; m++) {
-      const zz = z + (m === 0 ? -1 : m === 1 ? 1 : 0), yy = y + (m === 2 ? -1 : m === 3 ? 1 : 0), xx = x + (m === 4 ? -1 : m === 5 ? 1 : 0);
-      if (zz < 0 || yy < 0 || xx < 0 || zz >= D || yy >= Hy || xx >= Wx) continue;
-      const ii = (zz * Hy + yy) * Wx + xx; if (seen[ii]) continue; seen[ii] = 1;
-      if (a[ii] < lim) continue;
-      const ex = (xx - x0) * ux, ey = (yy - y0) * uy, ez = (zz - z0) * dz;
-      if (ex * ex + ey * ey + ez * ez > r2) { capR = true; continue; }
-      if (n >= VOL_OBJ_MAX) { capN = true; continue; }
-      take(ii, zz, yy, xx);
-    }
+  const key = `${unit.path}|${o.q}|${o.ch}|${o.frac}|${o.r}|${volMeta.down}`, c = volObjCache.get(key);
+  if (c && c !== "pending") return c.error ? null : c;
+  if (!c) {
+    volObjCache.set(key, "pending");
+    fetch("/api/object", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ unit: unit.path, ch: o.ch, q: o.q, frac: o.frac, r: o.r, down: volMeta.down }) })
+      .then(r => r.json()).then(d => {
+        if (d.error) { volObjCache.set(key, { error: d.error }); badge("object: " + d.error, true); }
+        else { d.idx = Int32Array.from(d.idx); volObjCache.set(key, d);
+               if (o.goto) { delete o.goto; volGoTo(volObjCentre(d).q); } }
+        volDraw(); orthoDraw(); volPtsList(); })
+      .catch(e => { volObjCache.set(key, { error: String(e) }); });
   }
-  return { idx: Q.slice(0, n), n, peak, lim, seed: [z0, y0, x0], cen: sum.map(x => x / n), lo, hi,
-           mean: Array.from(csum, x => x / n), capR, capN, vox: [dz, uy, ux] };
+  return null;
 }
 // the centre: f in full-resolution voxels as floats (for drawing), q the nearest full-resolution voxel
-function volObjCentre(reg) {
-  const k = volMeta.down, f = [reg.cen[0], (reg.cen[1] + .5) * k - .5, (reg.cen[2] + .5) * k - .5];
-  return { f, q: [Math.round(f[0]), Math.round(f[1]), Math.round(f[2])] };
-}
+function volObjCentre(reg) { const f = reg.centre_vox; return { f, q: f.map(Math.round) }; }
 function volObjStats(reg) {
-  const [vz, vy, vx] = reg.vox, f = volObjCentre(reg).f;
-  return { n: reg.n, um3: reg.n * vx * vy * vz, centre: volUm(f), slice: Math.round(f[0]),
-           ext: [(reg.hi[2] - reg.lo[2] + 1) * vx, (reg.hi[1] - reg.lo[1] + 1) * vy, (reg.hi[0] - reg.lo[0] + 1) * vz],
-           means: reg.mean.map((m, j) => ({ ch: volMeta.chans[j], v: volVal(m / 255, volMeta.chs[j].win) })) };
+  return { n: reg.n, um3: reg.um3, centre: reg.centre_um, slice: reg.slice, ext: reg.extent_um, means: reg.means };
 }
 function volObjText(o) {
   const name = ch => (unit.channels[ch] || "ch" + ch).replace("Channel_", "ch"), reg = volObjRegion(o);
-  if (!reg) return `${name(o.ch)} is not on the page — ${volMeta && !volMeta.ov ? `pick ${name(o.ch)}, or turn the overlay on` : "it is not one of the first two channels"}`;
+  if (!reg) return "growing on the recording's values…";
   const t = volObjStats(reg), f2 = x => x.toFixed(2), f4 = x => +x.toPrecision(4);
   return `${f4(t.um3)} µm³ · ${t.n} vox · centre x ${f2(t.centre[0])} · y ${f2(t.centre[1])} · z ${t.centre[2].toFixed(1)} · slice ${t.slice}`
     + `  · ${t.ext[0].toFixed(1)} × ${t.ext[1].toFixed(1)} × ${t.ext[2].toFixed(1)} µm`
     + `  · mean ${t.means.map(m => `${name(m.ch)} ≈ ${f4(m.v)}`).join(" · ")}`
-    + `  · ${name(o.ch)} ≥ ${Math.round(o.frac * 100)} % of peak, ≤ ${o.r} µm`
-    + (reg.capR ? " · reached the radius" : "") + (reg.capN ? ` · stopped at ${VOL_OBJ_MAX} voxels` : "");
+    + `  · ${name(o.ch)} ≥ ${Math.round(o.frac * 100)} % of the way from background ${f4(reg.background)} to peak ${f4(reg.peak)} (≥ ${f4(reg.threshold)}), ≤ ${o.r} µm`
+    + (reg.reached_radius ? " · reached the radius" : "") + (reg.stopped_at_max ? " · stopped at the voxel limit" : "");
 }
 // the objects in an XYZ pane: the voxels of each region in the pane's cut (in a projection, all of
 // them) tinted, the region's edge drawn solid, and its number beside it
@@ -2964,7 +2928,7 @@ function orthoObjs(g, axis, c, dpr) {
   objs.forEach((o, n) => {
     const reg = volObjRegion(o); if (!reg) return;
     const m = new Uint8Array(w * h); let cnt = 0, sx = 0, sy = 0;
-    for (let t = 0; t < reg.n; t++) {
+    for (let t = 0; t < reg.idx.length; t++) {
       const i = reg.idx[t], z = Math.floor(i / S), y = Math.floor((i - z * S) / Wx), x = i - z * S - y * Wx;
       let p;
       if (axis === "xy") { if (!v.oMax && z !== v.cz) continue; p = y * w + x; }

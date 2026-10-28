@@ -78,8 +78,9 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
     if (mode === "mip") await shot("gamma_mip_2");
     await setGam(0, 1); await settle(); const gBack = await gl();
     if (gBack.h !== g1.h) fail(`${mode}: gamma back at 1 is not the same picture to the bit: ${g1.h} vs ${gBack.h}`);
-    // (glass, looking down, is mostly the current slice's blue sheet, held at a quarter of white: it moves less)
-    const by = mode === "glass" ? 1.005 : 1.02;
+    // (glass, looking down, is mostly the current slice's blue sheet, held at a quarter of white: it moves
+    // less — and since 0.4.1 the floor no longer stretches the brightness, so more of glass sits at white)
+    const by = mode === "glass" ? 1.002 : 1.02;
     if (!(gLo.s > g1.s * by && g1.s > gHi.s * by)) fail(`${mode}: gamma is not monotonic (0.5 brighter, 2 darker): ${JSON.stringify([gLo.s, g1.s, gHi.s])}`);
     gam[mode] = { "0.5": gLo.s, "1": g1.s, "2": gHi.s, identical_at_1: true };
   }
@@ -135,19 +136,22 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   await clickAt(sc.x, sc.y);
   let O = await J("volObjs()");
   if (O.length !== 1 || O[0].ch !== 1 || O[0].frac !== .5 || O[0].r !== 15) fail("a click did not add one object grown in red: " + JSON.stringify(O));
-  const st = await J("(()=>{const r=volObjRegion(volObjs()[0]); return {...volObjStats(r), cen:r.cen, capR:r.capR, capN:r.capN, peak:r.peak};})()");
-  const k = u.down, cenFull = [st.cen[0], (st.cen[1] + .5) * k - .5, (st.cen[2] + .5) * k - .5];
+  // the region is grown by the server on the recording's values: wait for its answer
+  const region = async n => { for (let i = 0; i < 80; i++) { const r = await J(`(()=>{const o=volObjs()[${n}], r=o && volObjRegion(o); return r ? {...volObjStats(r), cen:r.centre_vox, capR:r.reached_radius, capN:r.stopped_at_max, peak:r.peak} : null;})()`);
+    if (r) return r; await sleep(150); } fail("no answer from the server for object " + n); };
+  const st = await region(0);
+  const k = u.down, cenFull = st.cen;
   if (!(Math.abs(cenFull[0] - 16) <= 1.5 && Math.abs(cenFull[1] - 30) <= 1.5 && Math.abs(cenFull[2] - 95) <= 1.5)) fail("the cell's object is not centred on (95, 30, 16): " + JSON.stringify(cenFull));
-  // at half the peak of the window's bytes: an ellipsoid about 2.6 µm across and 2.9 µm along z (~80 µm³)
+  // half way from the red background to the peak, on the recording's values: an ellipsoid ~2.6 µm across, ~2.9 µm along z
   if (!(st.um3 > 40 && st.um3 < 170) || st.capR || st.capN) fail("the cell's volume is not plausible (or a cap stopped it): " + JSON.stringify(st));
-  if (Math.abs(st.um3 - st.n * u.px * u.py * u.dz * k * k) > 1e-6) fail("the volume is not voxels × voxel size");
+  if (Math.abs(st.um3 - st.n * u.px * u.py * u.dz) > 1e-6) fail("the volume is not voxels × voxel size (full resolution)");
   const red = st.means.find(m => m.ch === 1).v, green = st.means.find(m => m.ch === 0).v;
-  // in reader units (raw × 0.5 − 786): red's background 3714, the cell's peak 11214, so a region kept at half the
-  // peak averages well above 7000; green is its background, -336, there
+  // in reader units (raw × 0.5 − 786): red's background 3714, the cell's peak 11214, so a region kept half way
+  // up averages well above 7000; green is its background, -336, there
   if (!(red > 7000 && red < 11300 && green < 0)) fail("the object's means are not the cell's red and the background's green: " + JSON.stringify(st.means));
   const lst = await ev("document.getElementById('volPts').textContent");
   if (!lst.includes("o1") || !lst.includes("µm³") || !/mean ch0 ≈ -?[\d.]+ · ch1 ≈ -?[\d.]+/.test(lst) || !lst.includes(`slice ${st.slice}`)) fail("the list does not give the object: " + lst);
-  const cross = await J("({cx:V.vol.cx, cy:V.vol.cy, z:V.frame})");
+  await sleep(200); const cross = await J("({cx:V.vol.cx, cy:V.vol.cy, z:V.frame})");
   if (Math.abs(cross.cx - 95 / k) > 2 || Math.abs(cross.cy - 30 / k) > 2 || Math.abs(cross.z - 16) > 1) fail("the crosshair did not go to the object's centre: " + JSON.stringify(cross));
   const teal = (cid, cx = null, cy = null, R = 20) => ev(`(()=>{const c=document.getElementById('${cid}'), g=c.getContext('2d'), r=c.getBoundingClientRect(), s=c.width/r.width;
     const x0=${cx === null ? 0 : `Math.max(0,Math.round((${cx}-r.left)*s)-${R})`}, y0=${cy === null ? 0 : `Math.max(0,Math.round((${cy}-r.top)*s)-${R})`};
@@ -162,10 +166,12 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   await clickAt(s16.x, s16.y);
   O = await J("volObjs()");
   if (O.length !== 2 || O[1].ch !== 0) fail("the bouton's object is not grown in ch0: " + JSON.stringify(O));
-  // the furthest voxel of an object from its seed, in µm, and its size
-  const far = n => J(`(()=>{const r=volObjRegion(volObjs()[${n}]), [D,H,W]=volMeta.shape, S=H*W, [vz,vy,vx]=r.vox; let m=0;
-    for(const i of r.idx){const z=Math.floor(i/S), y=Math.floor((i-z*S)/W), x=i-z*S-y*W; m=Math.max(m, Math.hypot((x-r.seed[2])*vx,(y-r.seed[1])*vy,(z-r.seed[0])*vz));}
-    const c=volObjCentre(r).f; return {far:m, n:r.n, capR:r.capR, cen:c, um3:volObjStats(r).um3};})()`);
+  // the furthest of an object's voxels (on the page's grid, each block's centre) from its peak, in µm, and its size
+  const far = async n => { await region(n); return J(`(()=>{const r=volObjRegion(volObjs()[${n}]), [D,H,W]=volMeta.shape, S=H*W, k=volMeta.down;
+    const vx=unit.pixel_size_um, vy=unit.pixel_size_y_um||vx, vz=unit.z_step_um, p=r.peak_vox; let m=0;
+    for(const i of r.idx){const z=Math.floor(i/S), y=Math.floor((i-z*S)/W), x=i-z*S-y*W; m=Math.max(m, Math.hypot(((x+.5)*k-.5-p[2])*vx,((y+.5)*k-.5-p[1])*vy,(z-p[0])*vz));}
+    return {far:m, n:r.n, capR:r.reached_radius, cen:r.centre_vox, um3:r.um3};})()`); };
+  const blockHalf = (u.down - 1) / 2 * Math.hypot(u.px, u.py);   // a block's centre is that far from its furthest voxel
   const bo = await far(1);
   if (Math.abs(bo.cen[0] - b16[0]) > 1.5 || Math.abs(bo.cen[1] - b16[1]) > 2 || Math.abs(bo.cen[2] - b16[2]) > 2) fail("the bouton's object is not centred on it: " + JSON.stringify([bo.cen, b16]));
   if (bo.capR || bo.far > 6) fail("at half its peak the bouton's object ran along the axon: " + JSON.stringify(bo));
@@ -174,9 +180,9 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const lo3 = await far(1);
   await ev("$('volObjR').value = 15; $('volObjR').onchange(); 'ok'");
   const lo15 = await far(1);
-  if (lo3.far > 3 + 1e-9 || !lo3.capR) fail("the radius did not hold the object at 3 µm: " + JSON.stringify(lo3));
+  if (lo3.far > 3 + blockHalf + 1e-9 || !lo3.capR) fail("the radius did not hold the object at 3 µm: " + JSON.stringify(lo3));
   if (!(lo15.far > 6 && lo15.n > 2 * lo3.n)) fail("the positive control failed: at 10 % without a tight radius the object should run along the axon: " + JSON.stringify(lo15));
-  if (lo15.far > 15 + 1e-9) fail("the object went past its 15 µm radius: " + JSON.stringify(lo15));
+  if (lo15.far > 15 + blockHalf + 1e-9) fail("the object went past its 15 µm radius: " + JSON.stringify(lo15));
   await shot("object_bouton_leak15");
   await ev("$('volObjF').value = 50; $('volObjF').onchange(); 'ok'");
   const bo2 = await far(1);
@@ -190,18 +196,20 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const maxT = await teal("oXY");
   await ev("V.vol.oMax = false; V.vol.ortho = false; V.vol.on = true; volShow(); 'ok'"); await settle();
   if (maxT <= xyT) fail("in the projection both objects are not drawn: " + JSON.stringify([xyT, maxT]));
-  // the red cell's object is listed as not on the page while only green is loaded
-  if (!(await ev("document.getElementById('volPts').textContent")).includes("ch1 is not on the page")) fail("the list does not say the red object's channel is missing");
+  // grown on the server, the red cell's object keeps its numbers while only green is on the page
+  if (!/o1\s+[\d.]+ µm³/.test(await ev("document.getElementById('volPts').textContent"))) fail("the red object's numbers are not listed while green alone is shown");
   // the PNG caption lists what it can grow
   await hookPng(); await ev("exportVolPng(); 'ok'"); const pngO = await J("window.__png");
   if (!pngO.lines.some(l => l.startsWith("o2: "))) fail("the 3D PNG's caption does not carry the objects: " + JSON.stringify(pngO.lines));
   // saved with the view: seed and numbers, regrown on load to the same region
   await ev("V.overlay = true; volShow(); 'ok'"); await waitStack(true); await settle();
+  await region(0); await region(1);
   const before = await J("volObjs().map(o => ({o, n: volObjRegion(o).n}))");
   await ev("saveView(); 'ok'"); await sleep(700);
   const saved = JSON.parse(await ev(`(async()=>{const r=await fetch('/api/view'); return JSON.stringify((await r.json()).view.vol.objs[${JSON.stringify(path)}] || null);})()`));
   if (!saved || saved.length !== 2 || saved.some(o => "idx" in o || Object.keys(o).sort().join() !== "ch,frac,q,r")) fail("the saved view does not hold just the seed and the numbers: " + JSON.stringify(saved));
   await send("Page.reload"); await sleep(2600); await waitStack(true);
+  await region(0); await region(1);
   const after = await J("volObjs().map(o => ({o, n: volObjRegion(o).n}))");
   if (JSON.stringify(after) !== JSON.stringify(before)) fail("the objects did not come back as they were: " + JSON.stringify([before, after]));
   if (await ev("V.vol.tool") !== "object") fail("the object tool was not restored with the view");

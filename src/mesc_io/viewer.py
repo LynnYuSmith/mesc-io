@@ -78,6 +78,7 @@ from . import MescFile
 from .check import check as mesc_check
 from .dff import DffParams, compute_dff, darkest_patch
 from . import mosaic as _mosaic
+from . import objects as _objects
 
 PAGE = Path(__file__).resolve().parent / "viewer.html"
 
@@ -427,6 +428,10 @@ class _Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         try:
             route = [p for p in url.path.split("/") if p]
+            if route == ["api", "object"]:
+                n = int(self.headers.get("Content-Length", 0))
+                payload = json.loads(self.rfile.read(n) or b"{}")
+                return self._json(self._object(payload if isinstance(payload, dict) else {}))
             if route[:2] == ["api", "mosaic"] and len(route) == 3 and route[2] in ("register", "export"):
                 n = int(self.headers.get("Content-Length", 0))
                 payload = json.loads(self.rfile.read(n) or b"{}")
@@ -448,6 +453,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"unit": dst, "copied": len(store[dst]), "from": src})
         except Exception as exc:                             # noqa: BLE001
             self._fail(exc)
+
+    # -- objects grown from a seed, on the recording's values -------------------------
+    def _object(self, payload: dict) -> dict:
+        """``{unit, ch, q: [z, y, x], frac, r, down}`` -> ``mesc_io.objects.grow``; the channel's
+        background is worked out once per unit and channel and kept."""
+        unit, ch = str(payload.get("unit", "")), int(payload.get("ch", 0))
+        q = [int(v) for v in payload.get("q", [])]
+        if len(q) != 3:
+            raise ValueError("expected q: [z, y, x]")
+        with self._file() as f:
+            key = (str(self.mesc_path), unit, ch, "background")
+            with self._lock:
+                bg = self._cache.get(key)
+            if bg is None:
+                bg = _objects.background(f, unit, ch)
+                with self._lock:
+                    self._cache[key] = bg
+            return _objects.grow(f, unit, ch, q, float(payload.get("frac", 0.5)), float(payload.get("r", 15.0)),
+                                 down=int(payload.get("down", 1)), bg=bg)
 
     # -- mosaics of z-stack tiles ---------------------------------------------------
     def _mosaic(self, what: str, payload: dict) -> dict:

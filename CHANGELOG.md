@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Objects are grown on the recording's own values**, on the server at full resolution
+  (`mesc_io.objects.grow`): face neighbours at least a share of the way from the stack's background
+  (its 5th percentile) to the peak, within the radius. On the page's 8-bit window bytes the same
+  seed was 86 µm³ under one window and 834 µm³ under another, and its means were of clipped bytes.
+  The list gives the background, the peak and the threshold used.
+- **Stitching after a red team.** A link is believed by its own correlation map (peak-to-sidelobe
+  ratio ≥ 6, or ≥ 4 when a loop of other links confirms it); a link no loop checks must give the
+  same shift from both halves of its depth; depth is taken from a link only when confirmed; depth is
+  rounded from each group's anchor; corrections are from where a tile is drawn, and those inside
+  the mosaic's own loop noise are not applied, so a second auto leaves a stitched field still; a
+  tile further off than one pair may move it is measured in a second pass. The report says what was
+  not used, unconfirmed, joined only among itself, held in depth or moved far, in a box of its own.
+- **One depth for a slice everywhere**, from the stack's geometry (µm from the rig's zero); slice 0
+  is named by its end, not called the surface.
+- Smaller: the mosaic's contrast follows the tile picked in the list and redraws when it changes;
+  the unit's slider and channel buttons are hidden under the mosaic; the tile list starts closed;
+  go takes a depth alone and says when a point is off every tile; the 3D ruler is kept with the view;
+  stacks are listed in slices.
+
 - **Mosaics in depth, from the stacks' own geometry.** A stack's slices are placed by the geometry
   it carries (`Unit.z0_um`: `GeomTransTransl` z plus the z axis's offset; slice 0 the deep end), not
   by the stage reading, which is one value taken at some moment of the scan — on a 2026-10-27 file

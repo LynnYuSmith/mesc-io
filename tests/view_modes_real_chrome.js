@@ -35,6 +35,9 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   await ev("V.flipY=false; V.overlay=false; V.ch=0; V.vol = volState(null); V.vol.on = true; V.vol.mode='mip'; V.vol.cut=true; V.vol.ceil=1; volShow(); volReset(); 'ok'");
   await loaded();
   if (await ev("!!volMeta && !volMeta.ov") !== true) fail("one-channel stack did not load");
+  // (the current plane's blue tint off for these: a pixel whose brightest voxel moves onto or off the
+  // plane when the floor cuts changes colour by design, which is not a change of brightness)
+  await ev("V.proj = 'max'; 'ok'");
   // 1. the ceiling does not rescale: pixels below it keep their grey when it comes down
   await ev("V.vol.thr = 0.0; V.vol.thrFor = unit.path; 'ok'");
   const a = await pix();
@@ -50,6 +53,7 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   let n2 = 0, s2 = 0; for (let i = 0; i < c0.length; i++) if (c0[i] > 0.45 * 255 * (await 1) && c0[i] < 250) { n2++; if (Math.abs(c0[i] - c1[i]) <= 4) s2++; }
   console.log("  floor 0 -> 0.3: bright pixels", n2, "within 4 grey levels", s2);
   if (!n2 || s2 / n2 < 0.99) fail("raising the floor changed the brightness of what is above it");
+  await ev("V.proj = ''; 'ok'");
   // 2. a mode switch with an auto floor says what it did
   await ev("V.vol.thrFor = ''; V.vol.thr = volAutoThr(); $('volNote').hidden = true; 'ok'");
   await ev("$('volGlass').click(); 'ok'"); await sleep(400);

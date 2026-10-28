@@ -68,6 +68,18 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   console.log("  overlay -> one channel:", JSON.stringify(after), "note:", JSON.stringify(note2));
   if (after.ov || Math.abs(after.thr - 0.33) > 1e-9 || !after.by) fail("the channel's floor from the overlay did not carry over");
   if (/floor ch0:/.test(note2)) fail("the note claims the floor changed when it was carried over");
+  // 3b. in the overlay each channel has its own ceiling, typed as a number in its own units
+  await ev("$('ovBtn').click(); 'ok'"); await loaded();
+  const cv = await J(`(()=>{const rows=[...document.querySelectorAll('#volChs .vceilN')]; return {n: rows.length, shown: rows.map(r=>r.offsetParent!==null), shared: !$('volCeilL').hidden};})()`);
+  if (cv.n !== 2 || !cv.shown.every(Boolean) || cv.shared) fail("the overlay does not give each channel a ceiling number: " + JSON.stringify(cv));
+  const w1 = await J("volMeta.chs[1].win"), want = w1[0] + 0.6 * (w1[1] - w1[0]);
+  await ev(`(()=>{const nb=document.querySelectorAll('#volChs .vceilN')[1]; nb.value='${want}'; nb.dispatchEvent(new Event('change', {bubbles:true})); return 'ok';})()`);
+  const cc = await J("V.vol.ceilC");
+  if (Math.abs(cc[1] - 0.6) > 1e-6 || Math.abs(cc[0] - 1) > 1e-6) fail("a typed ch1 ceiling did not set ch1's alone: " + JSON.stringify(cc));
+  await ev("V.ch = 1; $('ovBtn').click(); 'ok'"); await loaded();
+  if (Math.abs(await ev("V.vol.ceil") - 0.6) > 1e-6) fail("ch1's ceiling did not carry to one channel");
+  if (await ev("$('volCeilN').offsetParent === null")) fail("one channel shows no ceiling number");
+  await ev("V.ch = 0; volShow(); 'ok'"); await loaded();
   // 4. slab turns glass into MIP — and says so
   await ev("$('volGlass').click(); 'ok'"); await sleep(200); await ev("$('volNote').hidden = true; $('volSlab').click(); 'ok'"); await sleep(400);
   const note3 = await ev("$('volNote').hidden ? '' : $('volNote').textContent");

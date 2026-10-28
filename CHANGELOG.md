@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2 — 2026-10-28
+
+- **In the overlay each channel has its own ceiling**, by slider or typed as a number in that
+  channel's own units, beside its floor. The overlay hid the ceiling's number: one ceiling for two
+  channels with two windows has no single value in the recording's units. A channel's ceiling
+  carries to one channel and back, as its floor does.
+- The floor's and ceiling's help no longer mention a gamma, which 0.4 does not have.
+
 ## 0.4.1 — 2026-10-28
 
 **The 3D view says what it does.** Improvements to what 0.4.0 has; nothing new besides.

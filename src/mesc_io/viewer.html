@@ -240,9 +240,9 @@
         <button id="volMip" title="the brightest voxel along each line of sight">MIP</button>
         <button id="volGlass" title="semi-transparent: every voxel adds light and hides a little of what is behind it">glass</button>
         <button id="volDepth" title="MIP coloured by the depth the brightest voxel sits at — an axon's colour says how deep it runs">depth</button>
-        <label id="volThrL" title="below this, a voxel is not shown (fraction of the window). It only says what is shown — how bright the rest is comes from the window (contrast), gain and gamma, and does not change with it. Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"><input type="number" id="volThrN" class="vnum" step="any" title="the floor in the recording's own units (type a value, Enter)"></label>
+        <label id="volThrL" title="below this, a voxel is not shown (fraction of the window). It only says what is shown — how bright the rest is comes from the window (contrast) and gain, and does not change with it. Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"><input type="number" id="volThrN" class="vnum" step="any" title="the floor in the recording's own units (type a value, Enter)"></label>
         <span id="volChs" hidden title="overlay: each channel in its own colour, through its own window (instruments), with its own floor; click a channel's name to hide or show it"></span>
-        <label title="above this, a voxel is not shown (with cut on): the brightest blobs stop hiding what is around and behind them. It does not rescale the brightness of the rest — that is the window (contrast), gain and gamma">ceiling <input type="range" id="volCeil" min="0.05" max="1" step="0.01"><input type="number" id="volCeilN" class="vnum" step="any" title="the ceiling in the recording's own units (type a value, Enter)"></label>
+        <label id="volCeilL" title="above this, a voxel is not shown (with cut on): the brightest blobs stop hiding what is around and behind them. It does not rescale the brightness of the rest — that is the window (contrast) and gain">ceiling <input type="range" id="volCeil" min="0.05" max="1" step="0.01"><input type="number" id="volCeilN" class="vnum" step="any" title="the ceiling in the recording's own units (type a value, Enter)"></label>
         <button id="volCut" title="the ceiling on or off: on, a voxel above it is not shown, so a bright blob disappears and what is behind it shows; off, every voxel is shown at its own brightness">cut</button>
         <button id="volAuto" title="the floor back at the stack's own percentile — 99.7 for MIP and depth, 97 for glass: the background empty, what stands out of it kept">auto</button>
         <label title="how much a voxel hides what is behind it (glass only)">density <input type="range" id="volDen" min="0.02" max="1" step="0.01"></label>
@@ -1683,7 +1683,7 @@ function volTop() { return Math.PI / 2 - 0.02; }   // looking straight down the 
 function volState(v) {
   const d = { on: false, ortho: false, oMax: false, oCross: true, cx: -1, cy: -1, cz: -1,
               mode: "mip", thr: 0.5, thrFor: "", ceil: 1, ceilSet: 1, cut: true, den: 0.35, gain: 1.4, z: 1, yaw: 0, pitch: volTop(), dist: 1, tx: 0, ty: 0, tz: 0, deep: false, axes: 2,
-              chOn: [true, true], thrC: [0.5, 0.5], thrCFor: "",   // the overlay: each channel shown?, its floor
+              chOn: [true, true], thrC: [0.5, 0.5], thrCFor: "", ceilC: [1, 1],   // the overlay: each channel shown?, its floor, its ceiling
               tool: "", pts: {},     // tool: "" | point | measure
               box: [0, 1, 0, 1, 0, 1], boxOpen: false, slab: false, slabUm: 10 };   // the clip box: x0 x1 y0 y1 z0 z1 in 0..1 of the file's axes; the thick slab   // the 3D tool (point), and the points: unit path -> [[z, y, x], …] in the file's full-resolution voxels
   if (!v || typeof v !== "object") return d;
@@ -1702,6 +1702,7 @@ function volState(v) {
   o.chOn = [0, 1].map(k => !(Array.isArray(v.chOn) && v.chOn[k] === false));
   o.thrC = [0, 1].map(k => cl(Array.isArray(v.thrC) ? v.thrC[k] : NaN, 0, .95, d.thr));
   o.thrCFor = typeof o.thrCFor === "string" ? o.thrCFor : "";
+  o.ceilC = [0, 1].map(k => cl(Array.isArray(v.ceilC) ? v.ceilC[k] : NaN, .05, 1, o.ceil));
   o.tool = ["point", "measure"].includes(o.tool) ? o.tool : "";
   const bx = Array.isArray(v.box) && v.box.length === 6 ? v.box.map(x => cl(x, 0, 1, NaN)) : [];
   o.box = bx.length === 6 && bx.every(Number.isFinite) && bx[0] < bx[1] && bx[2] < bx[3] && bx[4] < bx[5] ? bx : d.box.slice();
@@ -1977,12 +1978,13 @@ function volMetaFrom(got) {         // got: one { r, shape, vox, data } per chan
 function volFloorAcrossOverlay(toOv) {
   if (!unit || !unit.z_step_um || unit.channels.length < 2) return;
   const k = Math.min(V.ch, 1);
-  if (toOv) { V.vol.thrC[k] = V.vol.thr; if (V.vol.thrFor === unit.path) V.vol.thrCFor = unit.path; }
-  else { V.vol.thr = V.vol.thrC[k]; V.vol.thrFor = V.vol.thrCFor === unit.path ? unit.path : ""; }
+  if (toOv) { V.vol.thrC[k] = V.vol.thr; if (V.vol.thrFor === unit.path) V.vol.thrCFor = unit.path; V.vol.ceilC[k] = V.vol.ceil; }
+  else { V.vol.thr = V.vol.thrC[k]; V.vol.thrFor = V.vol.thrCFor === unit.path ? unit.path : ""; V.vol.ceil = V.vol.ceilC[k]; }
 }
 function volFloorToChannel(from, to) {
   if (!unit || !unit.z_step_um || volOv() || from === to || from > 1 || to > 1) return;
-  V.vol.thrC[from] = V.vol.thr;                       // this channel's floor, kept for it
+  V.vol.thrC[from] = V.vol.thr; V.vol.ceilC[from] = V.vol.ceil;   // this channel's floor and ceiling, kept for it
+  V.vol.ceil = V.vol.ceilC[to];
   if (V.vol.thrCFor === unit.path) V.vol.thr = V.vol.thrC[to];   // the other's, when it was set by hand
   else V.vol.thrFor = "";                             // else the other channel's own auto floor
 }
@@ -2000,7 +2002,7 @@ function volSettings() {
     mode: V.vol.mode === "glass" ? "glass" : V.vol.mode === "depth" ? `depth (colours ${nm(ov ? (V.ch === 1 ? 1 : 0) : V.ch)})` : "MIP",
     floor: per(k => volFmt(volVal(ov ? V.vol.thrC[k] : V.vol.thr, win(k)))
                     + (hand ? " (by hand)" : ` (auto: the ${V.vol.mode === "glass" ? "97th" : "99.7th"} percentile)`)),
-    ceiling: V.vol.cut ? per(k => volFmt(volVal(V.vol.ceil, win(k))) + ", above it not shown") : "off (every voxel shown)",
+    ceiling: V.vol.cut ? per(k => volFmt(volVal(ov ? V.vol.ceilC[k] : V.vol.ceil, win(k))) + ", above it not shown") : "off (every voxel shown)",
     slab: V.vol.slab ? `${V.vol.slabUm} µm around slice ${V.frame}` : "off",
     stack: `${volMeta.down > 1 ? volMeta.down + "×" + volMeta.down + " block means" : "full resolution"}`,
   };
@@ -2012,7 +2014,7 @@ function volOwnKeys(el) {
   if (id === "ovBtn" || cl.contains("chan")) return ["channels", "stack"];
   if (cl.contains("vchOn")) return ["channels"];
   if (["volThr", "volThrN", "volAuto"].includes(id) || cl.contains("vthr") || cl.contains("vthrN")) return ["floor"];
-  if (["volCeil", "volCeilN"].includes(id)) return ["ceiling"];
+  if (["volCeil", "volCeilN"].includes(id) || cl.contains("vceil") || cl.contains("vceilN")) return ["ceiling"];
   if (id === "volCut") return ["ceiling"];
   if (["volSlab", "volSlabN"].includes(id)) return ["slab"];
   return [];
@@ -2084,7 +2086,7 @@ function volShow() {
   $("volZv").textContent = V.vol.z === 1 ? "1 (true)" : V.vol.z;
   $("volDen").disabled = V.vol.mode !== "glass";
   const ov = volOv();
-  $("volThrL").hidden = ov; $("volCeilN").hidden = ov; $("volChs").hidden = !ov; $("oChs").hidden = !ov;
+  $("volThrL").hidden = ov; $("volCeilL").hidden = ov; $("volChs").hidden = !ov; $("oChs").hidden = !ov;
   if (ov) volChRows();
   if (on || ortho) volLoad();
   if (ortho) orthoDraw();
@@ -2108,7 +2110,9 @@ function volChRows() {
     $("volChs").dataset.sig = sig;
     $("volChs").innerHTML = [0, 1].map(k => `<span class="vch" data-k="${k}">${btn(k)} floor`
       + `<input type="range" class="vthr" min="0" max="0.95" step="0.01" title="${name(k)} floor: below this, a voxel of this channel is empty (fraction of its own window). Set from the channel itself when it opens">`
-      + `<input type="number" class="vnum vthrN" step="any" title="${name(k)} floor in the recording's own units (type a value, Enter)"></span>`).join("");
+      + `<input type="number" class="vnum vthrN" step="any" title="${name(k)} floor in the recording's own units (type a value, Enter)"> ceiling`
+      + `<input type="range" class="vceil" min="0.05" max="1" step="0.01" title="${name(k)} ceiling: above this, a voxel of this channel is not shown (with the ceiling cutting); the brightness of the rest is not rescaled">`
+      + `<input type="number" class="vnum vceilN" step="any" title="${name(k)} ceiling in the recording's own units (type a value, Enter)"></span>`).join("");
     $("oChs").innerHTML = [0, 1].map(btn).join(" ");
     document.querySelectorAll("#volChs .vchOn, #oChs .vchOn").forEach(b => b.onclick = () => {
       const k = +b.dataset.k; V.vol.chOn[k] = !V.vol.chOn[k]; volShow(); volDraw(); orthoDraw(); saveView(); });
@@ -2120,10 +2124,18 @@ function volChRows() {
         V.vol.thrC[k] = Math.max(0, Math.min(.95, volFrac(x, c.win))); V.vol.thrCFor = unit.path;
         nb.blur(); volNums(); volDraw(); saveView(); };
       ["mousedown", "keydown", "wheel"].forEach(t => nb.addEventListener(t, e => e.stopPropagation()));
+      const cs = r.querySelector(".vceil"), cn = r.querySelector(".vceilN");
+      cs.oninput = () => { V.vol.ceilC[k] = +cs.value; volNums(); volDraw(); saveView(); };
+      cn.onchange = () => { const x = +cn.value, c = volMeta && volMeta.ov && volMeta.chs[k];
+        if (!c || !Number.isFinite(x)) return volNums();
+        V.vol.ceilC[k] = Math.max(.05, Math.min(1, volFrac(x, c.win)));
+        cn.blur(); volNums(); volDraw(); saveView(); };
+      ["mousedown", "keydown", "wheel"].forEach(t => cn.addEventListener(t, e => e.stopPropagation()));
     });
   }
   document.querySelectorAll("#volChs .vchOn, #oChs .vchOn").forEach(b => b.classList.toggle("on", V.vol.chOn[+b.dataset.k]));
   $("volChs").querySelectorAll(".vthr").forEach((sl, k) => { sl.value = V.vol.thrC[k]; });
+  $("volChs").querySelectorAll(".vceil").forEach((sl, k) => { sl.value = V.vol.ceilC[k]; });
   volNums();
 }
 // column-major 4x4, as WebGL wants them
@@ -2191,7 +2203,7 @@ function volDraw() {
   const ov = !!volMeta.ov, dch = V.ch === 1 ? 1 : 0;
   gl.uniform1i(u("ov"), ov ? 1 : 0);
   if (ov) {
-    const t = V.vol.thrC, c2 = t.map(x => Math.max(V.vol.ceil, x + 0.01)), cols = volColours();
+    const t = V.vol.thrC, c2 = t.map((x, k) => Math.max(V.vol.ceilC[k], x + 0.01)), cols = volColours();
     gl.uniform2f(u("thr2"), t[0], t[1]); gl.uniform2f(u("ceil2"), c2[0], c2[1]);
     gl.uniform2f(u("on2"), V.vol.chOn[0] ? 1 : 0, V.vol.chOn[1] ? 1 : 0);
     gl.uniform3fv(u("colA"), cols[0]); gl.uniform3fv(u("colB"), cols[1]); gl.uniform1i(u("dch"), dch);
@@ -2297,7 +2309,7 @@ function volPick(c, rd) {
   // the overlay: each shown channel against its own floor and ceiling, the one furthest above
   // its floor wins; in depth, the one channel that is drawn
   const ov = !!volMeta.ov, two = ov && V.vol.mode !== "depth", dch = V.ch === 1 ? 1 : 0;
-  const fl = V.vol.thrC.map(t => t * 255), cl = V.vol.thrC.map(t => Math.max(V.vol.ceil, t + .01) * 255);
+  const fl = V.vol.thrC.map(t => t * 255), cl = V.vol.thrC.map((t, k) => Math.max(V.vol.ceilC[k], t + .01) * 255);
   let best = ov ? fl[dch] : floor, bt = -1, bs = 0;
   for (let t = ta; t <= tb; t += step) {
     const p = [o[0] + rd[0] * t, o[1] + rd[1] * t, o[2] + rd[2] * t];
@@ -2360,6 +2372,8 @@ function volNums() {
   if (document.activeElement !== $("volCeilN")) $("volCeilN").value = fmt(volVal(V.vol.ceil));
   if (volMeta.ov) $("volChs").querySelectorAll(".vthrN").forEach((nb, k) => {     // each in its own window
     if (document.activeElement !== nb) nb.value = fmt(volVal(V.vol.thrC[k], volMeta.chs[k].win)); });
+  if (volMeta.ov) $("volChs").querySelectorAll(".vceilN").forEach((nb, k) => {
+    if (document.activeElement !== nb) nb.value = fmt(volVal(V.vol.ceilC[k], volMeta.chs[k].win)); });
 }
 $("volThrN").onchange = () => { const x = +$("volThrN").value; if (!volMeta || !Number.isFinite(x)) return volNums();
   V.vol.thr = Math.max(0, Math.min(.95, volFrac(x))); V.vol.thrFor = unit.path; $("volThr").value = V.vol.thr;
@@ -2463,7 +2477,7 @@ function volProject(P, c, W, H) {
 // two-channel MIP/glass the shown channel furthest above its own floor; cut voxels do not count
 function volScore(i) {
   const ov = !!volMeta.ov, dch = V.ch === 1 ? 1 : 0;
-  const cl = V.vol.thrC.map(t => Math.max(V.vol.ceil, t + .01) * 255);
+  const cl = V.vol.thrC.map((t, k) => Math.max(V.vol.ceilC[k], t + .01) * 255);
   if (ov && V.vol.mode !== "depth") {
     let b = -Infinity;
     for (let j = 0; j < 2; j++) { const v = volBytes[j][i], f = V.vol.thrC[j] * 255;

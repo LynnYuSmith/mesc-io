@@ -530,7 +530,7 @@ async function boot() {
   $("units").innerHTML = FILE.units.map((u, i) => `
     <div class="u" data-i="${i}">
       <img src="/api/thumb/${u.path}/0?${fileLut(u, 0) ? `vmin=${fileLut(u, 0)[0]}&vmax=${fileLut(u, 0)[1]}` : "lo=1&hi=99.5"}" alt="">
-      <div><b>${u.name}</b><span>${u.frames} fr · ${u.frame_rate_hz ? u.frame_rate_hz.toFixed(1) + " Hz" : "rate ?"}</span>
+      <div><b>${u.name}</b><span>${u.z_step_um ? `${u.frames} sl · ${+u.z_step_um.toPrecision(3)} µm step` : `${u.frames} fr · ${u.frame_rate_hz ? u.frame_rate_hz.toFixed(1) + " Hz" : "rate ?"}`}</span>
       <i title="${esc(u.comment)}">${esc(u.comment) || "&nbsp;"}</i></div>
     </div>`).join("");
   $("units").onclick = e => { const d = e.target.closest(".u"); if (d) pick(+d.dataset.i); };
@@ -855,10 +855,26 @@ function draw() {
   $("frameLbl").textContent = V.proj
     ? (V.proj === "max" ? "brightest over " : "mean over ") + (dz ? "depth" : "the recording")
     : dz
-      ? `slice ${V.frame} / ${unit.frames - 1} · ${((V.frame - (unit.frames - 1) / 2) * dz).toFixed(1)} µm`
+      ? `slice ${V.frame} / ${unit.frames - 1} · ${sliceZText(unit, V.frame)}`
       : `frame ${V.frame} / ${unit.frames - 1}` + (fs() ? ` · ${(V.frame / fs()).toFixed(2)} s` : "")
         + (V.avg > 1 ? ` · ×${V.avg}` : "");
 }
+// A slice's depth as the mosaic gives it, wherever it is shown: from the stack's own geometry, µm from
+// the rig's zero (+ shallower); a stack without geometry from its middle, said so. The unit bar
+// counted from the stack's middle and the mosaic from the zero, so one slice read -100 and -200.7.
+function sliceZ(u, i) {
+  if (!u || !u.z_step_um) return null;
+  if (Number.isFinite(u.z0_um)) return { z: u.z0_um + i * u.z_step_um - (Number.isFinite(u.z_origin_um) ? u.z_origin_um : 0), zero: Number.isFinite(u.z_origin_um) };
+  return { z: (i - (u.frames - 1) / 2) * u.z_step_um, mid: true };
+}
+function sliceZText(u, i) {
+  const r = sliceZ(u, i); if (!r) return "";
+  const t = `${r.z >= 0 && !r.mid ? "+" : ""}${r.z.toFixed(1)} µm`;
+  return r.mid ? `${t} from the middle of the stack` : `z ${t}${r.zero ? "" : " (rig)"}`;
+}
+// which end of a stack slice 0 is, by its geometry: slices count upward (shallower) when the step is
+// positive — the end MESc draws at the bottom
+const sliceZeroEnd = u => (u && Number.isFinite(u.z0_um) ? (u.z_step_um > 0 ? "the deep end" : "the shallow end") : "");
 /* The canvas is the stage's size; the zoom rectangle (image px) maps onto it. ROIs are drawn
    in image coordinates through the same mapping, so they stay put under any zoom. */
 // Image -> screen. With flipY the picture is drawn upside down, as MESc draws it (row 0 at the
@@ -2401,7 +2417,8 @@ function volDraw() {
   const tz = D * vz;
   $("volInfo").innerHTML = `<b>${(Wx * vx).toFixed(0)} × ${(Hy * vy).toFixed(0)} × ${tz.toFixed(0)} µm</b>`
     + (V.vol.z !== 1 ? `  · depth drawn ×${V.vol.z}` : "") + (volMeta.down > 1 ? `  · xy ÷${volMeta.down} to fit` : "")
-    + (V.vol.deep ? `\nthe deepest slice on top, as MESc` : `\nthe surface (slice 0) on top`)
+    + (V.vol.deep ? `\nthe last slice on top, as MESc${sliceZeroEnd(unit) ? ` (slice 0, ${sliceZeroEnd(unit)}, at the bottom)` : ""}`
+                  : `\nslice 0 on top${sliceZeroEnd(unit) ? ` — ${sliceZeroEnd(unit)}, by the stack's geometry` : ""}`)
     + (clip.full ? "" : `\n${volClipText()}`) + (V.vol.mode === "depth" ? " · red = slice 0 → blue = the last" : "")
     + (!ov ? "" : V.vol.mode === "depth" ? `\ndepth colours one channel: ${unit.channels[dch].replace("Channel_", "ch")} (pick it under the image); MIP and glass show both`
        : `\n${[0, 1].map(k => unit.channels[k].replace("Channel_", "ch") + (V.vol.chOn[k] ? "" : " (hidden)")).join(" + ")}, each in its own window`
@@ -3090,12 +3107,12 @@ function orthoDraw() {
   }
   const um = (i, n, step) => ((i - (n - 1) / 2) * step).toFixed(1);
   const lab = (id, r, text) => Object.assign($(id), { textContent: text }).style.cssText = `left:${r.x + 4}px;top:${r.y - 18}px`;
-  lab("lXY", xy, v.oMax ? "XY · brightest over depth" : `XY · z ${v.cz} (${um(v.cz, D, dz)} µm)`);
+  lab("lXY", xy, v.oMax ? "XY · brightest over depth" : `XY · slice ${v.cz} (${sliceZText(unit, v.cz)})`);
   lab("lYZ", yz, v.oMax ? "YZ · brightest over x" : `YZ · x ${v.cx}`);
   lab("lXZ", xz, v.oMax ? "XZ · brightest over y" : `XZ · y ${v.cy}`);
   $("oPos").textContent = `x ${v.cx} · y ${v.cy} · z ${v.cz}` + (volMeta.down > 1 ? ` · xy ÷${volMeta.down}` : "")
     + (volMeta.ov ? " · each channel in its own window" : "");
-  $("frameLbl").textContent = `slice ${v.cz} / ${D - 1} · ${um(v.cz, D, dz)} µm`;
+  $("frameLbl").textContent = `slice ${v.cz} / ${D - 1} · ${sliceZText(unit, v.cz)}`;
   surfInfo();
 }
 // the 3D points in a pane: where they lie in it, when the pane's cut passes within a voxel of them
@@ -3833,8 +3850,12 @@ $("mosGo").addEventListener("keydown", e => {
   }
   const n = raw.split(/\s+/).map(Number);
   if (n.length < 2 || !n.slice(0, 3).every(Number.isFinite)) { mosMsg("go: type x y, x y z, or z alone, in µm"); return; }
-  mosCentre(G, (n[0] - G.ox) / G.px, (n[1] - G.oy) / G.py);
-  let t = `centred on x ${n[0]} · y ${n[1]} µm`;
+  const gx = (n[0] - G.ox) / G.px, gy = (n[1] - G.oy) / G.py;
+  mosCentre(G, gx, gy);
+  // off every tile: say so, and how far from the nearest, instead of centring silently on black
+  const off = Object.values(G.place).every(p => gx < p.c0 || gy < p.r0 || gx >= p.c0 + p.u.width || gy >= p.r0 + p.u.height);
+  const near = Math.min(...Object.values(G.place).map(p => Math.hypot(Math.max(p.c0 - gx, 0, gx - (p.c0 + p.u.width)) * G.px, Math.max(p.r0 - gy, 0, gy - (p.r0 + p.u.height)) * G.py)));
+  let t = `centred on x ${n[0]} · y ${n[1]} µm` + (off ? ` — outside every tile, ${near.toFixed(0)} µm from the nearest (fit shows the whole field)` : "");
   if (n.length >= 3 && G.zUm !== null) {
     const q = Math.round((n[2] + (G.zZero === null ? 0 : G.zZero) - G.zUm) / G.dz);
     V.mos.plane = Math.max(G.z0, Math.min(G.z1 - 1, q));

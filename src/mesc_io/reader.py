@@ -189,6 +189,16 @@ class Unit:
     #: the one the comments' ``x-180 y120 z-20 from a1`` refer to. The zero is set by hand on the
     #: rig, per axis, at any time — so it is only comparable within one zero-setting.
     stage_rel_um: Optional[Dict[str, float]] = None
+    #: A z-stack's depth, from its own geometry: slice ``i`` is at ``z0_um + i * z_step_um`` (µm,
+    #: the rig's absolute z, larger = shallower), i.e. ``GeomTransTransl`` z plus the z axis's
+    #: conversion offset — slice 0 is the DEEP end. The stage position above is one reading
+    #: taken at some moment of the scan: on a 2026-10-27 file one tile's reading sat at the other
+    #: end of its stack from its neighbours', 190 µm off, while their geometries agreed. None for
+    #: a recording or a file without the geometry.
+    z0_um: Optional[float] = None
+    #: ``LabelingOriginTransl`` z: the zero the rig showed when the unit was taken (µm, absolute).
+    #: Depths are given from it when every unit shares it; it moves when the zero is set again.
+    z_origin_um: Optional[float] = None
     #: The unit as MESc's own information panel lists it, label by label and in its order
     #: (Item type, Date, Creator … Frame rate, Duration), each value worked out from the
     #: attributes the panel reads. ``()`` when the unit carries none of them.
@@ -423,6 +433,13 @@ class MescFile:
                 z_step = z_scale                 # µm per slice
         px = _float_or_none(_attr(a, "XAxisConversionConversionLinearScale"))
         py = _float_or_none(_attr(a, "YAxisConversionConversionLinearScale"))
+        z0 = z_origin = None
+        if z_step:
+            g, zoff = _vec(a, "GeomTransTransl", 3), _float_or_none(_attr(a, "ZAxisConversionConversionLinearOffset"))
+            if g is not None and np.isfinite(g[2]):
+                z0 = float(g[2]) + (zoff or 0.0)
+            o = _vec(a, "LabelingOriginTransl", 3)
+            z_origin = float(o[2]) if o is not None and np.isfinite(o[2]) else None
         return Unit(name=name, session=session, n_frames=int(n), height=int(h), width=int(w),
                     dtype=str(first.dtype), frame_rate_hz=rate, z_step_um=z_step,
                     pixel_size_um=px if px and px > 0 else None,
@@ -431,6 +448,7 @@ class MescFile:
                     comment=_text(_attr(a, "Comment")), channels=channels,
                     stage_um=_stage_position(a),
                     stage_rel_um=_stage_position(a, "AttributeRelativePosition", "Slow"),
+                    z0_um=z0, z_origin_um=z_origin,
                     info=_mesc_info(grp, chan_names, z_step))
 
 

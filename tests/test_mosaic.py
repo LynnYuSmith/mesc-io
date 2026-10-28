@@ -335,3 +335,80 @@ def test_the_tiff_is_written_a_plane_at_a_time_not_held_whole(mos, tmp_path):
     import tifffile
     a = tifffile.imread(tmp_path / "w.tif")
     assert np.isnan(a).any() and np.isfinite(a).mean() > 0.8      # NaN where no tile, not 0
+
+
+# -- what a real two-layer mosaic (cm027, 2026-10-27) taught ------------------------------------
+
+def _edited(src, dst, edit):
+    """A copy of the synthetic mosaic with some unit attributes changed."""
+    import shutil
+    import h5py
+    shutil.copy(src, dst)
+    with h5py.File(dst, "r+") as h:
+        edit(h["MSession_0"])
+    return dst
+
+
+def _geom_z(units, z0s, origin=-27013.5, step=1.0, offset=-20.0):
+    """Give tiles the geometry MESc writes: GeomTransTransl z (the stack's centre) and the z axis's
+    conversion offset, so slice 0 sits at centre + offset."""
+    for name, z0 in z0s.items():
+        a = units[name].attrs
+        a["GeomTransTransl"] = np.array([0.0, 0.0, z0 - offset])
+        a["ZAxisConversionConversionLinearOffset"] = offset
+        a["LabelingOriginTransl"] = np.array([0.0, 0.0, origin])
+
+
+def test_depth_comes_from_the_stacks_geometry_not_the_stage(mos, tmp_path):
+    # tiles 3..5 a second layer, 30 µm shallower; the stage z of the file is left as it is
+    lay = {f"MUnit_{i}": -27200.0 for i in range(3)} | {f"MUnit_{i}": -27170.0 for i in range(3, 6)}
+    p = _edited(mos, tmp_path / "layers.mesc", lambda u: _geom_z(u, lay))
+    with MescFile(p) as f:
+        ts = M.tiles(f)
+        assert ts[0].z0_um == pytest.approx(-27200.0) and ts[4].z0_um == pytest.approx(-27170.0)
+        g = M.geometry(ts)
+        compose = M.compose(f, ts, {}, planes=[35])[0]
+        t0 = f.read(ts[0].path, frames=[35])[0]
+    assert [g["place"][t.path]["z0"] for t in ts] == [0, 0, 0, 30, 30, 30]
+    assert g["planes"] == (0, 70) and g["z_um"] == pytest.approx(-27200.0) and g["z_zero_um"] == pytest.approx(-27013.5)
+    # plane 35 is slice 35 of the deep row and slice 5 of the shallow one: the deep tile's own pixels
+    assert np.allclose(compose[10, 10:40], t0[10, 10:40])
+    # the layout's dz is a correction on top of the geometry, not a replacement for it
+    g2 = M.geometry(ts, {"tiles": {ts[4].path: {"dz": -2}}})
+    assert g2["place"][ts[4].path]["z0"] == 28
+
+
+def test_a_file_without_the_geometry_keeps_every_slice_0_on_plane_dz(mos):
+    with MescFile(mos) as f:
+        ts = M.tiles(f)
+    assert all(t.z0_um is None for t in ts)
+    g = M.geometry(ts)
+    assert {p["z0"] for p in g["place"].values()} == {0} and g["z_um"] is None
+
+
+def test_a_stack_on_another_grid_first_in_the_file_does_not_drop_the_rest(mos, tmp_path):
+    # the injection-zero stack is taken first, at 10 µm slices: it used to be the reference and
+    # every real tile was "another pixel size", silently, leaving a mosaic of one tile
+    def odd_first(u):
+        u["MUnit_0"].attrs["ZAxisConversionConversionLinearScale"] = 10.0
+    p = _edited(mos, tmp_path / "injzero.mesc", odd_first)
+    with MescFile(p) as f:
+        ts = M.tiles(f)
+        g = M.geometry(ts)
+        r = M.register(f, ts)
+    assert list(g["skipped"]) == [ts[0].path] and "10 µm slices" in g["skipped"][ts[0].path]
+    assert sorted(g["place"]) == sorted(t.path for t in ts[1:])
+    assert ts[0].path not in r["layout"]["tiles"] and r["fixed"] == ts[1].path
+
+
+def test_a_tile_commented_ignore_starts_hidden_until_the_layout_shows_it(mos, tmp_path):
+    def ignore(u):
+        u["MUnit_2"].attrs["Comment"] = np.frombuffer(b"ignore\x00", dtype=np.uint8)
+    p = _edited(mos, tmp_path / "ignore.mesc", ignore)
+    with MescFile(p) as f:
+        ts = M.tiles(f)
+    assert ts[2].comment == "ignore"
+    assert ts[2].path not in M.geometry(ts)["place"] and not M.geometry(ts)["skipped"]
+    assert ts[2].path in M.geometry(ts, {"tiles": {ts[2].path: {"hidden": False}}})["place"]
+    # "ignored" or a longer word is not the rig's mark
+    assert not M._IGNORE.search("not ignored here")

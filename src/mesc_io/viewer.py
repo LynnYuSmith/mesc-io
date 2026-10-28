@@ -768,6 +768,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "colours": [c.colour for c in u.channels],
                 "stage_um": u.stage_um,
                 "stage_rel_um": u.stage_rel_um,
+                "z0_um": u.z0_um, "z_origin_um": u.z_origin_um,
                 "info": [list(r) for r in u.info],
             } for u in f.units()]
         rep = mesc_check(self.mesc_path)
@@ -852,14 +853,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _frame(self, unit, ch, i, q):
-        """One frame — or the mean of ``n`` frames centred on it.
+        """One frame — or the mean of ``n`` frames centred on it (``?proj=max``: their maximum).
 
         A single raw frame of a dim bouton is mostly shot noise; averaging a short window
         while scrubbing is what makes the structure visible without committing to the whole
         recording's mean. The window is clipped at the ends, never padded, so the first and
-        last frames average fewer neighbours rather than borrowing invented ones.
+        last frames average fewer neighbours rather than borrowing invented ones. In a z-stack
+        the maximum over a slab of slices is what makes a sparse axon read as a line instead
+        of a few dots — what a map of a mosaic needs.
         """
         n = max(1, min(MAX_AVG_FRAMES, int(float(q.get("n", ["1"])[0]))))
+        op = "max" if q.get("proj", ["mean"])[0] == "max" else "mean"
         with self._file() as f:
             u = f.unit(unit)
             if not (0 <= i < u.n_frames):
@@ -868,17 +872,17 @@ class _Handler(BaseHTTPRequestHandler):
             hi = min(u.n_frames, lo + n)
             lo = max(0, hi - n)
             img = (f.read(unit, channel=ch, frames=slice(lo, hi), reader_units=True, max_gb=MAX_READ_GB)[0]
-                   if n == 1 else _reduce(f, unit, ch, slice(lo, hi)))
+                   if n == 1 else _reduce(f, unit, ch, slice(lo, hi), op))
         win = self._window(q)
         if win[0] == "pct":                    # one stretch for the whole recording, not per frame
             # ?win_unit= takes the stretch from another unit: a mosaic's tiles share the first one's
-            win = ("fixed", *self._unit_window((q.get("win_unit") or [unit])[0], ch, win[1], win[2], n))
+            win = ("fixed", *self._unit_window((q.get("win_unit") or [unit])[0], ch, win[1], win[2], n, op))
         self._send(_png(img, win), "image/png")
 
     #: How many frames (or n-frame averages) the whole-recording percentile window is taken from.
     PCT_SAMPLE = 64
 
-    def _unit_window(self, unit, ch, p_lo, p_hi, n=1):
+    def _unit_window(self, unit, ch, p_lo, p_hi, n=1, op="mean"):
         """The percentile window of a whole recording, for frames shown one after another.
 
         Stretching each frame on its own percentiles made the picture flicker while scrubbing:
@@ -886,10 +890,11 @@ class _Handler(BaseHTTPRequestHandler):
         so brightness on screen said nothing about brightness in the tissue. Instead the window
         comes from ``PCT_SAMPLE`` frames spread evenly over the unit — averaged in groups of
         ``n`` when the view averages, since a mean of n frames has less noise and so tighter
-        percentiles than a single one — and every frame is drawn through it. Cached per unit,
-        channel, percentiles and n.
+        percentiles than a single one (or maximised, when the view projects a slab: a maximum is
+        brighter than any one slice) — and every frame is drawn through it. Cached per unit,
+        channel, percentiles, n and the projection.
         """
-        key = (str(self.mesc_path), unit, ch, "pctwin", float(p_lo), float(p_hi), int(n))
+        key = (str(self.mesc_path), unit, ch, "pctwin", float(p_lo), float(p_hi), int(n), op)
         with self._lock:
             hit = self._cache.get(key)
         if hit is not None:
@@ -900,7 +905,7 @@ class _Handler(BaseHTTPRequestHandler):
             starts = np.unique(np.linspace(0, max(0, u.n_frames - n), k).astype(int))
             imgs = []
             for s0 in starts:
-                im = (_reduce(f, unit, ch, slice(s0, s0 + n)) if n > 1 else
+                im = (_reduce(f, unit, ch, slice(s0, s0 + n), op) if n > 1 else
                       f.read(unit, channel=ch, frames=slice(s0, s0 + 1), reader_units=True, max_gb=MAX_READ_GB)[0])
                 imgs.append(np.asarray(im, np.float32)[::2, ::2])   # every other pixel: plenty for a percentile
         lo, hi = (float(v) for v in np.percentile(np.stack(imgs), [p_lo, p_hi]))

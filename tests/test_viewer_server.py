@@ -654,3 +654,13 @@ def test_an_roi_mask_is_the_full_frame_test_inside_its_box():
         full = _in_polygon(pts, 64, 64)
         if full.any():
             assert np.array_equal(_mask_of({"points": pts.tolist()}, 64, 64), full)
+
+
+def test_a_slab_can_be_its_maximum_instead_of_its_mean(server, recording):
+    from mesc_io import MescFile
+    a = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/4?n=5&proj=max&vmin=0&vmax=4000")[0]).astype(float)
+    m = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/4?n=5&vmin=0&vmax=4000")[0]).astype(float)
+    with MescFile(recording) as f:
+        v = f.read("MSession_0/MUnit_0", channel=0, frames=slice(2, 7), reader_units=True).max(axis=0)
+    want = np.clip(np.round((v - 0) / 4000 * 255), 0, 255)
+    assert np.abs(a - want).max() <= 1 and a.mean() >= m.mean()

@@ -171,6 +171,8 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   await send("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,modifiers:8}); await send("Input.dispatchKeyEvent",{type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,modifiers:8});
 
   // ---- 2. measure: a line between two picked boutons, a path through four ---------------------
+  // The ruler puts each point exactly where the cursor meets the CURRENT plane (the selected
+  // slice), never on the brightest thing along the ray: the plane is chosen before each click.
   await ev("V.overlay = false; V.lo = 1; V.hi = 100; V.vol = volState(null); V.vol.on = true; V.vol.mode = 'mip'; volShow(); volReset(); 'ok'");
   for (let i = 0; i < 40 && (await ev("!!(volMeta && volMeta.ov)") || !(await ev("!!(volMeta && volKey.endsWith('|0|1|100'))"))); i++) await sleep(250);
   await sleep(500);
@@ -179,12 +181,22 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const umOf = q => [q[2] * u.px, q[1] * u.py, q[0] * u.dz];
   const lenOf = Q => { let L = 0; for (let i = 1; i < Q.length; i++) { const a = umOf(Q[i - 1]), c = umOf(Q[i]); L += Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]); } return L; };
   const analytic = (za, zb) => { const a = bouton(za), c = bouton(zb); return Math.hypot((c[2] - a[2]) * u.px, (c[1] - a[1]) * u.py, (c[0] - a[0]) * u.dz); };
-  const pickB = async (bz, mod = 0) => { const q = bouton(bz).map(Math.round), sp = await screenOf(q); await clickAt(sp.x, sp.y, mod); };
+  const onPlane = async z => { await ev(`V.frame = ${z}; $('frame').value = V.frame; volDraw(); 'ok'`); await sleep(150); };
+  // at this window size the 3D toolbar wraps over the top of the stack, where bouton 4 is drawn: it
+  // is let through for the click (what is tested is the ruler, not the toolbar's layout), and any
+  // other cover is a failure that names what is in the way
+  const pickB = async (bz, mod = 0, off = [0, 0]) => { const q = bouton(bz).map(Math.round); await onPlane(q[0]);
+    const sp = await screenOf(q), x = sp.x + off[0], y = sp.y + off[1];
+    await ev("$('volBar').style.pointerEvents = 'none'; 'ok'");
+    const top = await ev(`(()=>{const e=document.elementFromPoint(${x}, ${y}); return e.id || e.tagName;})()`);
+    if (top !== "vol") fail(`bouton ${bz} is covered by ${top}`);
+    await clickAt(x, y, mod); await ev("$('volBar').style.pointerEvents = ''; 'ok'"); };
   await pickB(16);
   if ((await J("volMeas")).length !== 1 || (await pts()).length !== 0) fail("a measure click did not start a line (or added a point)");
   await pickB(40);
   let M = await J("volMeas");
-  if (M.length !== 2 || !near(M[0], bouton(16), 1, 1.5) || !near(M[1], bouton(40), 1, 1.5)) fail("the ruler's ends are not the boutons: " + JSON.stringify(M));
+  if (M.length !== 2 || !near(M[0], bouton(16), 0.5, 1.5) || !near(M[1], bouton(40), 0.5, 1.5)) fail("the ruler's ends are not the boutons: " + JSON.stringify(M));
+  if (M[0][0] !== Math.round(bouton(16)[0]) || M[1][0] !== Math.round(bouton(40)[0])) fail("a ruler point is not on the plane chosen for it: " + JSON.stringify(M));
   const want2 = lenOf(M), ana2 = analytic(16, 40), shown2 = await ev("volMeasText()");
   if (!shown2.startsWith(want2.toFixed(2) + " µm")) fail(`the ruler does not read the picked points' distance ${want2.toFixed(2)}: ${shown2}`);
   if (Math.abs(want2 - ana2) > 1.0) fail(`the ruler reads ${want2.toFixed(2)} µm, the boutons are ${ana2.toFixed(2)} µm apart`);
@@ -195,6 +207,15 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const yellow = await ev(`(()=>{const c=document.getElementById('volMarks'), d=c.getContext('2d').getImageData(0,0,c.width,c.height).data; let n=0; for(let i=0;i<d.length;i+=4) if(d[i]>220&&d[i+1]>190&&d[i+2]<60&&d[i+3]>200) n++; return n;})()`);
   if (yellow < 200) fail("the ruler is not drawn: " + yellow);
   await shot("measure_line");
+  // a click beside a bouton stays beside it: on the plane, where the cursor is — no snap to the bright voxel
+  { const q = bouton(16).map(Math.round); await onPlane(q[0]); const sp = await screenOf(q), sx = await screenOf([q[0], q[1], q[2] + 8]);
+    await clickAt(sx.x, sx.y); const A = (await J("volMeas"))[0];
+    if (!A || A[0] !== q[0] || Math.abs(A[2] - (q[2] + 8)) > 1.5 || Math.abs(A[1] - q[1]) > 1.5) fail("a click beside the bouton snapped or left the plane: " + JSON.stringify([A, q]));
+    void sp; await ev("volMeas = []; volDraw(); 'ok'"); await pickB(16); await pickB(40);
+    if (await ev("volMeasText()") !== shown2) fail("the same two picks again do not read the same"); }
+  // off the plane: nothing is put down, and the person is told
+  { const n0 = (await J("volMeas")).length; await clickAt(5, 5);
+    if ((await J("volMeas")).length !== n0) fail("a click off the plane put a point down"); }
   // turned, the length does not change (it is a length in the tissue, not on the screen)
   await ev("V.vol.yaw = 0.9; V.vol.pitch = 0.3; volDraw(); 'ok'"); await sleep(300);
   if (await ev("volMeasText()") !== shown2) fail("turning changed the measurement");

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **Mosaics in depth, from the stacks' own geometry.** A stack's slices are placed by the geometry
+  it carries (`Unit.z0_um`: `GeomTransTransl` z plus the z axis's offset; slice 0 the deep end), not
+  by the stage reading, which is one value taken at some moment of the scan — on a 2026-10-27 file
+  one tile's reading sat 190 µm from its neighbours' while their geometries agreed. Two layers of
+  tiles now sit at their depths, and a layout's `dz` is a correction on top of the geometry. The
+  grid is the one most tiles share: the injection-zero stack taken first at 10 µm slices no longer
+  drops every real tile behind it (it is left out, with the reason). A tile commented "ignore"
+  starts hidden. `Unit.z_origin_um` carries the rig's zero.
+- **The mosaic as a map.** Depth is shown in µm from the rig's zero (+ shallower) and the slider runs
+  shallow to the right (↑ shallower); **slab** draws each tile as the maximum of n slices, so sparse
+  axons read as lines; the hover gives x, y and z; a **map** overview with the part on screen
+  framed (click or drag on it to go there); **go** centres on a point typed in µm, and a z goes to
+  that depth. Each tile in the list shows its depth range. The frame endpoint takes `proj=max`.
+- **Stitching on projections, then depth.** Each pair is matched across on the maximum through its
+  common depth, then in depth on slabs at that shift: matching 3-D voxels let an axon running down
+  through the slices make every peak a ridge in z (runner-up = winner on every pair). A match must
+  stand 1.5× above the best match elsewhere (`ambiguous` otherwise); the search reaches ±25 µm (the
+  stage was ~20 µm off); narrow overlaps are not reduced; loops are checked with a z tolerance of
+  6 µm, a two-photon focus being several times longer in z. On three October mosaics: 20, 14 and 22
+  links used (cm027: 10 before, seven tiles left unjoined); every tile with a neighbour joined.
+- **The 3D ruler measures on the plane you chose.** A ruler click puts its point exactly where the
+  cursor meets the current plane (the slice selected), with no snap to the brightest voxel; change
+  the plane between clicks to measure across depth. The current plane is lit blue in MIP and slab
+  views too, not only in glass. The readout over the 3D view no longer swallows clicks on the stack
+  beneath it.
+- **Shift+click removes a surface mark you can see.** The nearest of the marks drawn in that pane,
+  within 14 screen pixels; a miss says so instead of doing nothing.
+
 - **The surface of the tissue, marked in XYZ.** **surface** in the XYZ bar: each click in a pane puts
   a mark where the tissue begins, instead of moving the crosshair; shift+click removes the nearest,
   Esc the last, shift+Esc all. A surface is fitted through the marks by least squares in µm — flat

@@ -103,7 +103,9 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   for (let i = 0; i < 50 && (await ev("$('mosAuto').disabled")); i++) await sleep(200);
   const L = await J("mosTiles().map(u => mosEntry(u.path))");
   L.forEach((e, i) => { if (e.dz !== ERR[i][2] || Math.abs(e.dx - ERR[i][0] * .5) > .5 || Math.abs(e.dy - ERR[i][1] * .5) > .5) fail(`auto put tile ${i} at ${JSON.stringify(e)}, it is at ${ERR[i]}`); });
-  if (!/stitched: 11 of 11/.test(await ev("$('mosInfo').textContent"))) fail("the stitch report: " + await ev("$('mosInfo').textContent"));
+  // every tile where it is (above); the report counts what was used and names what was not believed
+  { const rep = await ev("$('mosInfo').textContent"), m = rep.match(/stitched: (\d+) of 11/);
+    if (!m || +m[1] < 7 || (+m[1] < 11 && !/not believed/.test(rep))) fail("the stitch report: " + rep); }
   if ((await ev("V.mos.pairs.length")) !== 11) fail("the pairs are not kept for the seams");
   await ev("V.mos.plane = 25; mosDraw(); 'ok'"); await settled(); await shot("stitched");
   // undo goes back to the stage layout; ⌘Z too

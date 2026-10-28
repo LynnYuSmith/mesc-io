@@ -12,16 +12,20 @@ The layout is plain JSON, the same the viewer keeps with its view::
     {"tiles": {"MSession_0/MUnit_1": {"dx": 0.0, "dy": 0.0, "dz": 0, "hidden": false}, ...},
      "order": ["MSession_0/MUnit_1", ...], "seams": "nearest"}
 
-``dx``, ``dy`` (µm) move a tile from its stage position; ``dz`` (slices) says which mosaic plane
-its slice 0 is drawn at — its slice ``s`` is mosaic plane ``s + dz``. The stage's own z is not used:
-a stack's slices are counted from where the stack began, which the overlaps measure better than the
-stage reports it. Every mosaic pixel comes from ONE tile (hard seams, no blending, so nothing is
+``dx``, ``dy`` (µm) move a tile from its stage position; ``dz`` (slices) moves it in depth from
+where its own geometry puts it. A stack's depth is read from the geometry it carries (``Unit.z0_um``:
+slice ``s`` at ``z0_um + s * step``, slice 0 the deep end), never from the stage position, which is
+one reading taken at some moment of the scan — 190 µm off on one tile of a 2026-10-27 mosaic whose
+geometry was right. Mosaic plane ``q`` is at depth ``z0_um + q * step`` of the deepest tile, so a
+tile's slice ``s`` is plane ``s + (its z0 − the deepest z0) / step + dz``; a file without the
+geometry puts every slice 0 on plane ``dz``, as before. Tiles commented "ignore" start hidden. Every mosaic pixel comes from ONE tile (hard seams, no blending, so nothing is
 averaged that was never one place): with ``"nearest"`` the tile whose centre is nearest, with
 ``"order"`` the last in ``order`` that covers it. Only numpy is needed; a TIFF needs tifffile.
 """
 from __future__ import annotations
 
 import itertools
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -42,6 +46,8 @@ class Tile:
     dz: float          # µm per slice
     x_um: float        # the stage's position of the tile's centre (from the rig's zero when known)
     y_um: float
+    z0_um: Optional[float] = None       # the depth of slice 0, from the stack's own geometry (rig z, µm)
+    z_origin_um: Optional[float] = None  # the rig's zero in z when the stack was taken
 
 
 def tiles(mesc, paths=None) -> List[Tile]:
@@ -59,7 +65,7 @@ def tiles(mesc, paths=None) -> List[Tile]:
             continue
         out.append(Tile(u.path, u.name, u.comment or "", u.n_frames, u.height, u.width,
                         float(u.pixel_size_um), float(u.pixel_size_y_um or u.pixel_size_um),
-                        float(u.z_step_um), float(pos["x"]), float(pos["y"])))
+                        float(u.z_step_um), float(pos["x"]), float(pos["y"]), u.z0_um, u.z_origin_um))
     if paths is not None:
         out.sort(key=lambda t: list(paths).index(t.path))
     return out
@@ -71,24 +77,43 @@ def _round(v: float) -> int:
     return int(np.floor(v + 0.5))
 
 
-def _entry(layout, path) -> dict:
+_IGNORE = re.compile(r"\bignore\b", re.I)
+
+
+def _entry(layout, path, tile: Optional[Tile] = None) -> dict:
+    """A tile's entry in the layout; a tile commented "ignore" (the rig's word for a take to
+    throw away) starts hidden until the layout says otherwise."""
     e = ((layout or {}).get("tiles") or {}).get(path) or {}
+    hid = e["hidden"] if "hidden" in e else bool(tile is not None and _IGNORE.search(tile.comment or ""))
     return {"dx": float(e.get("dx", 0.0)), "dy": float(e.get("dy", 0.0)),
-            "dz": _round(float(e.get("dz", 0))), "hidden": bool(e.get("hidden", False))}
+            "dz": _round(float(e.get("dz", 0))), "hidden": bool(hid)}
+
+
+def _grid(t: Tile):
+    return (round(t.px, 6), round(t.py, 6), round(t.dz, 6))
 
 
 def geometry(ts: List[Tile], layout=None) -> dict:
-    """Where every shown tile sits in the mosaic, in whole mosaic pixels (the first tile's pixel
-    size; tiles of another pixel size are left out, with the reason). The viewer draws by the same
-    rule — top-left = round((centre + correction − half the tile − origin) / pixel) — so the
-    screen and an export put every pixel in the same place."""
-    shown = [t for t in ts if not _entry(layout, t.path)["hidden"]]
+    """Where every shown tile sits in the mosaic, in whole mosaic pixels and planes. The grid is
+    the one most shown tiles share (pixel size and slice step; ties to the earlier tile); tiles on
+    another grid are left out, with the reason — the first tile no longer decides, since the
+    injection-zero stack taken first at 10 µm steps silently dropped every real tile behind it.
+    The viewer draws by the same rule — top-left = round((centre + correction − half the tile −
+    origin) / pixel), plane of slice 0 = round((z0 − deepest z0) / step) + dz — so the screen and
+    an export put every voxel in the same place."""
+    shown = [t for t in ts if not _entry(layout, t.path, t)["hidden"]]
     if not shown:
         raise ValueError("no tile to show")
-    ref = shown[0]
-    skipped = {t.path: "pixel size differs from the first tile's" for t in shown
-               if abs(t.px - ref.px) > 1e-6 or abs(t.py - ref.py) > 1e-6 or abs(t.dz - ref.dz) > 1e-6}
+    grids = [_grid(t) for t in shown]
+    best = max(grids, key=lambda k: (grids.count(k), -grids.index(k)))
+    ref = shown[grids.index(best)]
+    skipped = {t.path: f"another grid ({t.px:g} µm pixels, {t.dz:g} µm slices) than most tiles' "
+                       f"({ref.px:g} µm, {ref.dz:g} µm)" for t in shown if _grid(t) != best}
     shown = [t for t in shown if t.path not in skipped]
+    # depth from the stacks' own geometry, when every shown tile carries it
+    zbase = min(t.z0_um for t in shown) if all(t.z0_um is not None for t in shown) else None
+    lift = {t.path: (_round((t.z0_um - zbase) / ref.dz) if zbase is not None else 0) for t in shown}
+    origins = {t.z_origin_um for t in shown}
     left = {t.path: t.x_um + _entry(layout, t.path)["dx"] - t.width * t.px / 2 for t in shown}
     top = {t.path: t.y_um + _entry(layout, t.path)["dy"] - t.height * t.py / 2 for t in shown}
     ox, oy = min(left.values()), min(top.values())
@@ -96,7 +121,7 @@ def geometry(ts: List[Tile], layout=None) -> dict:
     for t in shown:
         e = _entry(layout, t.path)
         c0, r0 = _round((left[t.path] - ox) / ref.px), _round((top[t.path] - oy) / ref.py)
-        place[t.path] = {"c0": c0, "r0": r0, "z0": e["dz"], "tile": t,
+        place[t.path] = {"c0": c0, "r0": r0, "z0": lift[t.path] + e["dz"], "tile": t,
                          "cx": c0 + t.width / 2, "cy": r0 + t.height / 2}
     W = max(p["c0"] + p["tile"].width for p in place.values())
     H = max(p["r0"] + p["tile"].height for p in place.values())
@@ -106,7 +131,9 @@ def geometry(ts: List[Tile], layout=None) -> dict:
     order += [t.path for t in shown if t.path not in order]
     return {"place": place, "width": W, "height": H, "planes": (z0, z1), "px": ref.px, "py": ref.py,
             "dz": ref.dz, "origin_um": (ox, oy), "order": order, "skipped": skipped,
-            "seams": (layout or {}).get("seams", "nearest")}
+            "seams": (layout or {}).get("seams", "nearest"),
+            # plane q is at rig z  z_um + q * dz;  from the rig's zero when every tile shares it
+            "z_um": zbase, "z_zero_um": origins.pop() if len(origins) == 1 and None not in origins else None}
 
 
 def compose(mesc, ts: List[Tile], layout=None, channel: int = 0, planes=None, crop=None,
@@ -181,7 +208,7 @@ def _corr(x: np.ndarray, y: np.ndarray, shape) -> np.ndarray:
     return np.fft.irfftn(np.fft.rfftn(x, shape, ax) * np.conj(np.fft.rfftn(y, shape, ax)), shape, ax)
 
 
-def _match(A: np.ndarray, B: np.ndarray, max_shift, min_frac: float = 0.4):
+def _match(A: np.ndarray, B: np.ndarray, max_shift, min_frac: float = 0.4, apart=(1, 2, 2)):
     """The shift d (z, y, x) for which A(p + d) best matches B(p): masked normalised cross-
     correlation over every shift within ``max_shift``, counting only where both volumes are
     (Padfield 2012), so a shift that leaves a thin sliver of overlap cannot win on a few voxels.
@@ -206,7 +233,7 @@ def _match(A: np.ndarray, B: np.ndarray, max_shift, min_frac: float = 0.4):
     i = np.unravel_index(int(np.argmax(ncc)), shape)
     d = [float(k if k <= m else k - s) for k, m, s in zip(i, max_shift, shape)]
     away = ncc.copy()
-    near = [np.arange(c - r, c + r + 1) % s for c, r, s in zip(i, (1, 2, 2), shape)]
+    near = [np.arange(c - r, c + r + 1) % s for c, r, s in zip(i, apart, shape)]
     away[np.ix_(*near)] = -1.0
     second = float(away.max())
     for ax in (1, 2):                                   # parabola through the peak along x and y
@@ -263,14 +290,18 @@ def _in_loop(paths, links, k):
     return any(ln["a"] in gr and ln["b"] in gr for gr in _components(paths, rest))
 
 
-def _solve(paths, links, fixed, dz_um: float = 1.0, max_ratio: float = 2.5, tol_um: float = 3.0):
+def _solve(paths, links, fixed, dz_um: float = 1.0, max_ratio: float = 2.5, tol_um: float = 3.0,
+           tol_z_um: float = 6.0):
     """One correction (dx µm, dy µm, dz slices) per tile from pairwise links — each link says
     ``b − a = shift`` with a weight — by weighted least squares, ``fixed`` held at 0.
 
     A wrong match must not bend every tile it reaches, and least squares hides it: in a grid it
     spreads its error round every loop it is in. So each link is checked against what the OTHER
     links say about its two tiles (leave one out). A link whose disagreement is over ``tol_um``
-    (depth counted in µm) is a suspect; the suspect whose removal leaves the links still checked
+    (depth counted in µm, at ``tol_um / tol_z_um`` of its weight: a two-photon focus is several
+    times longer in z than across, and the brain drifts in z within a stack, so loops of real
+    matches close to ~2–4 slices in depth while they close to a micron or two across — measured on
+    three 2026-10 mosaics) is a suspect; the suspect whose removal leaves the links still checked
     by a loop agreeing best is dropped, and everything solved again — but only if, without it,
     they agree within ``tol_um`` and ``max_ratio`` times better than without any other suspect.
     Otherwise the loops cannot tell which is wrong —
@@ -280,7 +311,7 @@ def _solve(paths, links, fixed, dz_um: float = 1.0, max_ratio: float = 2.5, tol_
     Tiles left joined to nothing are held where they started.
 
     Returns (corrections {path: array(3)}, the links dropped, the links in doubt)."""
-    to_um = np.array([1.0, 1.0, dz_um])
+    to_um = np.array([1.0, 1.0, dz_um * tol_um / tol_z_um])
     err = lambda s, ln: float(np.linalg.norm((np.asarray(ln["shift"]) - (s[ln["b"]] - s[ln["a"]])) * to_um))  # noqa: E731
     live, dropped, doubt = list(links), [], []
     while len(live) >= 3:
@@ -306,14 +337,60 @@ def _solve(paths, links, fixed, dz_um: float = 1.0, max_ratio: float = 2.5, tol_
     return _lsq(paths, live, fixed), dropped, doubt
 
 
-def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: float = 15.0,
+def _xy(RA: np.ndarray, RB: np.ndarray, lim_yx, px: float, py: float):
+    """The x-y shift of two overlap strips (z, y, x; raw, reduced), matched on their maximum
+    through depth: a sparse axon is a line there and a few faint dots in any one slice, and an axon
+    running down through the slices made a matched 3-D voxel peak a ridge in z, its runner-up as
+    high as itself (0.244 against 0.243 on every pair of a 2026-10-27 mosaic). The runner-up is
+    the best shift more than 3 reduced pixels away — another place, not the same one blurred.
+    Returns ((dy, dx) sub-pixel, peak, runner-up)."""
+    A = _prepare(RA.max(axis=0)[None], px, py)
+    B = _prepare(RB.max(axis=0)[None], px, py)
+    d, r, r2 = _match(A, B, (0, *lim_yx), apart=(0, 3, 3))
+    return (d[1], d[2]), r, r2
+
+
+def _z(RA: np.ndarray, RB: np.ndarray, dy: int, dx: int, lim_z: int, slab: int):
+    """With x-y fixed, the slice shift: slabs of ``slab`` slices (their maximum, prepared) of A
+    matched against B's at every offset within ±``lim_z``, the mean correlation over the slabs
+    both reach — the depth where the two tiles show the same tissue. Returns (dz in whole slices,
+    its mean correlation); dz in the convention of ``_match``: A(z + dz) ≈ B(z)."""
+    h, w = RA.shape[1:]
+    y0, y1, x0, x1 = max(0, dy), min(h, h + dy), max(0, dx), min(w, w + dx)
+    if y1 - y0 < 4 or x1 - x0 < 4:
+        return 0.0, -1.0
+    A = RA[:, y0:y1, x0:x1].astype(np.float32)
+    B = RB[:, y0 - dy:y1 - dy, x0 - dx:x1 - dx].astype(np.float32)
+    nz = A.shape[0]
+
+    def slabs(V):
+        return {s0: _prepare(V[s0:s0 + slab].max(axis=0)[None], 1.0)[0] for s0 in range(0, max(1, nz - slab + 1))}
+    SA, SB = slabs(A), slabs(B)
+    score = {}
+    for dz in range(-lim_z, lim_z + 1):
+        c = [float((SA[z + dz] * SB[z]).mean()) for z in SB if z + dz in SA]
+        if len(c) >= 2:
+            score[dz] = float(np.mean(c))
+    if not score:
+        return 0.0, -1.0
+    # whole slices: a layout keeps depth in slices, and a sub-slice parabola on these broad peaks
+    # (a focus several slices long) was biased by up to ~0.5 slice, enough to round a tile one off
+    best = max(score, key=score.get)
+    return float(best), score[best]
+
+
+def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: float = 25.0,
              max_dz_um: float = 15.0, down: int = 2, min_overlap_um: float = 8.0,
-             min_score: float = 0.15, fixed: Optional[str] = None, null_samples: int = 24) -> dict:
+             min_score: float = 0.1, fixed: Optional[str] = None, null_samples: int = 24,
+             distinct: float = 1.5, slab_um: float = 6.0) -> dict:
     """Correct the tiles from their overlaps, starting from ``layout`` (so a hand-made layout is
-    refined, not thrown away). Each pair overlapping by at least ``min_overlap_um`` is matched in
-    3-D within ±``max_shift_um`` across and ±``max_dz_um`` in depth — how far the stage (and the
-    brain) can plausibly be off; no tile is ever moved further from where it started than that
-    (on images reduced ``down`` times across, then the peak refined to a fraction of a pixel).
+    refined, not thrown away). Each pair overlapping by at least ``min_overlap_um`` (and sharing
+    depth, by the stacks' geometry) is matched in two steps: across, within ±``max_shift_um``, on
+    the maximum through their common depth (``_xy``); then in depth, within ±``max_dz_um``, on
+    slabs of ``slab_um`` (``_z``) — how far the stage (and the brain, ~10 µm in z between stacks)
+    can plausibly be off; no tile is ever moved further from where it started than that (on
+    images reduced ``down`` times across, then the peak refined to a fraction of a pixel). A match
+    must stand ``distinct`` times above the best one elsewhere, or it is ``ambiguous``.
 
     Which matches to believe is decided by the data, as ASHLAR does: the same strips are matched
     against tiles that do NOT overlap, and the best of those chance correlations is the bar a real
@@ -346,7 +423,8 @@ def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: 
             cache[path] = np.asarray(mesc.read(path, channel=channel, reader_units=False))
         return cache[path]
 
-    ms = (int(round(max_dz_um / dzu)), int(round(max_shift_um / (py * down))), int(round(max_shift_um / (px * down))))
+    def lims(dn):
+        return (int(round(max_dz_um / dzu)), int(round(max_shift_um / (py * dn))), int(round(max_shift_um / (px * dn))))
 
     def overlap(A, B):
         x0, x1 = max(A["c0"], B["c0"]), min(A["c0"] + A["tile"].width, B["c0"] + B["tile"].width)
@@ -354,12 +432,13 @@ def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: 
         za0, za1 = max(A["z0"], B["z0"]), min(A["z0"] + A["tile"].depth, B["z0"] + B["tile"].depth)
         return x0, x1, y0, y1, za0, za1
 
-    def strip(P, path, x0, y0, h, w, za0, za1):
+    def strip(P, path, x0, y0, h, w, za0, za1, down):
         # cut at full resolution from the same mosaic pixel in both tiles, then reduced: the two
         # grids coincide, so reducing adds no shift of its own
         v = vol(path)[za0 - P["z0"]:za1 - P["z0"], y0 - P["r0"]:y0 - P["r0"] + h * down,
                       x0 - P["c0"]:x0 - P["c0"] + w * down].astype(np.float32)
-        return _prepare(v.reshape(v.shape[0], h, down, w, down).mean(axis=(2, 4)), px * down, py * down)
+        return v.reshape(v.shape[0], h, down, w, down).mean(axis=(2, 4))
+    slab = max(2, int(round(slab_um / dzu)))
 
     pairs, geo = [], {}
     for a, b in itertools.combinations(paths, 2):
@@ -367,17 +446,23 @@ def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: 
         x0, x1, y0, y1, za0, za1 = overlap(A, B)
         if (x1 - x0) * px < min_overlap_um or (y1 - y0) * py < min_overlap_um or za1 - za0 < 4:
             continue
-        h, w = (y1 - y0) // down, (x1 - x0) // down
-        VA, VB = strip(A, a, x0, y0, h, w, za0, za1), strip(B, b, x0, y0, h, w, za0, za1)
-        lim = (min(ms[0], VA.shape[0] // 2), min(ms[1], h // 2), min(ms[2], w // 2))
-        d, r, r2 = _match(VA, VB, lim)
-        geo[(a, b)] = (x0, y0, h, w, za0, za1, lim)
+        # reduced ``down`` times across, unless that leaves the strip narrower than 32 pixels: a
+        # few dozen pixels of a narrow overlap match a stranger by chance as well as their partner
+        dn = down if min(y1 - y0, x1 - x0) // down >= 32 else 1
+        h, w = (y1 - y0) // dn, (x1 - x0) // dn
+        VA, VB = strip(A, a, x0, y0, h, w, za0, za1, dn), strip(B, b, x0, y0, h, w, za0, za1, dn)
+        ms = lims(dn)
+        lim = (min(ms[0], max(0, (VA.shape[0] - 2 * slab) // 2)), min(ms[1], h // 2), min(ms[2], w // 2))
+        (dy, dx), r, r2 = _xy(VA, VB, lim[1:], px * dn, py * dn)
+        dz, _ = _z(VA, VB, int(round(dy)), int(round(dx)), lim[0], slab) if lim[0] > 0 else (0.0, 0.0)
+        d = (dz, dy, dx)
+        geo[(a, b)] = (x0, y0, h, w, za0, za1, lim, dn)
         # a peak on the edge of the search is no peak: the true shift is further out, and the best
         # the window could offer is whatever chance put there
         edge = any(m > 0 and abs(round(v)) >= m for v, m in zip(d, lim))
         # B's content at p is A's at p + d: B sits d further on than its layout says (µm, slices)
         pairs.append({"a": a, "b": b, "score": r, "second": r2, "edge": edge,
-                      "shift": [d[2] * px * down, d[1] * py * down, d[0]]})
+                      "shift": [d[2] * px * dn, d[1] * py * dn, d[0]]})
 
     # the bar: the same strips of A matched against tiles that share nothing with A — any
     # correlation found there is chance (the strip is cut from the other tile at the place B's
@@ -388,7 +473,7 @@ def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: 
         if len(null) >= null_samples:
             break
         a, b = p["a"], p["b"]
-        x0, y0, h, w, za0, za1, lim = geo[(a, b)]
+        x0, y0, h, w, za0, za1, lim, dn = geo[(a, b)]
         B = place[b]
         for c in paths:
             if c in (a, b) or (a, c) in overl or len(null) >= null_samples:
@@ -396,16 +481,16 @@ def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: 
             C = place[c]
             ox, oy = x0 - B["c0"] + C["c0"], y0 - B["r0"] + C["r0"]   # the same place in C
             z0c, z1c = max(za0, C["z0"]), min(za1, C["z0"] + C["tile"].depth)
-            if z1c - z0c < 4 or C["tile"].width < (x0 - B["c0"]) + w * down or C["tile"].height < (y0 - B["r0"]) + h * down:
+            if z1c - z0c < 4 or C["tile"].width < (x0 - B["c0"]) + w * dn or C["tile"].height < (y0 - B["r0"]) + h * dn:
                 continue
-            VA = strip(place[a], a, x0, y0, h, w, z0c, z1c)
-            VC = strip(C, c, ox, oy, h, w, z0c, z1c)
-            null.append(_match(VA, VC, (min(lim[0], VA.shape[0] // 2), lim[1], lim[2]))[1])
+            VA = strip(place[a], a, x0, y0, h, w, z0c, z1c, dn)
+            VC = strip(C, c, ox, oy, h, w, z0c, z1c, dn)
+            null.append(_xy(VA, VC, lim[1:], px * dn, py * dn)[1])
             break                                    # one stranger per pair: spread over pairs
     bar = max(min_score, max(null)) if len(null) >= 3 else min_score
 
     links = [{"a": p["a"], "b": p["b"], "shift": p["shift"], "weight": max(p["score"], 1e-3)}
-             for p in pairs if p["score"] >= bar and not p["edge"]]
+             for p in pairs if p["score"] >= bar and not p["edge"] and p["score"] >= distinct * max(p["second"], 0)]
     sol, dropped, doubt = _solve(paths, links, fixed, dz_um=dzu)
     out_keys = {(ln["a"], ln["b"]) for ln in dropped}
     doubt_keys = {(ln["a"], ln["b"]) for ln in doubt}
@@ -425,8 +510,9 @@ def register(mesc, ts: List[Tile], layout=None, channel: int = 0, max_shift_um: 
         key = (p["a"], p["b"])
         fit = sol[p["b"]] - sol[p["a"]]
         p["residual"] = [round(float(m - f), 3) for m, f in zip(p["shift"], fit)]
-        p["status"] = ("edge" if p["edge"] else "weak" if p["score"] < bar else "outlier" if key in out_keys
-                       else "doubt" if key in doubt_keys else "used")
+        p["status"] = ("edge" if p["edge"] else "weak" if p["score"] < bar
+                       else "ambiguous" if p["score"] < distinct * max(p["second"], 0)
+                       else "outlier" if key in out_keys else "doubt" if key in doubt_keys else "used")
         p["used"] = p["status"] in ("used", "doubt")
         others = [ln for ln in used if (ln["a"], ln["b"]) != key]
         p["loop"] = any(p["a"] in gr and p["b"] in gr for gr in _components(paths, others))

@@ -136,7 +136,8 @@
   #volMarks[hidden], #volPts[hidden] { display:none }
   #volPts { position:absolute; left:8px; bottom:8px; font-size:11px; color:var(--ink); max-width:calc(50% - 12px);
             background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px;
-            font-variant-numeric:tabular-nums; white-space:pre-wrap; max-height:40%; overflow-y:auto }
+            font-variant-numeric:tabular-nums; white-space:pre-wrap; max-height:40%; overflow-y:auto;
+            pointer-events:none }   /* a readout over the stack: clicks go through to the stack under it */
   #volPts .h { color:var(--muted) }
   #vol.tool { cursor:crosshair }
   #volInfo { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted); pointer-events:none;
@@ -178,6 +179,10 @@
   #mosInfo { position:absolute; right:8px; bottom:8px; max-width:calc(100% - 16px); font-size:11px; color:var(--ink);
              background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px; white-space:pre-wrap }
   #mosInfo:empty { display:none }
+  #mosMini { position:absolute; right:8px; bottom:40px; border:1px solid var(--line); border-radius:3px; background:#000;
+             cursor:pointer; box-shadow:0 1px 6px rgba(0,0,0,.6) }
+  #mosMini[hidden] { display:none }
+  #mosGo { width:120px; font-size:11px }
 
   /* ---- instruments (right) ---- */
   #toolsCol { grid-area:tools; display:flex; flex-direction:column; min-height:0; position:relative;
@@ -288,7 +293,7 @@
           <span id="volBoxTxt" class="hint"></span>
           <button id="volBoxFull" title="the whole stack again">full</button>
         </span>
-        <button id="volMeasure" title="a ruler in 3D: click two points (picked as with point) and read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button>
+        <button id="volMeasure" title="a ruler in 3D: each click puts a point exactly where the cursor meets the CURRENT plane (the slice selected by the slider or the XYZ crosshair, lit blue in the view) — no snapping to anything bright; change the plane between clicks to measure across depth. Read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button>
         <button id="volObject" title="an object: a click picks a seed as point does, then grows the connected region around it — every voxel of that channel at least the given share of the seed's peak, joined face to face, no further than the radius from the seed. Its volume in µm³, centre, extent and each channel's mean are listed; it is outlined in XYZ. Esc removes the last, shift+Esc all">object</button>
         <label id="volObjL" hidden title="what the next object keeps: voxels at least this share of the seed's peak (of the window, as the bytes are), within this radius of the seed. Changing either grows the last object again (Enter)">≥<input type="number" id="volObjF" class="vnum" min="5" max="99" step="1" style="width:44px">% of peak · within<input type="number" id="volObjR" class="vnum" min="0.5" step="any" style="width:48px">µm</label>
       </div>
@@ -319,7 +324,10 @@
           <button id="mosUndo" title="undo the last change to the layout (⌘Z)">undo</button>
           <button id="mosSeams" title="hard seams: each pixel from the tile whose centre is nearest, or from the last in the order (top puts a tile last)">seams: nearest</button>
           <button id="mosChan" title="both channels (green + magenta) or one, through the first tile's window">overlay</button>
-          <input type="range" id="mosPlane" title="the plane of the mosaic (shift+wheel or ↑ ↓ step it)"><span class="hint" id="mosPlaneL"></span>
+          <input type="range" id="mosPlane" title="the depth of the mosaic: right is shallower (shift+wheel, or ↑ shallower / ↓ deeper; PageUp/PageDown ten)"><span class="hint" id="mosPlaneL"></span>
+          <span class="hint" title="each tile drawn as the maximum of this many slices around the plane: a sparse axon reads as a line instead of a few dots (1: the slice itself)">slab <input type="number" id="mosSlab" min="1" max="64" step="1"> sl</span>
+          <input id="mosGo" placeholder="go: x y [z] µm" title="centre the map on a point: x y in µm (the frame the hover reads, from the rig's zero when every tile has one), and z to go to that depth; Enter">
+          <button id="mosMiniBtn" class="on" title="the overview map of the whole field, with the part on screen framed; click or drag on it to go there">map</button>
           <button id="mosCrop" title="drag a rectangle to cut out (Esc clears it); the TIFF takes the crop and the planes from–to">crop</button>
           <span class="hint">planes <input type="number" id="mosZ0" title="from (empty: all)"> – <input type="number" id="mosZ1" title="to (empty: all)"></span>
           <button id="mosTif" title="the crop (or the whole field) over the planes from–to, as a Fiji hyperstack, written beside the view file — float reader units, 0 where no tile reaches, the layout in its Info">TIFF</button>
@@ -331,6 +339,7 @@
           <span class="hint" id="mosWait"></span>
         </div>
         <div id="mosList"></div>
+        <canvas id="mosMini"></canvas>
         <div id="mosInfo"></div>
       </div>
     </div>
@@ -1810,7 +1819,7 @@ void main() {
   if (ta > tb || tb < 0.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
   ta = max(ta, 0.0);
   float jit = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-  float m = 0.0, mz = 0.0; vec2 m2 = vec2(0.0); vec4 acc = vec4(0.0);
+  float m = 0.0, mz = 0.0; vec2 m2 = vec2(0.0), mz2 = vec2(-1.0); vec4 acc = vec4(0.0);
   for (int i = 0; i < 2048; i++) {
     float t = ta + (float(i) + jit) * dt;
     if (t > tb) break;
@@ -1833,7 +1842,8 @@ void main() {
         acc.rgb += (1.0 - acc.a) * s * c; acc.a += (1.0 - acc.a) * s;
         if (acc.a > 0.985) break;
       } else {
-        m2 = max(m2, w);
+        if (w.x > m2.x) { m2.x = w.x; mz2.x = uvw.z; }        // each channel's brightest, and its depth
+        if (w.y > m2.y) { m2.y = w.y; mz2.y = uvw.z; }
         if (all(greaterThanEqual(m2, ceil2 * on2))) break;   // nothing further can be brighter
       }
       continue;
@@ -1856,9 +1866,14 @@ void main() {
   if (ov == 1 && mode == 0) {                               // each channel's MIP, coloured, added
     vec2 g2 = clamp((m2 - thr2) / (ceil2 - thr2) * gain, 0.0, 1.0);
     g2 = vec2(gm(g2.x, gam2.x), gm(g2.y, gam2.y));
+    // the current frame in a MIP (and so in a slab): a pixel whose brightest voxel lies on it is
+    // blue, as glass tints it — which piece of what is seen the selected plane holds
+    vec2 on = vec2(slw > 0.0 && abs(mz2.x - slz) < slw ? 1.0 : 0.0, slw > 0.0 && abs(mz2.y - slz) < slw ? 1.0 : 0.0);
+    if (on.x + on.y > 0.0) { o = vec4(vec3(0.35, 0.72, 1.0) * clamp(max(g2.x * on.x, g2.y * on.y) * 1.6, 0.0, 1.0), 1.0); return; }
     o = vec4(min(colA * g2.x + colB * g2.y, vec3(1.0)), 1.0); return;
   }
   float g = gm(clamp((m - thr) / (ceil_ - thr) * gain, 0.0, 1.0), gam);
+  if (mode == 0 && slw > 0.0 && abs(mz - slz) < slw) { o = vec4(vec3(0.35, 0.72, 1.0) * clamp(g * 1.6, 0.0, 1.0), 1.0); return; }
   o = vec4(mode == 2 ? hue(mz * 0.75) * g : vec3(g), 1.0);
 }`;
 const LVS = `#version 300 es
@@ -2500,12 +2515,35 @@ function volPickAt(clientX, clientY) {
   const [z, y, x] = volSnap(volWorldVox(P, c.ext)), k = volMeta.down, h = k >> 1;
   return [z, y * k + h, x * k + h];
 }
+// the full-resolution voxel where the ray under the cursor meets plane z of the stack (its slice's
+// centre), exactly — the ruler's pick: a point on the plane the person chose, not the brightest
+// thing along the ray; null when the ray runs along the plane or meets it outside the stack
+function volPlanePickAt(clientX, clientY, z) {
+  if (!volMeta) return null;
+  const [D, Hy, Wx] = volMeta.shape, k = volMeta.down;
+  const r = cvol.getBoundingClientRect(), c = volCam(r.width / r.height), e = c.ext;
+  const nx = ((clientX - r.left) / r.width) * 2 - 1, ny = 1 - ((clientY - r.top) / r.height) * 2;
+  const rd = v3.norm([0, 1, 2].map(i => c.F[i] + nx * c.tanHalf * c.aspect * c.R[i] + ny * c.tanHalf * c.U[i]));
+  const sl = (z + .5) / D, wy = (2 * (V.vol.deep ? sl : 1 - sl) - 1) * e[1];
+  if (Math.abs(rd[1]) < 1e-9) return null;
+  const t = (wy - c.eye[1]) / rd[1]; if (!(t > 0)) return null;
+  const P = [c.eye[0] + rd[0] * t, c.eye[1] + rd[1] * t, c.eye[2] + rd[2] * t];
+  const u = (P[0] / e[0] + 1) / 2, ry = (P[2] / e[2] + 1) / 2, rr = V.flipY ? 1 - ry : ry;
+  if (u < 0 || u >= 1 || rr < 0 || rr >= 1) return null;
+  return [z, Math.floor(rr * Hy * k), Math.floor(u * Wx * k)];
+}
 function volGoTo(q) {                          // the XYZ crosshair and the slice to a full-resolution voxel
   const k = volMeta.down;
   V.vol.cx = Math.floor(q[2] / k); V.vol.cy = Math.floor(q[1] / k);
   V.frame = q[0]; $("frame").value = V.frame; $("frame").oninput();
 }
 function volToolClick(e) {
+  if (V.vol.tool === "measure") {
+    const z = Math.max(0, Math.min(volMeta.shape[0] - 1, V.frame | 0)), q = volPlanePickAt(e.clientX, e.clientY, z);
+    if (!q) { badge(`the cursor is off plane z ${z} (the blue one) — click inside it, or turn the stack so the plane faces you`, true); return; }
+    if ((e.shiftKey && volMeas.length) || volMeas.length === 1) volMeas.push(q); else volMeas = [q];
+    volDraw(); saveView(); return;
+  }
   let q = volPickAt(e.clientX, e.clientY);
   if (!q) { badge("nothing drawn under the cursor — lower the floor, or click on the object"); return; }
   if (V.vol.tool === "point") volPts().push(q);
@@ -3049,6 +3087,7 @@ function surfDepth(q, fit = surfFit()) {
   const [x, y, z] = volUm(q);
   return surfSide(fit).side * (z - fit.z(x, y));
 }
+const SURF_HIT_PX = 14;                       // how near a shift+click must be to a drawn mark (CSS pixels)
 function surfClick(h, remove) {
   const { D, Hy, Wx } = oGeom, v = V.vol, k = volMeta.down, cl = (f, n) => Math.max(0, Math.min(n - 1, Math.floor(f * n)));
   const full = (i, n) => Math.min(n * k - 1, Math.floor((i + .5) * k));      // a reduced voxel's full-resolution pixel
@@ -3057,12 +3096,20 @@ function surfClick(h, remove) {
   else if (h.axis === "yz") { z = cl(h.fx, D); y = cl(h.fy, Hy); x = v.cx; }
   else { z = cl(h.fy, D); y = v.cy; x = cl(h.fx, Wx); }
   const ms = surfMarks();
-  if (remove) {                               // the nearest mark shown in this pane, within a few voxels
-    let best = -1, bd = 1e9;
+  if (remove) {
+    // the nearest of the marks DRAWN in this pane (surfDrawPane's rule: its cut within a voxel), in
+    // screen pixels — counted in voxels, from every depth, it took a near-exact hit on a 512-pixel
+    // stack and could pick a mark that was not on screen, and a miss said nothing
+    const r = oGeom[h.axis];
+    let best = -1, bd = Infinity;
     ms.forEach((q, i) => { const qz = q[0], qy = Math.floor(q[1] / k), qx = Math.floor(q[2] / k);
-      const d = { xy: Math.hypot(qx - x, qy - y), yz: Math.hypot(qz - z, qy - y), xz: Math.hypot(qz - z, qx - x) }[h.axis];
+      if (!v.oMax && { xy: Math.abs(qz - v.cz), yz: Math.abs(qx - v.cx), xz: Math.abs(qy - v.cy) }[h.axis] > 1) return;
+      const [fx, fy] = { xy: [(qx + .5) / Wx, (qy + .5) / Hy], yz: [(qz + .5) / D, (qy + .5) / Hy], xz: [(qx + .5) / Wx, (qz + .5) / D] }[h.axis];
+      const d = Math.hypot((fx - h.fx) * r.w, (fy - h.fy) * r.h);
       if (d < bd) { bd = d; best = i; } });
-    if (best >= 0 && bd <= 6) ms.splice(best, 1);
+    if (best >= 0 && bd <= SURF_HIT_PX) ms.splice(best, 1);
+    else { badge(best >= 0 ? "no surface mark under the cursor — shift+click on one of the crosses in this pane"
+                           : "no surface mark is shown in this pane — move the cut to where the marks are, or Esc removes the last", true); return; }
   } else ms.push([z, full(y, Hy), full(x, Wx)]);
   orthoDraw(); volShow(); volPtsList(); saveView();
 }
@@ -3146,13 +3193,13 @@ $("oCross").onclick = () => { V.vol.oCross = !V.vol.oCross; volShow(); saveView(
    ------------------------------------------------------------------------------------------ */
 function mosState(m) {
   const d = { on: false, layout: { tiles: {}, order: [], seams: "nearest" }, plane: 0, view: null, sel: "", edit: false,
-              cropUm: null, zr: null, chan: "ov", pairs: null, list: true, marks: true };   // the crop in stage µm: it stays on the tissue when tiles move
+              cropUm: null, zr: null, chan: "ov", pairs: null, list: true, marks: true, slab: 1, mini: true };   // the crop in stage µm: it stays on the tissue when tiles move
   if (!m || typeof m !== "object") return d;
   const o = { ...d, ...m }, L = o.layout && typeof o.layout === "object" ? o.layout : {};
   const num = (x, def) => (Number.isFinite(+x) ? +x : def);
   o.layout = { tiles: {}, order: Array.isArray(L.order) ? L.order.filter(p => typeof p === "string") : [], seams: L.seams === "order" ? "order" : "nearest" };
   for (const [p, e] of Object.entries(L.tiles && typeof L.tiles === "object" ? L.tiles : {}))
-    if (e && typeof e === "object") o.layout.tiles[p] = { dx: num(e.dx, 0), dy: num(e.dy, 0), dz: Math.round(num(e.dz, 0)), hidden: !!e.hidden };
+    if (e && typeof e === "object") o.layout.tiles[p] = { dx: num(e.dx, 0), dy: num(e.dy, 0), dz: Math.round(num(e.dz, 0)), ...("hidden" in e ? { hidden: !!e.hidden } : {}) };
   o.on = !!o.on; o.edit = !!o.edit; o.list = o.list !== false; o.marks = o.marks !== false; o.plane = Math.round(num(o.plane, 0)); o.sel = typeof o.sel === "string" ? o.sel : "";
   o.view = o.view && [o.view.x, o.view.y, o.view.k].every(Number.isFinite) && o.view.k > 0 ? o.view : null;
   o.cropUm = Array.isArray(o.cropUm) && o.cropUm.length === 4 && o.cropUm.every(Number.isFinite) ? o.cropUm : null;
@@ -3162,6 +3209,7 @@ function mosState(m) {
     && Number.isFinite(q.score) && fin(q.residual, 3)) : null;
   o.zr = Array.isArray(o.zr) && o.zr.length === 2 && o.zr.every(Number.isFinite) ? o.zr.map(Math.round) : null;
   o.chan = o.chan === 0 || o.chan === 1 ? o.chan : "ov";
+  o.slab = Math.max(1, Math.min(64, Math.round(num(o.slab, 1)))); o.mini = o.mini !== false;
   return o;
 }
 V.mos = mosState(V.mos);
@@ -3173,31 +3221,50 @@ function mosTiles() {
   return FILE ? FILE.units.filter(u => u.z_step_um && u.frames > 1 && u.pixel_size_um && mosPos(u)
     && Number.isFinite(mosPos(u).x) && Number.isFinite(mosPos(u).y)) : [];
 }
+// a tile commented "ignore" (the rig's word for a take to throw away) starts hidden — mesc_io.mosaic._entry
+const MOS_IGNORE = /\bignore\b/i;
 function mosEntry(p) {
-  const e = V.mos.layout.tiles[p] || {};
-  return { dx: +e.dx || 0, dy: +e.dy || 0, dz: Math.round(+e.dz || 0), hidden: !!e.hidden };
+  const e = V.mos.layout.tiles[p] || {}, u = FILE && FILE.units.find(x => x.path === p);
+  return { dx: +e.dx || 0, dy: +e.dy || 0, dz: Math.round(+e.dz || 0),
+           hidden: "hidden" in e ? !!e.hidden : !!(u && MOS_IGNORE.test(u.comment || "")) };
 }
 function mosSet(p, ch) { V.mos.layout.tiles[p] = { ...mosEntry(p), ...ch }; }
-// where each shown tile sits, in whole mosaic pixels — mesc_io.mosaic.geometry, line for line
+// where each shown tile sits, in whole mosaic pixels and planes — mesc_io.mosaic.geometry, line for line:
+// the grid most tiles share (the injection-zero stack taken first at 10 µm no longer decides), and
+// depth from each stack's own geometry (z0_um: slice 0, the deep end), never from the stage reading
+const mosGrid = u => [u.pixel_size_um, u.pixel_size_y_um || u.pixel_size_um, u.z_step_um].map(v => Math.round(v * 1e6) / 1e6).join(",");
 function mosGeom() {
   const all = mosTiles(), shown0 = all.filter(u => !mosEntry(u.path).hidden);
   if (!shown0.length) return null;
-  const ref = shown0[0], rpy = ref.pixel_size_y_um || ref.pixel_size_um, same = (a, b) => Math.abs(a - b) <= 1e-6;
-  const shown = shown0.filter(u => same(u.pixel_size_um, ref.pixel_size_um) && same(u.pixel_size_y_um || u.pixel_size_um, rpy) && same(u.z_step_um, ref.z_step_um));
+  const grids = shown0.map(mosGrid), count = k => grids.filter(g => g === k).length;
+  const best = grids.reduce((a, k) => (count(k) > count(a) ? k : a), grids[0]);
+  const ref = shown0[grids.indexOf(best)], rpy = ref.pixel_size_y_um || ref.pixel_size_um;
+  const shown = shown0.filter(u => mosGrid(u) === best);
+  const zb = shown.every(u => Number.isFinite(u.z0_um)) ? Math.min(...shown.map(u => u.z0_um)) : null;
+  const lift = u => (zb === null ? 0 : Math.round((u.z0_um - zb) / ref.z_step_um));
+  const zeros = new Set(shown.map(u => u.z_origin_um));
   const left = {}, top = {};
   shown.forEach(u => { const e = mosEntry(u.path), py = u.pixel_size_y_um || u.pixel_size_um;
     left[u.path] = mosPos(u).x + e.dx - u.width * u.pixel_size_um / 2; top[u.path] = mosPos(u).y + e.dy - u.height * py / 2; });
   const ox = Math.min(...Object.values(left)), oy = Math.min(...Object.values(top));
   const place = {};
   shown.forEach(u => { const c0 = Math.round((left[u.path] - ox) / ref.pixel_size_um), r0 = Math.round((top[u.path] - oy) / rpy);
-    place[u.path] = { c0, r0, z0: mosEntry(u.path).dz, u, cx: c0 + u.width / 2, cy: r0 + u.height / 2 }; });
+    place[u.path] = { c0, r0, z0: lift(u) + mosEntry(u.path).dz, u, cx: c0 + u.width / 2, cy: r0 + u.height / 2 }; });
   const P = Object.values(place);
   const order = V.mos.layout.order.filter(p => place[p]).concat(shown.map(u => u.path).filter(p => !V.mos.layout.order.includes(p)));
   return { place, W: Math.max(...P.map(p => p.c0 + p.u.width)), H: Math.max(...P.map(p => p.r0 + p.u.height)),
            z0: Math.min(...P.map(p => p.z0)), z1: Math.max(...P.map(p => p.z0 + p.u.frames)),
            px: ref.pixel_size_um, py: rpy, dz: ref.z_step_um, ox, oy, order, all, ref,
-           skipped: shown0.filter(u => !place[u.path]).map(u => u.path) };
+           skipped: shown0.filter(u => !place[u.path]).map(u => u.path),
+           // plane q is at rig z  zUm + q·dz (larger = shallower); shown from the rig's zero when all share one
+           zUm: zb, zZero: zeros.size === 1 && Number.isFinite([...zeros][0]) ? [...zeros][0] : null };
 }
+// the depth of a plane as people say it: µm from the rig's zero (else the rig's own z); + is shallower
+function mosDepth(G, q) {
+  if (G.zUm === null) return null;
+  return G.zUm + q * G.dz - (G.zZero === null ? 0 : G.zZero);
+}
+const mosDepthT = (G, q) => { const z = mosDepth(G, q); return z === null ? "" : `z ${z >= 0 ? "+" : ""}${z.toFixed(1)} µm${G.zZero === null ? " (rig)" : ""}`; };
 // the channels drawn, and one window for every tile (the first tile's: typed here, or the file's)
 function mosChans(G) { const n = G.ref.channels.length; return V.mos.chan === "ov" ? (n > 1 ? [0, 1] : [0]) : [Math.min(V.mos.chan, n - 1)]; }
 function mosWinQ(G, ch) {
@@ -3219,7 +3286,8 @@ function mosImg(url) {
 }
 // one tile's slice as a picture: grey for one channel, green + magenta added for two
 function mosPic(G, u, s) {
-  const chans = mosChans(G), urls = chans.map(ch => `/api/frame/${u.path}/${ch}/${s}?${mosWinQ(G, ch)}&n=1`), key = urls.join("|");
+  const n = V.mos.slab, q = n > 1 ? `&n=${n}&proj=max` : "&n=1";
+  const chans = mosChans(G), urls = chans.map(ch => `/api/frame/${u.path}/${ch}/${s}?${mosWinQ(G, ch)}${q}`), key = urls.join("|");
   if (mosPics.has(key)) return mosPics.get(key);
   const rs = urls.map(mosImg);
   if (!rs.every(r => r.ok)) return null;
@@ -3332,6 +3400,37 @@ function mosDraw() {
   const L = step / G.px * v.k;
   g.fillStyle = "#fff"; g.fillRect(16, H - 22, L, 3); g.font = "11px sans-serif"; g.textBaseline = "bottom"; g.fillText(`${step} µm`, 16, H - 25);
   $("mosWait").textContent = waiting ? `loading ${waiting} tile${waiting > 1 ? "s" : ""}…` : "";
+  mosMiniDraw(G, live.length ? mosPlaneCv : null);
+}
+// the overview: the whole field at this plane, small, with the part on screen framed
+function mosMiniGeom(G) {
+  const st = $("stage"), side = Math.max(120, Math.min(240, st.clientWidth / 5));
+  const k = Math.min(side / G.W, side / G.H);
+  return { k, w: Math.max(1, Math.round(G.W * k)), h: Math.max(1, Math.round(G.H * k)) };
+}
+function mosMiniDraw(G, pic) {
+  const c = $("mosMini"); c.hidden = !V.mos.mini || !G;
+  if (c.hidden) return;
+  const m = mosMiniGeom(G), dpr = window.devicePixelRatio || 1;
+  c.style.width = m.w + "px"; c.style.height = m.h + "px";
+  if (c.width !== Math.round(m.w * dpr) || c.height !== Math.round(m.h * dpr)) { c.width = Math.round(m.w * dpr); c.height = Math.round(m.h * dpr); }
+  const g = c.getContext("2d"), fy = V.flipY ? -1 : 1;
+  g.setTransform(dpr * m.k, 0, 0, dpr * m.k * fy, 0, V.flipY ? G.H * m.k * dpr : 0);
+  g.fillStyle = "#000"; g.fillRect(0, 0, G.W, G.H); g.imageSmoothingEnabled = true;
+  if (pic) g.drawImage(pic, 0, 0);
+  g.lineWidth = 1 / m.k; g.strokeStyle = "rgba(255,255,255,.25)";
+  for (const p of Object.values(G.place)) { const has = V.mos.plane - p.z0 >= 0 && V.mos.plane - p.z0 < p.u.frames;
+    g.setLineDash(has ? [] : [3 / m.k, 3 / m.k]); g.strokeRect(p.c0, p.r0, p.u.width, p.u.height); }
+  g.setLineDash([]);
+  const v = mosView(G), st = $("stage");            // the screen, in mosaic pixels
+  const x0 = v.x, x1 = v.x + st.clientWidth / v.k, ya = mosFy(G, v.y), yb = mosFy(G, v.y + st.clientHeight / v.k);
+  g.strokeStyle = "#ff9f1c"; g.lineWidth = 2 / m.k;
+  g.strokeRect(x0, Math.min(ya, yb), x1 - x0, Math.abs(yb - ya));
+}
+// centre the map on a mosaic point (and keep the zoom)
+function mosCentre(G, x, y) {
+  const v = mosView(G), st = $("stage");
+  v.x = x - st.clientWidth / 2 / v.k; v.y = mosFy(G, y) - st.clientHeight / 2 / v.k;
 }
 function mosMarks(g, G, v) {
   const sr = (x0, y0, x1, y1) => { const a = mosToScreen(G, x0, y0), b = mosToScreen(G, x1, y1);
@@ -3362,10 +3461,10 @@ function mosMarks(g, G, v) {
     // grey: not believed (below chance, or its best match on the edge of the search); red: dropped
     // as the one link that disagreed, or one of several a loop says cannot all be right
     const st = q.status || (q.used ? "used" : "weak"), res = Math.hypot(q.residual[0], q.residual[1]);
-    const what = { used: q.loop === false ? "unchecked" : "", weak: "below chance", edge: "too far to find", outlier: "outlier, dropped", doubt: "doubt: look" }[st] || "";
+    const what = { used: q.loop === false ? "unchecked" : "", weak: "below chance", ambiguous: "another place fits nearly as well", edge: "too far to find", outlier: "outlier, dropped", doubt: "doubt: look" }[st] || "";
     const t = `r ${q.score.toFixed(2)}` + (st === "used" || st === "doubt" ? ` · ${res.toFixed(1)} µm${Math.round(q.residual[2]) ? ` · ${q.residual[2] > 0 ? "+" : ""}${q.residual[2].toFixed(1)} sl` : ""}` : "") + (what ? " · " + what : "");
     const tw = g.measureText(t).width + 8;
-    g.fillStyle = st === "outlier" || st === "doubt" ? "rgba(150,30,30,.88)" : st === "weak" || st === "edge" ? "rgba(60,64,70,.85)"
+    g.fillStyle = st === "outlier" || st === "doubt" ? "rgba(150,30,30,.88)" : st === "weak" || st === "edge" || st === "ambiguous" ? "rgba(60,64,70,.85)"
       : q.loop === false ? "rgba(130,95,10,.88)" : "rgba(18,60,30,.82)";
     g.fillRect(x - tw / 2, y - 8, tw, 16);
     g.fillStyle = "#fff"; g.textBaseline = "middle"; g.fillText(t, x - tw / 2 + 4, y); g.textBaseline = "top";
@@ -3380,7 +3479,10 @@ function mosUi(G) {
   $("mosListBtn").classList.toggle("on", V.mos.list); $("mosMarksBtn").classList.toggle("on", V.mos.marks);
   if (!G) { $("mosInfo").textContent = "every tile is hidden — tick one in the list"; mosList(null); return; }
   const pl = $("mosPlane"); pl.min = G.z0; pl.max = G.z1 - 1; pl.value = V.mos.plane;
-  $("mosPlaneL").textContent = `plane ${V.mos.plane} · ${G.z0}…${G.z1 - 1} · ${(V.mos.plane * G.dz).toFixed(1)} µm`;
+  $("mosPlaneL").textContent = (G.zUm !== null ? `${mosDepthT(G, V.mos.plane)} · ` : "")
+    + `plane ${V.mos.plane} of ${G.z0}…${G.z1 - 1}` + (V.mos.slab > 1 ? ` · max of ${V.mos.slab} sl` : "");
+  if (document.activeElement !== $("mosSlab")) $("mosSlab").value = V.mos.slab;
+  $("mosMiniBtn").classList.toggle("on", V.mos.mini);
   if (document.activeElement !== $("mosZ0")) $("mosZ0").value = V.mos.zr ? V.mos.zr[0] : "";
   if (document.activeElement !== $("mosZ1")) $("mosZ1").value = V.mos.zr ? V.mos.zr[1] : "";
   $("mosZ0").placeholder = G.z0; $("mosZ1").placeholder = G.z1 - 1;
@@ -3390,10 +3492,11 @@ function mosList(G) {
   const box = $("mosList"); box.hidden = !V.mos.list;
   if (!V.mos.list) return;
   const rows = mosTiles().map(u => { const e = mosEntry(u.path), p = G && G.place[u.path], sel = u.path === V.mos.sel;
-    const why = G && G.skipped.includes(u.path) ? " · another pixel size: not shown" : "";
+    const why = G && G.skipped.includes(u.path) ? " · another grid than most tiles: not shown" : "";
+    const zr = p && G.zUm !== null ? ` · z ${mosDepth(G, p.z0).toFixed(0)}…${mosDepth(G, p.z0 + u.frames - 1).toFixed(0)}` : "";
     return `<div class="t${sel ? " sel" : ""}" data-p="${esc(u.path)}"><input type="checkbox" ${e.hidden ? "" : "checked"} title="show this tile">`
       + `<b>${esc(u.name)}</b> <span class="c">${esc(u.comment)}</span>`
-      + `<span class="n">${e.dx.toFixed(1)}, ${e.dy.toFixed(1)} µm · ${e.dz >= 0 ? "+" : ""}${e.dz} sl${p ? "" : why}</span>`
+      + `<span class="n">${e.dx.toFixed(1)}, ${e.dy.toFixed(1)} µm · ${e.dz >= 0 ? "+" : ""}${e.dz} sl${zr}${p ? "" : why}</span>`
       + `<button class="top" title="draw this tile over the others (seams: order)">top</button><button class="rs" title="back to its stage position">reset</button>`
       + `<button class="op" title="open this tile in XYZ (to mark its surface)">XYZ</button></div>`; }).join("");
   const html = `<div class="h">tiles · ${mosTiles().length}${V.mos.edit ? " · edit: drag, arrows (shift ×10), [ ] a slice, h hides, ⌘Z undoes" : ""}</div>` + rows;
@@ -3414,7 +3517,7 @@ function mosInfo(text) { $("mosInfo").textContent = text; }
 function mosHover(G, m) {
   const [x, y] = m, p = mosOwner(G, x, y);
   const xs = G.ox + x * G.px, ys = G.oy + y * G.py;
-  let t = `x ${xs.toFixed(1)} · y ${ys.toFixed(1)} µm (stage)`;
+  let t = `x ${xs.toFixed(1)} · y ${ys.toFixed(1)} µm${mosRel() ? " from the zero" : " (stage)"}` + (G.zUm !== null ? ` · ${mosDepthT(G, V.mos.plane)}` : "");
   if (p) {
     const s = V.mos.plane - p.z0, f = surfFitOf(p.u.path), py = p.u.pixel_size_y_um || p.u.pixel_size_um;
     t += ` · ${p.u.name}${p.u.comment ? " (" + p.u.comment + ")" : ""} · slice ${s}`;
@@ -3513,7 +3616,7 @@ function mosKey(e) {
   if (ed && (e.key === "[" || e.key === "]")) { mosPush(); mosSet(sel, { dz: mosEntry(sel).dz + (e.key === "]" ? 1 : -1) }); mosDraw(); saveView(); return true; }
   if (ed && e.key === "h") { mosPush(); mosSet(sel, { hidden: !mosEntry(sel).hidden }); mosDraw(); saveView(); return true; }
   if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "PageUp" || e.key === "PageDown") {
-    V.mos.plane += (e.key === "ArrowDown" || e.key === "PageDown" ? 1 : -1) * (e.shiftKey || e.key.startsWith("Page") ? 10 : 1);
+    V.mos.plane += (e.key === "ArrowUp" || e.key === "PageUp" ? 1 : -1) * (e.shiftKey || e.key.startsWith("Page") ? 10 : 1);
     mosDraw(); saveView(); return true;
   }
   return false;
@@ -3533,6 +3636,37 @@ $("mosMarksBtn").onclick = () => { V.mos.marks = !V.mos.marks; mosDraw(); saveVi
 $("mosListBtn").onclick = () => { V.mos.list = !V.mos.list; mosDraw(); saveView(); };
 $("mosFitBtn").onclick = () => { V.mos.view = null; mosDraw(); saveView(); };
 $("mosPlane").oninput = e => { V.mos.plane = +e.target.value; mosDraw(); saveView(); };
+$("mosSlab").onchange = e => { V.mos.slab = Math.max(1, Math.min(64, Math.round(+e.target.value || 1))); mosDraw(); saveView(); };
+$("mosMiniBtn").onclick = () => { V.mos.mini = !V.mos.mini; mosDraw(); saveView(); };
+let mosMiniDrag = false;
+function mosMiniGo(e) {
+  const G = mosGeom(); if (!G) return;
+  const r = $("mosMini").getBoundingClientRect(), m = mosMiniGeom(G);
+  const x = (e.clientX - r.left) / m.k, yv = (e.clientY - r.top) / m.k;     // yv: as drawn (flipped when flipY)
+  mosCentre(G, x, mosFy(G, yv)); mosDraw();
+}
+$("mosMini").addEventListener("pointerdown", e => { e.stopPropagation(); e.preventDefault(); mosMiniDrag = true;
+  $("mosMini").setPointerCapture(e.pointerId); mosMiniGo(e); });
+$("mosMini").addEventListener("pointermove", e => { e.stopPropagation(); if (mosMiniDrag) mosMiniGo(e); });
+const mosMiniUp = e => { if (!mosMiniDrag) return; mosMiniDrag = false; try { $("mosMini").releasePointerCapture(e.pointerId); } catch (_) {} saveView(); };
+$("mosMini").addEventListener("pointerup", mosMiniUp); $("mosMini").addEventListener("pointercancel", mosMiniUp);
+$("mosMini").addEventListener("wheel", e => { e.preventDefault(); e.stopPropagation(); }, { passive: false });
+// go to a point typed in µm, in the frame the hover reads (and to a depth, given a z)
+$("mosGo").addEventListener("keydown", e => {
+  e.stopPropagation();
+  if (e.key !== "Enter") return;
+  const G = mosGeom(); if (!G) return;
+  const n = e.target.value.replace(/[,;]/g, " ").trim().split(/\s+/).map(Number);
+  if (n.length < 2 || !n.slice(0, 3).every(Number.isFinite)) { mosInfo("go: type x y, or x y z, in µm"); return; }
+  mosCentre(G, (n[0] - G.ox) / G.px, (n[1] - G.oy) / G.py);
+  let t = `centred on x ${n[0]} · y ${n[1]} µm`;
+  if (n.length >= 3 && G.zUm !== null) {
+    const q = Math.round((n[2] + (G.zZero === null ? 0 : G.zZero) - G.zUm) / G.dz);
+    V.mos.plane = Math.max(G.z0, Math.min(G.z1 - 1, q));
+    t += q === V.mos.plane ? ` · ${mosDepthT(G, q)}` : ` · z ${n[2]} is outside the stacks: at the nearest plane, ${mosDepthT(G, V.mos.plane)}`;
+  } else if (n.length >= 3) t += " · this file carries no stack depths: z not used";
+  mosDraw(); saveView(); mosInfo(t);
+});
 const mosZr = () => { const a = $("mosZ0").value, b = $("mosZ1").value;
   V.mos.zr = a === "" || b === "" ? null : [Math.min(+a, +b), Math.max(+a, +b)]; saveView(); };
 $("mosZ0").onchange = mosZr; $("mosZ1").onchange = mosZr;
@@ -3559,7 +3693,7 @@ $("mosAuto").onclick = async () => {
     const n = st => r.pairs.filter(p => p.status === st).length, nm = p => p.split("/").pop();
     mosInfo(`stitched: ${used.length} of ${r.pairs.length} overlapping pairs used (correlation above ${r.threshold}, the best chance match between tiles that do not overlap), ${nm(r.fixed)} held still`
       + (used.length ? ` · the worst seam is off by ${worst.toFixed(2)} µm after the solve` : "")
-      + (n("weak") + n("edge") ? ` · ${n("weak") + n("edge")} not believed` : "")
+      + (n("weak") + n("edge") + n("ambiguous") ? ` · ${n("weak") + n("edge") + n("ambiguous")} not believed (below chance, too far, or another place fits as well)` : "")
       + (n("outlier") ? ` · ${n("outlier")} dropped as disagreeing with the rest` : "")
       + (n("doubt") ? ` · ${n("doubt")} in DOUBT: a loop does not close and cannot say which seam is wrong — look at the red ones` : "")
       + (used.some(p => !p.loop) ? ` · ${used.filter(p => !p.loop).length} unchecked (no loop)` : "")
@@ -3578,7 +3712,8 @@ $("mosFlat").onclick = () => {
   const s = at.find(a => a.p.u.path === V.mos.sel), P = at.map(a => a.zs + a.p.z0).sort((a, b) => a - b);
   const target = s ? s.zs + s.p.z0 : P[(P.length - 1) >> 1];
   mosPush();
-  at.forEach(a => mosSet(a.p.u.path, { dz: Math.round(target - a.zs) }));
+  // dz is the correction on top of where the tile's geometry put it (p.z0 − its dz)
+  at.forEach(a => mosSet(a.p.u.path, { dz: Math.round(target - a.zs - (a.p.z0 - mosEntry(a.p.u.path).dz)) }));
   V.mos.plane = Math.round(target);
   mosInfo(`flattened: the surface of ${at.length} tile${at.length > 1 ? "s" : ""} on plane ${Math.round(target)} (at each tile's centre)`
     + (Object.keys(G.place).length > at.length ? ` · ${Object.keys(G.place).length - at.length} without surface marks left as they were` : "") + " · ⌘Z undoes");

@@ -464,6 +464,7 @@
   </div>
 </div>
 <script src="static/api.js"></script>
+<script src="static/image.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -648,7 +649,12 @@ const fmt = v => (v == null ? "—" : (Math.round(v * 10) / 10).toString());
 
 /* ------------------------------------------------------------------------------------------
    the image: frames (single or averaged) or the mean, zoomed by a rectangle */
-let imgEl = null, imgUrl = "", frameInFlight = false, frameWanted = false;
+let imgEl = null;
+// one frame in flight at a time (MescIO.image); the old names stay readable — the real-Chrome checks watch them
+const frameLoader = MescIO.image.createLoader();
+Object.defineProperty(window, "imgUrl", { get: () => frameLoader.key });
+Object.defineProperty(window, "frameInFlight", { get: () => frameLoader.busy });
+Object.defineProperty(window, "frameWanted", { get: () => frameLoader.wanted });
 /* The fixed window: what was typed here for this unit and channel, else the file's own LUT. */
 function fixedWinFor(ch) {
   if (!unit) return null;
@@ -839,18 +845,16 @@ function draw() {
   const url = urls.join(" + ") + " | " + chans.map(paletteFor).join(",");
   // At most one frame in flight. A slider dragged across 30 positions used to ask for all 30, and
   // the disk served them in turn after the hand had stopped; now a step taken while a frame is on
-  // its way only marks that another is wanted, and when it lands the page asks for wherever the
+  // its way only marks that another is wanted (MescIO.image.createLoader), and when it lands the page asks for wherever the
   // slider is THEN. Playback has always waited the same way (frameInFlight in togglePlay).
-  if (url !== imgUrl && frameInFlight) frameWanted = true;
-  else if (url !== imgUrl) {
-    imgUrl = url;
-    frameInFlight = true; frameWanted = false;
-    const forUnit = unit;
-    const landed = () => { frameInFlight = false; if (frameWanted) { frameWanted = false; draw(); } };
-    Promise.all(urls.map(u => new Promise((ok, bad) => { const im = new Image(); im.onload = () => ok(im); im.onerror = bad; im.src = u; })))
-      .then(ims => { if (imgUrl === url && unit === forUnit) { imgEl = composite(ims, chans); paint(); badge("saved"); } landed(); })
-      .catch(() => { if (imgUrl === url && unit === forUnit) { imgEl = null; paint(); badge("frame failed to load", true); } landed(); });
-  } else paint();
+  const forUnit = unit;
+  const got = frameLoader.request(url, urls, {
+    isCurrent: () => unit === forUnit,
+    onLoad: ims => { imgEl = composite(ims, chans); paint(); badge("saved"); },
+    onError: () => { imgEl = null; paint(); badge("frame failed to load", true); },
+    again: () => draw(),
+  });
+  if (got === "same") paint();
   // A stack's third axis is depth, so the slider counts slices and the label says microns.
   // Calling a slice a "frame" and offering it in seconds is how a 1 um step became "1000 Hz"
   // one layer down; the same axis deserves its own name here too.
@@ -884,13 +888,8 @@ const sliceZeroEnd = u => (u && Number.isFinite(u.z0_um) ? (u.z_step_um > 0 ? "t
 // bottom); every image coordinate still means the file's own row, so ROIs, the zoom box, the
 // pixel readout and the exports are untouched — only sy() and imgPoint() know about the flip.
 function mapping() {
-  const s = $("stage"), W = s.clientWidth, H = s.clientHeight;
-  const z = V.zoom.w ? V.zoom : { x: 0, y: 0, w: unit.width, h: unit.height };
-  const k = Math.min(W / z.w, H / z.h), fy = !!V.flipY, uh = unit.height;
-  const ox = (W - z.w * k) / 2 - z.x * k;
-  const oy = (H - z.h * k) / 2 - (fy ? uh - z.y - z.h : z.y) * k;   // the top of the picture on screen
-  const sy = y => oy + (fy ? uh - y : y) * k;
-  return { k, ox, oy, W, H, fy, sy };
+  const s = $("stage");
+  return MescIO.image.mapping(s.clientWidth, s.clientHeight, V.zoom, unit.width, unit.height, V.flipY);
 }
 function paint() {
   if (!unit) return;
@@ -900,10 +899,7 @@ function paintTo(c, m) {                 // the screen and the PNG export draw t
   const g = c.getContext("2d");
   c.width = m.W; c.height = m.H;
   g.fillStyle = "#000"; g.fillRect(0, 0, m.W, m.H);
-  if (imgEl) { g.imageSmoothingEnabled = false;
-    if (m.fy) { g.save(); g.setTransform(1, 0, 0, -1, 0, 2 * m.oy + unit.height * m.k); }
-    g.drawImage(imgEl, m.ox, m.oy, unit.width * m.k, unit.height * m.k);
-    if (m.fy) g.restore(); }
+  MescIO.image.drawFrame(g, imgEl, m, unit.width, unit.height);
   overlay(g, m);
 }
 function overlay(g, m) {
@@ -1033,9 +1029,7 @@ function exportTracePng() {
               exportName([FILE.file.replace(/\.mesc$/i, ""), unit.name, "traces", V.signal]));
 }
 function imgPoint(ev) {
-  const r = $("stage").getBoundingClientRect(), m = mapping();
-  const y = (ev.clientY - r.top - m.oy) / m.k;
-  return [(ev.clientX - r.left - m.ox) / m.k, m.fy ? unit.height - y : y];
+  return MescIO.image.toImage(ev.clientX, ev.clientY, $("stage").getBoundingClientRect(), mapping(), unit.height);
 }
 /* Every resize goes one way: the stage, the trace strip, a splitter being dragged. One observer
    watches both boxes and redraws each view once per frame; there used to be three observers on
@@ -1194,7 +1188,7 @@ function togglePlay() {
   showFrames(); $("playBtn").textContent = "❚❚";
   const [a, b] = V.traceZoom || [0, unit.frames - 1];
   playing = setInterval(() => {
-    if (frameInFlight) return;                    // the disk sets the pace, not the timer
+    if (frameLoader.busy) return;                 // the disk sets the pace, not the timer
     V.frame = V.frame + 1 > b ? a : V.frame + 1;
     $("frame").value = V.frame; draw(); plotTraces();
   }, 40);

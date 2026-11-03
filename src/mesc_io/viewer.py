@@ -745,6 +745,10 @@ class _Handler(BaseHTTPRequestHandler):
             # empty unless someone marked points on the rig — and it is not JSON.
             if isinstance(v, h5py.Empty):
                 return None
+            # a numpy scalar (a bool, an int64, a float32) is not JSON either; a .mesc rarely has
+            # one, a pipeline's master file (np.bool_ `is_ignored`) does
+            if isinstance(v, np.generic) and not isinstance(v, (np.bytes_, np.str_)):
+                return v.item()
             if isinstance(v, bytes):
                 return v.decode("utf-8", "replace").rstrip("\x00")
             if isinstance(v, np.ndarray):

@@ -41,6 +41,8 @@ def _toy(path, raw):
         d = f.create_dataset("frames/MUnit_0/Channel_0", data=((raw.astype(np.int32) - 786) // 2).astype(np.uint16))
         d.attrs["conversion"], d.attrs["offset"] = 2.0, 0.0
         f["frames/MUnit_0"].attrs["note"] = "toy layout"
+        f["frames/MUnit_0"].attrs["is_ignored"] = np.False_         # a numpy bool, as a master has
+        f["frames/MUnit_0"].attrs["n_frames"] = np.int64(N)
     return path
 
 
@@ -112,7 +114,9 @@ def test_mesc_only_routes_do_not_break(pair):
     assert s == 200 and d["findings"] == [] and d["units"][0]["path"] == "MSession_0/MUnit_0"
     s, _, body = b.handle("GET", "/api/metadata/MSession_0/MUnit_0")
     m = json.loads(body)
-    assert s == 200 and m["n_attributes"] == 1
+    assert s == 200 and m["n_attributes"] == 3, m
+    flat = {k: v for g in m["groups"].values() for k, v in g.items()}
+    assert flat["is_ignored"] is False and flat["n_frames"] == N
     s, _, body = b.handle("GET", "/api/metadata/MSession_0/MUnit_9")
     assert "error" in json.loads(body)
 

@@ -79,7 +79,12 @@ const sandbox = {
 sandbox.window = sandbox; sandbox.globalThis = sandbox;
 process.on("unhandledRejection", (e) => { console.error("unhandled: " + (e && e.stack || e)); process.exit(4); });
 try {
-  vm.runInContext(m[1], vm.createContext(sandbox), { filename: "viewer.html(inline)" });
+  const ctx = vm.createContext(sandbox);
+  // the engine's modules first, in page order, exactly as the browser loads them (<script src="static/…">)
+  const dir = require("node:path").dirname(process.argv[2]);
+  for (const s of src.matchAll(/<script src="static\/([a-z0-9_]+\.js)"><\/script>/g))
+    vm.runInContext(require("node:fs").readFileSync(dir + "/static/" + s[1], "utf8"), ctx, { filename: "static/" + s[1] });
+  vm.runInContext(m[1], ctx, { filename: "viewer.html(inline)" });
 } catch (e) { console.error("threw at load: " + (e && e.stack || e)); process.exit(5); }
 // let boot()'s fetches and the deferred image load resolve, then exercise the wiring a click would
 setTimeout(() => {

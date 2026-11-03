@@ -62,6 +62,7 @@ import base64
 import io
 import json
 import os
+import re
 import sys
 import subprocess
 import shutil
@@ -81,6 +82,10 @@ from . import mosaic as _mosaic
 from . import objects as _objects
 
 PAGE = Path(__file__).resolve().parent / "viewer.html"
+# The engine's browser modules (api.js, later image.js, player.js …), served at /static/<name>.js so a
+# host that mounts the engine under a prefix gets them under the same prefix.
+STATIC = Path(__file__).resolve().parent / "static"
+_STATIC_NAME = re.compile(r"^[a-z][a-z0-9_]*\.js$")
 
 #: The most frames one hover or one frame step may average. 256 frames of a 512×512 field
 #: is 0.5 GB as float64 -- already a lot for a hover; unbounded, a URL could ask for the whole
@@ -331,6 +336,12 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if not parts or parts == ["index.html"]:
                 return self._send(PAGE.read_bytes(), "text/html; charset=utf-8")
+            if len(parts) == 2 and parts[0] == "static":
+                # a fixed folder, a plain file name, nothing else: no "..", no sub-paths
+                f = STATIC / parts[1]
+                if not _STATIC_NAME.match(parts[1]) or not f.is_file():
+                    return self._json({"error": f"no such module: {parts[1]}"}, 404)
+                return self._send(f.read_bytes(), "text/javascript; charset=utf-8")
             if parts == ["favicon.ico"]:
                 # Answer it rather than 404: an unanswered favicon is a console error, and a
                 # console error is exactly what the headless check watches for.

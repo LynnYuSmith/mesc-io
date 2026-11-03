@@ -463,9 +463,12 @@
     <div id="allMetaBody"></div>
   </div>
 </div>
+<script src="static/api.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
+// every engine URL goes through API.url / API.base: "" standalone, "/mesc" when a host mounts the engine
+const API = MescIO.createApi();
 
 /* ------------------------------------------------------------------------------------------
    state — everything the view IS, and therefore everything that is saved. One object, so the
@@ -515,7 +518,7 @@ function saveView() {
   saveT = setTimeout(async () => {
     try {
       const body = JSON.stringify({ ...V, unit: unit ? unit.path : null, tracesH: V.tracesH });
-      const r = await fetch("/api/view", { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+      const r = await fetch(API.base + "/api/view", { method: "PUT", headers: { "Content-Type": "application/json" }, body });
       badge(r.ok ? "saved" : "NOT saved", !r.ok);
     } catch (e) { badge("NOT saved", true); }
   }, 300);
@@ -525,11 +528,11 @@ function badge(text, bad) { const b = $("saveState"); b.textContent = text; b.cl
 /* ------------------------------------------------------------------------------------------
    units + metadata */
 async function boot() {
-  FILE = await (await fetch("/api/file")).json();
+  FILE = await (await fetch(API.base + "/api/file")).json();
   $("fname").textContent = FILE.file;
   $("units").innerHTML = FILE.units.map((u, i) => `
     <div class="u" data-i="${i}">
-      <img src="/api/thumb/${u.path}/0?${fileLut(u, 0) ? `vmin=${fileLut(u, 0)[0]}&vmax=${fileLut(u, 0)[1]}` : "lo=1&hi=99.5"}" alt="">
+      <img src="${API.base}/api/thumb/${u.path}/0?${fileLut(u, 0) ? `vmin=${fileLut(u, 0)[0]}&vmax=${fileLut(u, 0)[1]}` : "lo=1&hi=99.5"}" alt="">
       <div><b>${u.name}</b><span>${u.z_step_um ? `${u.frames} sl · ${+u.z_step_um.toPrecision(3)} µm step` : `${u.frames} fr · ${u.frame_rate_hz ? u.frame_rate_hz.toFixed(1) + " Hz" : "rate ?"}`}</span>
       <i title="${esc(u.comment)}">${esc(u.comment) || "&nbsp;"}</i></div>
     </div>`).join("");
@@ -541,7 +544,7 @@ async function boot() {
     let tries = 0; const src0 = im.src;
     im.onerror = () => { if (++tries > 3) return; setTimeout(() => { im.src = src0 + "&retry=" + tries; }, 800 * tries); };
   });
-  const saved = (await (await fetch("/api/view")).json()).view || {};
+  const saved = (await (await fetch(API.base + "/api/view")).json()).view || {};
   Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW","vol","flipY","mos"]));
   V.vol = volState(V.vol); V.mos = mosState(V.mos);
   if (V.win !== "pct") V.win = "fixed";
@@ -824,8 +827,8 @@ function showWin() {
 }
 function frameUrl(ch = V.ch) {
   const w = winQuery(ch);
-  return V.proj ? `/api/mean/${unit.path}/${ch}?${w}&mode=${V.proj}`
-                : `/api/frame/${unit.path}/${ch}/${V.frame}?${w}&n=${V.avg}`;
+  return V.proj ? `${API.base}/api/mean/${unit.path}/${ch}?${w}&mode=${V.proj}`
+                : `${API.base}/api/frame/${unit.path}/${ch}/${V.frame}?${w}&n=${V.avg}`;
 }
 const shownChans = () => V.overlay && unit.channels.length > 1 ? unit.channels.map((_, k) => k) : [V.ch];
 function draw() {
@@ -1100,7 +1103,7 @@ $("stage").addEventListener("mousemove", ev => {
     const seq = ++hoverSeq;
     const qs = V.proj ? `x=${x}&y=${y}&mode=${V.proj}` : `x=${x}&y=${y}&i=${V.frame}&n=${V.avg}`;   // a projection: which one
     try {
-      const d = await (await fetch(`/api/pixel/${unit.path}/${V.ch}?${qs}`)).json();
+      const d = await (await fetch(`${API.base}/api/pixel/${unit.path}/${V.ch}?${qs}`)).json();
       if (seq !== hoverSeq || d.error) return;
       rd.innerHTML = `x ${x} · y ${y} · <b>${d.value}</b> <span class="faint">(3×3 ${d.patch_mean})</span>`;
     } catch (_) {}
@@ -1249,7 +1252,7 @@ $("allMeta").onclick = async () => {
   $("allMetaBox").hidden = false;
   $("allMetaFilter").focus();
   try {
-    ALL_META = await (await fetch(`/api/metadata/${unit.path}`)).json();
+    ALL_META = await (await fetch(`${API.base}/api/metadata/${unit.path}`)).json();
     if (ALL_META.error) throw new Error(ALL_META.error);
     $("allMetaUnit").textContent = `${unit.path} · ${ALL_META.n_attributes} attributes`;
     renderAllMeta();
@@ -1347,7 +1350,7 @@ const nextName = () => { let n = ROIS.length + 1; while (ROIS.some(r => r.name =
    set over when the field really is the same. */
 async function loadRois() {
   if (!unit) return;
-  const d = await (await fetch(`/api/rois?unit=${encodeURIComponent(unit.path)}`)).json();
+  const d = await (await fetch(`${API.base}/api/rois?unit=${encodeURIComponent(unit.path)}`)).json();
   ROIS = d.rois || []; ROI_UNITS = d.units_with_rois || {}; draft = []; ruler = []; rulerHover = null;
   if (V.sel >= ROIS.length) V.sel = -1;
   renderRois(); renderCopyMenu(); paint();
@@ -1355,7 +1358,7 @@ async function loadRois() {
 }
 async function saveRois() {
   if (!unit) return;
-  try { const r = await fetch("/api/rois", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit: unit.path, rois: ROIS }) });
+  try { const r = await fetch(API.base + "/api/rois", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit: unit.path, rois: ROIS }) });
         badge(r.ok ? "saved" : "ROIs NOT saved", !r.ok);
         ROI_UNITS[unit.path] = ROIS.length; if (!ROIS.length) delete ROI_UNITS[unit.path]; renderCopyMenu(); }
   catch (e) { badge("ROIs NOT saved", true); }
@@ -1370,7 +1373,7 @@ function renderCopyMenu() {
 $("copyFrom").onchange = async () => {
   const src = $("copyFrom").value; if (!src || !unit) return;
   if (ROIS.length && !confirm(`Replace this unit's ${ROIS.length} ROIs with the ${ROI_UNITS[src]} from ${src.split("/").pop()}?`)) { $("copyFrom").value = ""; return; }
-  const r = await fetch("/api/rois/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: src, to: unit.path }) });
+  const r = await fetch(API.base + "/api/rois/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: src, to: unit.path }) });
   if (!r.ok) { badge("copy failed", true); return; }
   $("copyFrom").value = ""; V.sel = -1; TR = null; await loadRois(); plotTraces(); saveView();
 };
@@ -1452,8 +1455,8 @@ function applySize() {
   regen(r); TR = null; renderRois(); paint(); saveRois();
 }
 ["spotR", "rectW", "rectH"].forEach(id => { $(id).onchange = applySize; $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { applySize(); $(id).blur(); } }; });
-$("dlCsv").onclick = e => { e.preventDefault(); if (unit) location.href = `/api/export/traces/${unit.path}/${V.ch}.csv`; };
-$("dlZip").onclick = e => { e.preventDefault(); if (!ROIS.length) { badge("no ROIs to export", true); setTimeout(() => badge("saved"), 1500); return; } location.href = `/api/export/rois.zip?unit=${encodeURIComponent(unit.path)}`; };
+$("dlCsv").onclick = e => { e.preventDefault(); if (unit) location.href = `${API.base}/api/export/traces/${unit.path}/${V.ch}.csv`; };
+$("dlZip").onclick = e => { e.preventDefault(); if (!ROIS.length) { badge("no ROIs to export", true); setTimeout(() => badge("saved"), 1500); return; } location.href = `${API.base}/api/export/rois.zip?unit=${encodeURIComponent(unit.path)}`; };
 $("clearAll").onclick = () => {
   if (!ROIS.length) return;
   if (!confirm(`Remove all ${ROIS.length} ROIs of ${unit.name}? Export first if you want to keep them.`)) return;
@@ -1461,7 +1464,7 @@ $("clearAll").onclick = () => {
 };
 $("pngBtn").onclick = () => (V.vol && V.vol.on ? exportVolPng() : exportImagePng());
 $("dlTracePng").onclick = e => { e.preventDefault(); exportTracePng(); };
-$("dlJson").onclick = e => { e.preventDefault(); location.href = "/api/export/rois.json"; };
+$("dlJson").onclick = e => { e.preventDefault(); location.href = API.base + "/api/export/rois.json"; };
 
 /* ------------------------------------------------------------------------------------------
    traces: full width, stack or overlay, a real grid, zoom in time, the frame cursor */
@@ -1470,7 +1473,7 @@ $("doTraces").onclick = async () => {
   if (!ROIS.length) { $("traceLbl").textContent = "draw something first"; return; }
   $("traceLbl").textContent = "one pass over the recording…";
   const forUnit = unit.path, forCh = V.ch, seq = ++tracesSeq;
-  const d = await (await fetch(`/api/traces/${forUnit}/${forCh}?q=${V.dffQ}&win_s=${V.dffWin}`)).json();
+  const d = await (await fetch(`${API.base}/api/traces/${forUnit}/${forCh}?q=${V.dffQ}&win_s=${V.dffWin}`)).json();
   // the reply may arrive after the unit or channel changed under it, or after a newer request:
   // then it describes something that is no longer on screen and must not be shown as if it were
   if (seq !== tracesSeq || !unit || unit.path !== forUnit || V.ch !== forCh) return;
@@ -1962,7 +1965,7 @@ async function volLoad() {
   volLoading = key; badge(ov ? "loading the stack, two channels…" : "loading the stack…");
   try {
     const one = async ch => {
-      const r = await fetch(`/api/volume/${unit.path}/${ch}?` + (ov ? `${winQuery(ch)}&share=2` : `lo=${V.lo}&hi=${V.hi}`));
+      const r = await fetch(`${API.base}/api/volume/${unit.path}/${ch}?` + (ov ? `${winQuery(ch)}&share=2` : `lo=${V.lo}&hi=${V.hi}`));
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
       return { r, ch, shape: r.headers.get("X-Volume-Shape").split(",").map(Number),
                vox: r.headers.get("X-Voxel-Um").split(",").map(Number), data: new Uint8Array(await r.arrayBuffer()) };
@@ -2892,7 +2895,7 @@ function volObjRegion(o) {                   // the server's region (null while 
   if (c && c !== "pending") return c.error ? null : c;
   if (!c) {
     volObjCache.set(key, "pending");
-    fetch("/api/object", { method: "POST", headers: { "Content-Type": "application/json" },
+    fetch(API.base + "/api/object", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ unit: unit.path, ch: o.ch, q: o.q, frac: o.frac, r: o.r, down: volMeta.down }) })
       .then(r => r.json()).then(d => {
         if (d.error) { volObjCache.set(key, { error: d.error }); badge("object: " + d.error, true); }
@@ -3421,7 +3424,7 @@ function mosImg(url) {
 // one tile's slice as a picture: grey for one channel, green + magenta added for two
 function mosPic(G, u, s) {
   const n = V.mos.slab, q = n > 1 ? `&n=${n}&proj=max` : "&n=1";
-  const chans = mosChans(G), urls = chans.map(ch => `/api/frame/${u.path}/${ch}/${s}?${mosWinQ(G, ch)}${q}`), key = urls.join("|");
+  const chans = mosChans(G), urls = chans.map(ch => `${API.base}/api/frame/${u.path}/${ch}/${s}?${mosWinQ(G, ch)}${q}`), key = urls.join("|");
   if (mosPics.has(key)) return mosPics.get(key);
   const rs = urls.map(mosImg);
   if (!rs.every(r => r.ok)) return null;
@@ -3849,7 +3852,7 @@ $("mosAuto").onclick = async () => {
   b.disabled = true; b.textContent = "stitching…"; mosMsg("matching every overlapping pair in 3D…");
   try {
     const G = mosGeom(), ch = V.mos.chan === "ov" ? 0 : V.mos.chan;
-    const r = await (await fetch("/api/mosaic/register", { method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await (await fetch(API.base + "/api/mosaic/register", { method: "POST", headers: { "Content-Type": "application/json" },
       // the tile held still: the one picked in edit, never just the last one clicked while looking
       body: JSON.stringify({ layout: V.mos.layout, channel: ch, fixed: V.mos.edit && V.mos.sel && G && G.place[V.mos.sel] ? V.mos.sel : null }) })).json();
     if (r.error) throw new Error(r.error);
@@ -3894,7 +3897,7 @@ $("mosTif").onclick = async () => {
   const zr = V.mos.zr || [G.z0, G.z1 - 1];
   b.disabled = true; b.textContent = "writing…";
   try {
-    const r = await (await fetch("/api/mosaic/export", { method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await (await fetch(API.base + "/api/mosaic/export", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ layout: V.mos.layout, channels: mosChans(G), planes: zr, crop: mosCropPx(G) }) })).json();
     if (r.error) throw new Error(r.error);
     mosMsg(`written: ${r.path} (${(r.bytes / 1e6).toFixed(1)} MB, planes ${zr[0]}–${zr[1]}${mosCropPx(G) ? ", the crop" : ", the whole field"})`); badge("TIFF written");

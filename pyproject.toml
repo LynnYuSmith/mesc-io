@@ -49,4 +49,4 @@ where = ["src"]
 # `mesc-io view` fails at the first request with a file-not-found — on someone else's machine,
 # not on the one it was built on.
 [tool.setuptools.package-data]
-mesc_io = ["viewer.html", "third_party/crameri_LICENSE.txt"]
+mesc_io = ["viewer.html", "static/*.js", "third_party/crameri_LICENSE.txt"]

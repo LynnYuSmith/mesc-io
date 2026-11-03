@@ -325,8 +325,18 @@ class _Handler(BaseHTTPRequestHandler):
     def _fail(self, exc: Exception, code: int = 400):
         self._json({"error": f"{type(exc).__name__}: {exc}"}, code)
 
+    #: How to open the recording. None = the `.mesc` at mesc_path. A host serving another kind of
+    #: recording (a master file) passes a zero-argument callable returning an object with
+    #: MescFile's reading interface — usually a MescFile subclass (see MescFile._dataset).
+    _opener = None
+
     def _file(self) -> MescFile:
-        return MescFile(self.mesc_path)
+        op = type(self)._opener
+        return op() if op is not None else MescFile(self.mesc_path)
+
+    @property
+    def _is_mesc(self) -> bool:
+        return type(self)._opener is None
 
     # -- routes -----------------------------------------------------------
     def do_GET(self):                                        # noqa: N802
@@ -772,6 +782,18 @@ class _Handler(BaseHTTPRequestHandler):
                 return "measurement"
             return "other"
 
+        if not self._is_mesc:
+            # another recording: whatever attributes it states for the unit, grouped the same way
+            with self._file() as f:
+                ua = getattr(f, "unit_attributes", None)
+                attrs = ua(unit_path) if ua else {}
+            if attrs is None:
+                return {"error": f"no such unit: {unit_path}"}
+            groups = {}
+            for k in sorted(attrs):
+                groups.setdefault(bucket(k), {})[k] = val(attrs[k])
+            return {"unit": unit_path, "session": {}, "groups": groups, "curves": {},
+                    "n_attributes": sum(len(v) for v in groups.values())}
         with self._file() as f, h5py.File(self.mesc_path, "r") as h5:
             if unit_path not in h5:
                 return {"error": f"no such unit: {unit_path}"}
@@ -806,10 +828,11 @@ class _Handler(BaseHTTPRequestHandler):
                 "z0_um": u.z0_um, "z_origin_um": u.z_origin_um,
                 "info": [list(r) for r in u.info],
             } for u in f.units()]
-        rep = mesc_check(self.mesc_path)
+        # `mesc-io check` reads a .mesc's own attributes; another recording has no such report
+        findings = mesc_check(self.mesc_path).findings if self._is_mesc else []
         return {"file": self.mesc_path.name, "path": str(self.mesc_path), "units": units,
                 "findings": [{"level": x.level, "code": x.code, "message": x.message,
-                              "units": list(x.units)} for x in rep.findings]}
+                              "units": list(x.units)} for x in findings]}
 
     @staticmethod
     def _window(q):

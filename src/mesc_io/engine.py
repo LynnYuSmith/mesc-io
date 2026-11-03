@@ -53,12 +53,16 @@ class _Captured(_viewer._Handler):
 class Engine:
     """One recording (and its ROI file) behind the viewer's routes."""
 
-    def __init__(self, recording, rois: Optional[Path] = None):
+    def __init__(self, recording, rois: Optional[Path] = None, opener=None):
+        """``recording`` names the file (its path is the cache key and the ROI file's default name).
+        ``opener``: how to open it, when it is not a `.mesc` — a zero-argument callable returning an
+        object with MescFile's reading interface (a MescFile subclass over another HDF5 layout)."""
         recording = Path(recording)
         rois = Path(rois) if rois else _viewer.default_rois_path(recording)
         # a subclass per Engine: the viewer keeps the recording, ROI file, cache and locks on the class
         self._cls = type("_EngineHandler", (_Captured,), {
             "mesc_path": recording, "rois_path": rois,
+            "_opener": staticmethod(opener) if opener is not None else None,
             "_lock": threading.Lock(), "_store_lock": threading.Lock(), "_cache": _viewer._BoundedCache()})
         self.recording, self.rois = recording, rois
 

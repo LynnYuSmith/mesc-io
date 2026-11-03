@@ -339,7 +339,7 @@ class MescFile:
         """
         u = self.unit(unit)
         ch = self._channel(u, channel)
-        ds = self._f[f"{u.path}/{ch.dataset}"]
+        ds = self._dataset(u, ch)
         if max_gb is not None:
             self._check_size(ds, frames, reader_units, max_gb, f"{u.path}/{ch.name}")
         block = _read(ds, frames)
@@ -357,7 +357,7 @@ class MescFile:
         """
         u = self.unit(unit)
         ch = self._channel(u, channel)
-        ds = self._f[f"{u.path}/{ch.dataset}"]
+        ds = self._dataset(u, ch)
         if block < 1:
             raise ValueError("block must be at least 1 frame")
         if reader_units:
@@ -366,6 +366,12 @@ class MescFile:
             chunk = _read(ds, slice(start, start + block))
             yield (to_reader_units(chunk, offset=ch.offset, scale=ch.scale)
                    if reader_units else chunk)
+
+    def _dataset(self, u: "Unit", ch: Channel):
+        """The stored frames of one channel. A recording that keeps its frames elsewhere (another
+        HDF5 layout: a pipeline's master file) subclasses MescFile and overrides this and
+        ``units()``; read, iter_frames, the conversion and the size guard are then inherited."""
+        return self._f[f"{u.path}/{ch.dataset}"]
 
     def _channel(self, u: "Unit", channel) -> Channel:
         try:

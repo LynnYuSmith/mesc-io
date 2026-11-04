@@ -353,7 +353,7 @@ def test_the_tiff_is_written_a_plane_at_a_time_not_held_whole(mos, tmp_path):
     assert np.isnan(a).any() and np.isfinite(a).mean() > 0.8      # NaN where no tile, not 0
 
 
-# -- what a real two-layer mosaic (cm027, 2026-10-27) taught ------------------------------------
+# -- what a real two-layer mosaic (October 2026) taught ------------------------------------------------
 
 def _edited(src, dst, edit):
     """A copy of the synthetic mosaic with some unit attributes changed."""

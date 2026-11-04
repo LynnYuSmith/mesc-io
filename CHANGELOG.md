@@ -57,7 +57,7 @@
   stand 1.5× above the best match elsewhere (`ambiguous` otherwise); the search reaches ±25 µm (the
   stage was ~20 µm off); narrow overlaps are not reduced; loops are checked with a z tolerance of
   6 µm, a two-photon focus being several times longer in z. On three October mosaics: 20, 14 and 22
-  links used (cm027: 10 before, seven tiles left unjoined); every tile with a neighbour joined.
+  links used (one of them: 10 before, seven tiles left unjoined); every tile with a neighbour joined.
 - **The 3D ruler measures on the plane you chose.** A ruler click puts its point exactly where the
   cursor meets the current plane (the slice selected), with no snap to the brightest voxel; change
   the plane between clicks to measure across depth. The current plane is lit blue in MIP and slab

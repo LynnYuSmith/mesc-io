@@ -540,6 +540,19 @@ def test_a_fixed_window_shows_brightness_and_so_does_the_whole_unit_percentile_w
     assert background(fx9, 9).mean() > background(fx0, 0).mean()
 
 
+def test_a_frame_says_which_window_it_was_drawn_through(server):
+    """X-Window = the floor and ceiling actually used, in reader units: the given one for a fixed
+    window, the whole unit's percentiles for an auto one — and a fixed window of exactly those
+    numbers draws the same picture, so a host can switch auto → fixed without the image jumping."""
+    _, h = _volume(server + "/api/frame/MSession_0/MUnit_0/0/9?vmin=200&vmax=800")
+    assert h["X-Window"] == "200,800"
+    body, h = _volume(server + "/api/frame/MSession_0/MUnit_0/0/9?lo=1&hi=99")
+    lo, hi = (float(v) for v in h["X-Window"].split(","))
+    assert lo < hi
+    same, _ = _volume(server + f"/api/frame/MSession_0/MUnit_0/0/9?vmin={lo!r}&vmax={hi!r}")
+    assert (_decode_grey_png(same).astype(int) - _decode_grey_png(body).astype(int)).__abs__().max() <= 1
+
+
 def test_the_percentile_window_is_the_same_for_every_frame_of_a_unit(server):
     """Scrubbing must not flicker: the same reader value maps to the same grey in every frame."""
     a = _decode_grey_png(get(server + "/api/frame/MSession_0/MUnit_0/0/3?lo=1&hi=99")[0])

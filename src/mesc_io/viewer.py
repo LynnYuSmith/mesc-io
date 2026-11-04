@@ -71,6 +71,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
@@ -311,11 +312,13 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):      # quiet: one line per run, not per request
         pass
 
-    def _send(self, body: bytes, ctype: str, code: int = 200):
+    def _send(self, body: bytes, ctype: str, code: int = 200, headers: Optional[Dict[str, str]] = None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -939,7 +942,9 @@ class _Handler(BaseHTTPRequestHandler):
         if win[0] == "pct":                    # one stretch for the whole recording, not per frame
             # ?win_unit= takes the stretch from another unit: a mosaic's tiles share the first one's
             win = ("fixed", *self._unit_window((q.get("win_unit") or [unit])[0], ch, win[1], win[2], n, op))
-        self._send(_png(img, win), "image/png")
+        # the floor / ceiling actually used, in reader units: a host switching from auto to a fixed window
+        # starts from the picture already on screen (X-Window, as /api/volume sends it)
+        self._send(_png(img, win), "image/png", headers={"X-Window": f"{float(win[1]):.6g},{float(win[2]):.6g}"})
 
     #: How many frames (or n-frame averages) the whole-recording percentile window is taken from.
     PCT_SAMPLE = 64

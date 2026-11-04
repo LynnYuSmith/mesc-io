@@ -10,3 +10,4 @@ dist/
 *_rois.json
 *_view.json
 *.log
+.idea/

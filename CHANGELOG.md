@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-11-04
+
+- **The viewer's engine, mountable in another application.** `mesc_io.engine.Engine(recording, rois=…)`
+  answers the viewer's routes (`/api/frame`, `/api/mean`, `/api/pixel`, `/api/rois`, `/api/traces`, …) as
+  `engine.handle(method, path, body, headers) -> (status, headers, body)`, with its own ROI file, cache
+  and locks; a host server routes a prefix of its own (say `/mesc/`) to it. The viewer's own handler runs
+  on a request held in memory, so the standalone viewer and a mounted engine give the same bytes for the
+  same request (`tests/test_engine.py`).
+- **Over another recording**: `Engine(…, opener=…)` reads through any `MescFile` subclass that points
+  `_dataset` at its frames — a file holding motion-corrected frames in its own layout serves exactly as a
+  .mesc does; routes that only a .mesc can answer stay quiet for it. Metadata with numpy scalars comes
+  out as JSON.
+- **The page's pieces as scripts a host can load**: `static/api.js` (every URL through one base, found
+  from the script's own URL), `static/image.js` (image ↔ screen mapping with the MESc flip, whole-pixel
+  drawing, a one-frame-in-flight loader) and `static/player.js` (playback that waits for the disk, arrow
+  steps, a sliding time window, the averaging clamp). The viewer draws and plays through them.
+- **A frame says which window drew it**: `X-Window: floor,ceiling` in the recording's units on
+  `/api/frame`, so a host switching auto → fixed starts from the picture already on screen.
 
 - **Objects are grown on the recording's own values**, on the server at full resolution
   (`mesc_io.objects.grow`): face neighbours at least a share of the way from the stack's background
@@ -110,6 +127,46 @@
   shift+Esc all. `tests/view_gamma_object_real_chrome.js` checks both on the synthetic stack: the red
   cell's object is centred within 0.1 voxel of (95, 30, 16) at ~86 µm³, a bouton's stays a bouton,
   and at 10 % the axon is taken in only as far as the radius allows.
+
+## 0.4.3 — 2026-10-28
+
+- **No ROIs from the 3D bar.** The 3D toolbar sits inside the image's stage, and a click on its
+  buttons (reset, side y, side x among them) reached the hidden 2D image underneath: a spot ROI was
+  put down there and saved to the ROI file, unseen. While a 3D or XYZ view covers the image, the
+  image's click, press and double-click do nothing, and no button or field ever counts as a click
+  on it. If you used 3D in 0.4.0–0.4.2, look in the ROI list for spots you did not draw.
+- **Backspace and Delete remove an ROI only where ROIs are shown** — not under a 3D or XYZ view,
+  where the selected ROI was deleted without being seen.
+
+## 0.4.2 — 2026-10-28
+
+- **In the overlay each channel has its own ceiling**, by slider or typed as a number in that
+  channel's own units, beside its floor. The overlay hid the ceiling's number: one ceiling for two
+  channels with two windows has no single value in the recording's units. A channel's ceiling
+  carries to one channel and back, as its floor does.
+- The floor's and ceiling's help no longer mention a gamma, which 0.4 does not have.
+
+## 0.4.1 — 2026-10-28
+
+**The 3D view says what it does.** Improvements to what 0.4.0 has; nothing new besides.
+
+- **The 3D ruler measures on the plane you chose.** A ruler click puts its point exactly where the
+  cursor meets the current plane (the slice selected by the slider or the XYZ crosshair), with no
+  snap to the brightest voxel along the ray; change the plane between clicks to measure across
+  depth, Δz from the planes chosen. A click off the plane puts nothing down and says so.
+- **The current plane is lit blue in MIP and slab views too**, not only in glass: a pixel whose
+  brightest voxel lies on the selected plane is blue.
+- **Floor and ceiling only decide what is shown.** They were also the black and white points, so
+  moving either rescaled the brightness of every voxel between them. Brightness now comes from the
+  window (contrast) and gain alone; below the floor a voxel is not drawn, above the ceiling (when it
+  cuts) neither, and the rest keeps its grey. The ceiling's toggle reads "ceiling: cut / off".
+- **One floor per channel.** A floor set for a channel in the overlay was a separate setting from the
+  one-channel floor, so leaving the overlay showed a floor nobody had set; it now carries across, and
+  across a switch of channel.
+- **Display modes are transparent.** A click on a 3D or XYZ control that changes something besides
+  itself — the auto floor following the mode, a slab drawing glass as a MIP, a stack reduced further
+  for two channels — says what changed, from what to what, and why, in a note over the view.
+- **The readout over the 3D view no longer swallows clicks** on the stack beneath it.
 
 ## 0.4.0 — 2026-10-27
 

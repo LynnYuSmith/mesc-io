@@ -1,10 +1,12 @@
 # mesc-io
 
-[![tests](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml/badge.svg)](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml) [![PyPI](https://img.shields.io/pypi/v/mesc-io)](https://pypi.org/project/mesc-io/)
+[![tests](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml/badge.svg)](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml) [![PyPI](https://img.shields.io/pypi/v/mesc-io)](https://pypi.org/project/mesc-io/) [![Python](https://img.shields.io/pypi/pyversions/mesc-io)](https://pypi.org/project/mesc-io/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Read Femtonics `.mesc` two-photon recordings in Python — the frames in the units the native
-reader shows, every unit's metadata, an export, a write-back, and a viewer that draws ROIs and
-computes their dF/F.
+Open Femtonics `.mesc` two-photon recordings **without Windows and without MESc**: on macOS,
+Linux or Windows, from Python, the command line or a browser. The frames come out in the units
+the native reader shows, with every unit's metadata. Export to Fiji (which has no `.mesc`
+reader), write processed frames back, motion-correct, and look at it all in a viewer that draws
+ROIs and computes their dF/F.
 
 ![the viewer on a synthetic recording: four spots, three of them blinking, their dF/F below](https://raw.githubusercontent.com/LynnYuSmith/mesc-io/main/docs/viewer.png)
 
@@ -73,59 +75,83 @@ where they are kept and how to share them: [docs/registration.md](docs/registrat
 
 ### The viewer
 
-`mesc-io view` opens the recording in a private browser window: units on the left with a
-thumbnail each and the unit's own metadata (rate, pixel size, the stage position and the
-position from the zero set on the rig); the image in
-the middle — scrub it, average a window of N frames, zoom into a place by dragging a box;
-ROIs on the right (spot, rectangle, polygon; drag to move, type a size); every ROI's time
-course along the bottom, raw or dF/F by our pipeline's method (`mesc_io.dff`, numpy only,
-held against the pipeline's functions in the tests), stacked or overlaid, zoomed by dragging a box. ROIs belong to the
-unit they were drawn on and are saved as you go, in one folder, `~/mesc-viewer/`, never beside
-the raw file; so is the view itself, so reopening the file puts you back where you were.
-A z-stack is shown in slices and microns, with a max projection, a **3D** view you can turn
-(MIP, semi-transparent, or coloured by depth) and **XYZ** orthogonal views through one crosshair.
-With **overlay** on, a two-channel stack is shown in both: green and magenta, each channel through
-its own window and with its own floor, white where both are bright (depth colouring stays one
-channel). In 3D, **point** marks the brightest voxel under a click (numbered, with its µm position,
-slice and each channel's value; also shown in XYZ), **measure** gives the distance between two
-points in µm — shift+click goes on into a path, an axon's length — **box** clips the stack to six
-limits and **slab** draws only a thickness around the current slice, as MIP. **object** grows a
-connected region from a clicked seed (voxels at least a share of its peak, within a radius) and
-gives its volume in µm³, centre, extent and each channel's mean; it is outlined in XYZ. A **γ** per
-channel brightens the dim parts (below 1) or darkens them (above 1) in 3D, XYZ and the 3D PNG; at 1
-the picture is unchanged.
+`mesc-io view` opens the recording in a private browser window:
 
-**surface** in XYZ marks where the tissue begins: a few clicks in the XZ / YZ panes, just above the
-first slice where the label appears, and a surface is fitted through them — flat from one mark, a
-tilted plane from three, a curved one from six spread over the stack (a brain under a window is
-rarely level). It is drawn in the panes, the tilt is given in degrees, and every 3D point and the
-crosshair get their depth below it in µm, into the tissue: the brighter side of the stack, or the
-side you set. **csv** saves the marks, the fit and the points' depths; the marks are kept with the view.
+- **left** — the units, a thumbnail each, and the unit's own metadata (rate, pixel size, the
+  stage position and the position from the zero set on the rig);
+- **middle** — the image: scrub it, average a window of N frames, zoom into a place by dragging a box;
+- **right** — ROIs (spot, rectangle, polygon; drag to move, type a size);
+- **bottom** — every ROI's time course, raw or dF/F by our pipeline's method (`mesc_io.dff`,
+  numpy only, held against the pipeline's functions in the tests), stacked or overlaid, zoomed by
+  dragging a box.
 
-**mosaic** (shown when a file holds two or more z-stacks with a stage position) lays every tile out
-as one field where the stage put it, a plane at a time, with hard seams — each pixel from the tile
-whose centre is nearest, never an average of two places. **auto** stitches it from the overlaps:
-every overlapping pair matched in 3D (x, y and the slice), one correction per tile by least squares,
-each seam labelled with its correlation and what the solve left of it. **edit** moves a tile by hand
-(drag; arrows a pixel, [ ] a slice, h hides; ⌘Z undoes), **flatten** puts every tile's marked surface
-on one plane, double-click opens a tile in XYZ. **crop** + planes from–to + **TIFF** cut a piece out as
-a Fiji hyperstack, placed exactly as on screen; **layout** saves the corrections as JSON. The same is
-in Python: `mesc_io.mosaic.tiles / register / compose / to_tiff`.
+ROIs belong to the unit they were drawn on and are saved as you go, in one folder,
+`~/mesc-viewer/`, never beside the raw file; so is the view itself, so reopening the file puts
+you back where you were.
 
-**ruler** (beside the ROI tools) measures in µm between two clicks on the image; **PNG** saves what
-is on screen for a figure — the image at whole pixels with the ROIs, the ruler, a scale bar and a
-caption, or the 3D view — and **png** beside csv the traces.
+#### Brightness and colour
 
-The picture is drawn in **fixed limits**: by default the display window the recording was
-saved with on the rig (the file's own LUT, typically 0–2000 in reader units), the same for every
-frame, so a frame that is dimmer looks dimmer — bleaching, a change of laser power or a field
+The picture is drawn in **fixed limits**: by default the display window the recording was saved
+with on the rig (the file's own LUT, typically 0–2000 in reader units), the same for every
+frame, so a frame that is dimmer looks dimmer. Bleaching, a change of laser power or a field
 drifting out of focus show while you scrub. Type other limits per unit and channel (they live in
 the view, never in the file; **file** brings the saved ones back), or switch to **auto %**, which
-stretches the recording on percentiles of the whole unit — one window for every frame, so
-scrubbing does not flicker. Each channel
-has a palette: its colour from the file, a single colour, or one of 25 of Fabio Crameri's
-perceptually uniform Scientific colour maps (batlow, oslo, lajolla, vik, roma, …). **Overlay**
-puts all channels in one picture, each through its own limits and colour.
+stretches the recording on percentiles of the whole unit: one window for every frame, so
+scrubbing does not flicker.
+
+Each channel has a palette: its colour from the file, a single colour, or one of 25 of Fabio
+Crameri's perceptually uniform Scientific colour maps (batlow, oslo, lajolla, vik, roma, …).
+**Overlay** puts all channels in one picture, each through its own limits and colour.
+
+#### Z-stacks: 3D and XYZ
+
+A z-stack is shown in slices and microns, with a max projection, a **3D** view you can turn
+(MIP, semi-transparent, or coloured by depth) and **XYZ** orthogonal views through one crosshair.
+
+- **overlay** — a two-channel stack in green and magenta, each channel through its own window
+  and floor, white where both are bright (depth colouring stays one channel);
+- **point** — the brightest voxel under a click: numbered, with its µm position, slice and each
+  channel's value; also shown in XYZ;
+- **measure** — the distance between two points in µm; shift+click goes on into a path, an axon's length;
+- **box** clips the stack to six limits; **slab** draws only a thickness around the current slice, as MIP;
+- **object** — grows a connected region from a clicked seed (voxels at least a share of its
+  peak, within a radius) and gives its volume in µm³, centre, extent and each channel's mean;
+  outlined in XYZ;
+- **γ** per channel brightens the dim parts (below 1) or darkens them (above 1) in 3D, XYZ and
+  the 3D PNG; at 1 the picture is unchanged.
+
+#### Where the tissue begins
+
+**surface** in XYZ: a few clicks in the XZ / YZ panes, just above the first slice where the
+label appears, and a surface is fitted through them — flat from one mark, a tilted plane from
+three, a curved one from six spread over the stack (a brain under a window is rarely level). It
+is drawn in the panes, the tilt is given in degrees, and every 3D point and the crosshair get
+their depth below it in µm, into the tissue: the brighter side of the stack, or the side you
+set. **csv** saves the marks, the fit and the points' depths; the marks are kept with the view.
+
+#### Mosaic
+
+![the mosaic on a synthetic file: six two-channel z-stack tiles stitched from their overlaps, each seam labelled with its correlation](https://raw.githubusercontent.com/LynnYuSmith/mesc-io/main/docs/mosaic.png)
+
+Shown when a file holds two or more z-stacks with a stage position: every tile laid out as one
+field where the stage put it, a plane at a time, with hard seams (each pixel from the tile whose
+centre is nearest, never an average of two places).
+
+- **auto** stitches it from the overlaps: every overlapping pair matched in 3D (x, y and the
+  slice), one correction per tile by least squares, each seam labelled with its correlation and
+  what the solve left of it;
+- **edit** moves a tile by hand (drag; arrows a pixel, [ ] a slice, h hides; ⌘Z undoes);
+- **flatten** puts every tile's marked surface on one plane; double-click opens a tile in XYZ;
+- **crop** + planes from–to + **TIFF** cut a piece out as a Fiji hyperstack, placed exactly as
+  on screen; **layout** saves the corrections as JSON.
+
+The same is in Python: `mesc_io.mosaic.tiles / register / compose / to_tiff`.
+
+#### Measuring and figures
+
+**ruler** (beside the ROI tools) measures in µm between two clicks on the image. **PNG** saves
+what is on screen for a figure: the image at whole pixels with the ROIs, the ruler, a scale bar
+and a caption, or the 3D view. **png** beside csv saves the traces.
 
 Layout and decisions: [docs/viewer_design.md](docs/viewer_design.md).
 

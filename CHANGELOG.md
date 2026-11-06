@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 — 2026-11-06
 
 - `frame_times`: a channel with no `Channel_N_Name` took the first unnamed curve (an empty name matched an empty
   name), so channel 1 could get channel 0's stamps; unnamed channels now take their curve by position.

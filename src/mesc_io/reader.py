@@ -150,6 +150,10 @@ class Channel:
     #: The channel's display colour from the same LUT (``Channel_N_LUT_VecColors``, the top
     #: colour as 0xRRGGBB), e.g. "#00ff00" for green. None when absent or black.
     colour: Optional[str] = None
+    #: The valid stored range ``(Channel_N_Conversion_LowerLimit…, …UpperLimit…)`` that MESc
+    #: clamps the raw integers to before scaling. None when the file states none. Usually the
+    #: whole uint16 range, which makes the clamp a no-op.
+    limits: Optional[Tuple[float, float]] = None
 
     @property
     def dataset(self) -> str:
@@ -221,6 +225,17 @@ class Unit:
 
 def _attr(attrs, name):
     return attrs[name] if name in attrs else None
+
+
+def _conversion_limits(a, cn: str) -> Optional[Tuple[float, float]]:
+    """The channel's raw clamp range. The Uint16 pair is the one in the stored integers' own
+    terms; the Double pair (same values in every file seen) is the fallback."""
+    for kind in ("Uint16", "Double"):
+        lo = _float_or_none(_attr(a, f"{cn}_Conversion_LowerLimit{kind}"))
+        hi = _float_or_none(_attr(a, f"{cn}_Conversion_UpperLimit{kind}"))
+        if lo is not None and hi is not None:
+            return (lo, hi)
+    return None
 
 
 def _lut_bounds(value) -> Optional[Tuple[float, float]]:
@@ -346,7 +361,7 @@ class MescFile:
         if not reader_units:
             return block
         self._warn_unconverted(u, ch)
-        return to_reader_units(block, offset=ch.offset, scale=ch.scale)
+        return to_reader_units(block, offset=ch.offset, scale=ch.scale, limits=ch.limits)
 
     def iter_frames(self, unit: str, channel: int = 0, block: int = 500,
                     reader_units: bool = True) -> Iterator[np.ndarray]:
@@ -364,7 +379,7 @@ class MescFile:
             self._warn_unconverted(u, ch)
         for start in range(0, ds.shape[0], block):
             chunk = _read(ds, slice(start, start + block))
-            yield (to_reader_units(chunk, offset=ch.offset, scale=ch.scale)
+            yield (to_reader_units(chunk, offset=ch.offset, scale=ch.scale, limits=ch.limits)
                    if reader_units else chunk)
 
     def _dataset(self, u: "Unit", ch: Channel):
@@ -420,7 +435,8 @@ class MescFile:
                                     scale=1.0 if sc is None else sc,
                                     converted=off is not None and sc is not None,
                                     lut=_lut_bounds(_attr(a, f"{cn}_LUT_VecBounds")),
-                                    colour=_lut_colour(_attr(a, f"{cn}_LUT_VecColors"))))
+                                    colour=_lut_colour(_attr(a, f"{cn}_LUT_VecColors")),
+                                    limits=_conversion_limits(a, cn)))
         first = grp[chan_names[0]]
         n, h, w = (first.shape + (0, 0, 0))[:3]
         # The third axis is TIME in a recording and DEPTH in a z-stack, and the file says

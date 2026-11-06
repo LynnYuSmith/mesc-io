@@ -79,6 +79,7 @@ import numpy as np
 from . import MescFile
 from .check import check as mesc_check
 from .dff import DffParams, compute_dff, darkest_patch
+from .values import clamp_raw
 from . import mosaic as _mosaic
 from . import objects as _objects
 
@@ -175,7 +176,8 @@ def _reduce(f, unit: str, ch: int, frames, op: str = "mean") -> np.ndarray:
     """
     u = f.unit(unit)
     c = u.channels[ch]
-    raw = f.read(unit, channel=ch, frames=frames, reader_units=False, max_gb=None)
+    raw = clamp_raw(f.read(unit, channel=ch, frames=frames, reader_units=False, max_gb=None),
+                    c.limits)
     if op == "max" and c.scale > 0:
         red = raw.max(axis=0).astype(np.float64)
     elif op == "max":                       # a negative scale turns the brightest into the darkest
@@ -248,7 +250,7 @@ def _mask_means(f, unit: str, ch: int, masks, block: int = 200) -> np.ndarray:
         f._warn_unconverted(u, c)
     out = []
     for raw in f.iter_frames(unit, channel=ch, block=block, reader_units=False):
-        g = raw.reshape(len(raw), -1).take(flat_idx, axis=1).astype(np.float64)
+        g = clamp_raw(raw, c.limits).reshape(len(raw), -1).take(flat_idx, axis=1).astype(np.float64)
         out.append(np.add.reduceat(g, starts, axis=1) / sizes)
     means = np.concatenate(out, axis=0).T
     return means * float(c.scale) + float(c.offset)
@@ -890,8 +892,8 @@ class _Handler(BaseHTTPRequestHandler):
                 c = u.channels[ch]
                 vol = np.empty((u.n_frames, hh // k, ww // k), dtype=np.float32)
                 for z0 in range(0, u.n_frames, 64):
-                    block = f.read(unit, channel=ch, frames=slice(z0, z0 + 64), reader_units=False,
-                                   max_gb=None)[:, :hh, :ww]
+                    block = clamp_raw(f.read(unit, channel=ch, frames=slice(z0, z0 + 64),
+                                             reader_units=False, max_gb=None)[:, :hh, :ww], c.limits)
                     m = block.reshape(len(block), hh // k, k, ww // k, k).sum(axis=(2, 4), dtype=np.int64) / (k * k)
                     vol[z0:z0 + len(block)] = m * float(c.scale) + float(c.offset)
                 with self._lock:

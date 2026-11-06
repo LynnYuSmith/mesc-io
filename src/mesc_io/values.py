@@ -20,7 +20,7 @@ import numpy as np
 
 from .errors import MescIOError
 
-__all__ = ["to_reader_units", "from_reader_units", "ConversionError", "ConversionWarning"]
+__all__ = ["to_reader_units", "from_reader_units", "clamp_raw", "ConversionError", "ConversionWarning"]
 
 
 class ConversionError(MescIOError, ValueError):
@@ -31,7 +31,8 @@ class ConversionWarning(UserWarning):
     """A channel states no conversion, so "reader units" are the stored integers unchanged."""
 
 
-def to_reader_units(stored, offset: float, scale: float = 1.0, halved: bool = False):
+def to_reader_units(stored, offset: float, scale: float = 1.0, halved: bool = False,
+                    limits=None):
     """Stored integers -> the values the native reader displays.
 
     `offset` and `scale` come from the channel's `ConversionLinearOffset` /
@@ -40,18 +41,46 @@ def to_reader_units(stored, offset: float, scale: float = 1.0, halved: bool = Fa
     this); the factor is then restored before the offset is applied, because the offset is a
     property of the raw integers and not of a scaled copy.
 
+    `limits` is the channel's valid stored range ``(LowerLimit, UpperLimit)``. MESc clamps the
+    RAW integers to it before scaling, so this does the same. ``None`` or a range that covers
+    the whole stored dtype (0…65535 for uint16, which every file we have checked carries)
+    changes nothing and costs no extra pass.
+
     Returns float64 — the conversion can produce negatives and the caller should see them
-    rather than have them clipped away silently.
+    rather than have them clipped away silently. Only the stated raw limits clip anything.
     """
     # one float64 copy, then in place: ``a * scale + offset`` made two more (18 bytes a pixel at
     # the peak where the read guard counts 8 — a 500-frame 512² block was 2.1 GB)
     a = np.array(stored, dtype=np.float64)
     if halved:
         a *= 2.0
+    if limits is not None and _narrower(limits, np.uint16 if halved else np.asarray(stored).dtype):
+        np.clip(a, float(limits[0]), float(limits[1]), out=a)
     if float(scale) != 1.0:
         a *= float(scale)
     a += float(offset)
     return a
+
+
+def clamp_raw(raw, limits):
+    """The stored integers clamped to a channel's limits, as MESc does before converting.
+
+    For code that reduces the integers (mean, sum) before converting: the clamp must come
+    first, because the mean of clamped values is not the clamped mean. Returns `raw` itself,
+    untouched, when there are no limits or they cover its whole dtype.
+    """
+    if limits is None or not _narrower(limits, np.asarray(raw).dtype):
+        return raw
+    return np.clip(raw, limits[0], limits[1]).astype(np.asarray(raw).dtype, copy=False)
+
+
+def _narrower(limits, dtype) -> bool:
+    """True when `limits` cut into the values `dtype` can hold (so clamping can change data)."""
+    lo, hi = float(limits[0]), float(limits[1])
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        return lo > info.min or hi < info.max
+    return np.isfinite(lo) or np.isfinite(hi)
 
 
 def from_reader_units(values, offset: float, scale: float = 1.0, dtype=np.uint16,
@@ -61,6 +90,9 @@ def from_reader_units(values, offset: float, scale: float = 1.0, dtype=np.uint16
     This is the direction that writes back into a file, so it clips to the target dtype's
     range by default: a value outside it means the data is not what this conversion describes,
     and silently wrapping around would corrupt the file.
+
+    Values that `to_reader_units` clamped to a channel's limits cannot be recovered: the inverse
+    returns the limit, as MESc itself would show it.
     """
     if float(scale) == 0.0:
         raise ConversionError("conversion scale is zero — cannot invert")

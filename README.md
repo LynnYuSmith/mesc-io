@@ -181,9 +181,7 @@ read as stacks, safe write-back into a copy of the `.mesc`, export to Fiji, and 
 **Not handled yet.** The PMT A/D inversion is a recording setting (`ad_invert` in the unit's
 `MeasurementParamsXML`, next to the A/D offsets; added in MESc 3.5.7). mesc-io has been tested on files recorded
 with `ad_invert = 1`, where its values match what MESc shows; a file recorded with `ad_invert = 0` has not been
-tested (some readers apply `65535 − x` by hand). Each channel's conversion limits (`LowerLimit…`/`UpperLimit…`, which MESc
-clamps the raw values to before scaling) are not applied yet; this matters only when they are narrower than
-0–65535. Files written by MES 7 or older (`.mes`) are a different format and are not read.
+tested (some readers apply `65535 − x` by hand). Files written by MES 7 or older (`.mes`) are a different format and are not read.
 
 ## Development
 

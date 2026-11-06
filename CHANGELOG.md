@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+- Reader units now apply each channel's conversion limits the way MESc does: the raw integers are clamped to
+  `Channel_N_Conversion_LowerLimit…`/`UpperLimit…` (the Uint16 pair, else the Double pair) before scale + offset.
+  `Channel.limits` carries them; `clamp_raw` is exported for code that averages the integers before converting
+  (the viewer's mean/max images, its z-stack volumes and object growth now clamp first, since the mean of clamped
+  values is not the clamped mean). Limits covering the whole stored range (0–65535, every file seen so far) change
+  nothing and add no pass over the data: values are bitwise the same as 0.5.1 on such files.
 - README: the PMT inversion is the recording's `ad_invert` setting (tested with 1), not a property of the stored
-  data; the 0.5.1 wording was wrong. The conversion limits that MESc clamps to are named as not applied yet. The
+  data; the 0.5.1 wording was wrong. The
   README describes the tool on its own terms: the dF/F method and the registration defaults are stated directly.
 
 ## 0.5.1 — 2026-11-06

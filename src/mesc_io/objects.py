@@ -14,6 +14,8 @@ from typing import Dict, Optional, Sequence
 
 import numpy as np
 
+from .values import clamp_raw
+
 #: The most voxels an object may take before the growth stops (and says so).
 MAX_VOXELS = 2_000_000
 #: The background: this low percentile of the channel, from a sample spread over the whole stack.
@@ -24,7 +26,8 @@ def background(mesc, unit: str, channel: int) -> float:
     """The channel's background in reader units: a low percentile of every 4th slice, row and column."""
     u = mesc.unit(unit)
     c = u.channels[channel]
-    raw = mesc.read(unit, channel=channel, frames=list(range(0, u.n_frames, 4)), reader_units=False, max_gb=None)
+    raw = clamp_raw(mesc.read(unit, channel=channel, frames=list(range(0, u.n_frames, 4)), reader_units=False,
+                              max_gb=None), c.limits)
     v = np.percentile(np.asarray(raw)[:, ::4, ::4], BG_PERCENTILE)
     return float(v) * float(c.scale) + float(c.offset)
 
@@ -59,7 +62,8 @@ def grow(mesc, unit: str, channel: int, seed: Sequence[int], frac: float, r_um: 
     z0, z1 = max(0, z - rz), min(D, z + rz + 1)
     y0, y1 = max(0, y - ry), min(H, y + ry + 1)
     x0, x1 = max(0, x - rx), min(W, x + rx + 1)
-    raw = np.asarray(mesc.read(unit, channel=channel, frames=list(range(z0, z1)), reader_units=False, max_gb=None))
+    raw = clamp_raw(np.asarray(mesc.read(unit, channel=channel, frames=list(range(z0, z1)), reader_units=False,
+                                         max_gb=None)), c.limits)
     vol = raw[:, y0:y1, x0:x1].astype(np.float64) * sc + off
     # the peak: the brightest of the seed's 3×3×3 (the seed itself on a tie)
     sz, sy, sx = z - z0, y - y0, x - x0
@@ -104,7 +108,7 @@ def grow(mesc, unit: str, channel: int, seed: Sequence[int], frac: float, r_um: 
         cc = u.channels[ch]
         r_ = raw if ch == channel else np.asarray(mesc.read(unit, channel=ch, frames=list(range(z0, z1)),
                                                              reader_units=False, max_gb=None))
-        v = r_[:, y0:y1, x0:x1][reg].astype(np.float64) * float(cc.scale) + float(cc.offset)
+        v = clamp_raw(r_[:, y0:y1, x0:x1][reg], cc.limits).astype(np.float64) * float(cc.scale) + float(cc.offset)
         means.append({"ch": ch, "v": float(v.mean())})
     k = max(1, int(down))
     Hy, Wx = H // k, W // k

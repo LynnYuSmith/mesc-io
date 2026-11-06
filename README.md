@@ -72,8 +72,7 @@ mesc-io register recording.mesc out.mesc --preset soma     # use it; a flag stil
 ```
 
 Needs `pip install "mesc-io[register]"`. The defaults are Suite2p non-rigid registration with
-64-px blocks, `maxregshift` 0.1 and a non-rigid cap of 3 px, the settings of our lab's
-(private) calcium-imaging pipeline, which they reproduce; z-stacks and units too short to
+64-px blocks, `maxregshift` 0.1 and a non-rigid cap of 3 px; z-stacks and units too short to
 register are skipped and said so. Groups, presets, where they are kept and how to share them: [docs/registration.md](docs/registration.md).
 
 ### The viewer
@@ -85,9 +84,9 @@ Firefox or Edge (or Brave or Chromium), otherwise the default browser, and it sa
   stage position and the position from the zero set on the rig);
 - **middle** — the image: scrub it, average a window of N frames, zoom into a place by dragging a box;
 - **right** — ROIs (spot, rectangle, polygon; drag to move, type a size);
-- **bottom** — every ROI's time course, raw or dF/F by our lab's pipeline's method (`mesc_io.dff`,
-  numpy only; checked against that (private) pipeline by tests that run where it is
-  installed and are skipped in CI), stacked or overlaid, zoomed by
+- **bottom** — every ROI's time course, raw or dF/F (`mesc_io.dff`, numpy only: dark
+  current and a fitted darkest-patch background removed, then a rolling-quantile baseline, q = 0.3 over 60 s),
+  stacked or overlaid, zoomed by
   dragging a box.
 
 ROIs belong to the unit they were drawn on and are saved as you go, in one folder,
@@ -175,16 +174,16 @@ and [NeuroConv](https://github.com/catalystneuro/neuroconv) (`FemtonicsImagingEx
 [Suite2p](https://github.com/MouseLand/suite2p) reads `.mesc` as HDF5 through `h5py_key`;
 [FIMAS](https://github.com/zhengkaiyu/FIMAS) (MATLAB) applies the channel conversion and tells time series from
 z-stacks; and Femtonics' own [FemtoAPI](https://github.com/Femtonics/FemtoAPI) reads and writes everything through
-a running, licensed MESc. The open Python readers we know of return the stored integers. mesc-io adds, without
+a running, licensed MESc. The other open Python readers return the stored integers. mesc-io adds, without
 MESc installed: frames in the units MESc shows (each channel's conversion, including the PMT offset), z-stacks
 read as stacks, safe write-back into a copy of the `.mesc`, export to Fiji, and the browser viewer with mosaics.
 
 **Not handled yet.** The PMT A/D inversion is a recording setting (`ad_invert` in the unit's
-`MeasurementParamsXML`, next to the A/D offsets; added in MESc 3.5.7). All our files were recorded with
-`ad_invert = 1`, and their values match what MESc shows; a file recorded with `ad_invert = 0` has not been tested
-(some readers apply `65535 − x` by hand). Each channel's conversion limits (`LowerLimit…`/`UpperLimit…`, which MESc
-clamps the raw values to before scaling) are not applied yet; in our files they span the whole 0–65535 range, so
-nothing changes. Files written by MES 7 or older (`.mes`) are a different format and are not read.
+`MeasurementParamsXML`, next to the A/D offsets; added in MESc 3.5.7). mesc-io has been tested on files recorded
+with `ad_invert = 1`, where its values match what MESc shows; a file recorded with `ad_invert = 0` has not been
+tested (some readers apply `65535 − x` by hand). Each channel's conversion limits (`LowerLimit…`/`UpperLimit…`, which MESc
+clamps the raw values to before scaling) are not applied yet; this matters only when they are narrower than
+0–65535. Files written by MES 7 or older (`.mes`) are a different format and are not read.
 
 ## Development
 

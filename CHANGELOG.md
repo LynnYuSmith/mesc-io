@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- README: the PMT inversion is the recording's `ad_invert` setting (all our files: 1), not a property of
-  the stored data; the 0.5.1 wording ("our files are not inverted") was wrong. The conversion limits that MESc
-  clamps to are named as not applied yet.
+- README: the PMT inversion is the recording's `ad_invert` setting (tested with 1), not a property of the stored
+  data; the 0.5.1 wording was wrong. The conversion limits that MESc clamps to are named as not applied yet. The
+  README describes the tool on its own terms: the dF/F method and the registration defaults are stated directly.
 
 ## 0.5.1 — 2026-11-06
 

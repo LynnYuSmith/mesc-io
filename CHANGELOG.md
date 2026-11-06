@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 — 2026-11-06
 
 - ROIs drawn on the rig: `MescFile.rig_rois(unit)` decodes the ROI list MESc saves in `ViewerParamsXML` (base64
   Qt `QDataStream`, decoded from the public Qt format) into `RigRoi`s: label, colour, z planes, vertices in µm and

@@ -1,9 +1,10 @@
 """Read Femtonics `.mesc` two-photon recordings, in the units the native reader shows."""
 from .errors import MescIOError
 from .reader import Channel, MescError, MescFile, Unit
+from .rig_rois import RigRoi, RigRoiWarning
 from .values import ConversionError, ConversionWarning, InvertWarning, clamp_raw, from_reader_units, to_reader_units
 
 __version__ = "0.5.1"
-__all__ = ["MescFile", "Unit", "Channel", "MescError", "MescIOError",
+__all__ = ["MescFile", "Unit", "Channel", "RigRoi", "RigRoiWarning", "MescError", "MescIOError",
            "to_reader_units", "from_reader_units", "clamp_raw", "ConversionError", "ConversionWarning", "InvertWarning",
            "__version__"]

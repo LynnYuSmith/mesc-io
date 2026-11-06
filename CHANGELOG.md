@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- ROIs drawn on the rig: `MescFile.rig_rois(unit)` decodes the ROI list MESc saves in `ViewerParamsXML` (base64
+  Qt `QDataStream`, decoded from the public Qt format) into `RigRoi`s: label, colour, z planes, vertices in µm and
+  in pixels (centre of the first pixel = 0), in drawing order. The ROI key is found directly, and an ROI with an
+  unknown field is skipped by its stated length with a `RigRoiWarning`, so one odd record never hides the rest.
+  `mesc-io rig-rois FILE [--unit U] [--out x.json|x.zip]` lists or exports them (ImageJ `.zip` for Fiji).
 - Per-frame hardware stamps: `MescFile.frame_times(unit, channel)` returns the stamp closing each frame, in
   seconds (from the channel's `Curve_N`, found by name; the end-of-acquisition stamp dropped; None for z-stacks),
   and `frame_stalls` lists pauses (interval > 3× median). `check` notes them as `acquisition-pause`. On the

@@ -38,6 +38,10 @@ with MescFile("recording.mesc") as f:
     f.frame_stalls("MUnit_0")                          # [(frame, seconds lost), ...]
 ```
 
+`f.rig_rois("MUnit_0")` returns the ROIs drawn on the unit in MESc. MESc saves them in the unit's
+`ViewerParamsXML` attribute, which is not XML but a base64 Qt `QDataStream`; mesc-io decodes the ROI list from the
+public Qt serialisation format and gives each ROI's vertices in µm (field coordinates, as stored) and in pixels.
+
 `frame_times` reads the per-frame stamps MESc records (`Curve_N`, clock ticks). They are the real times:
 the nominal period leaves out pauses in the acquisition (≈0.6 s after the first dark frames, in most of the
 recordings tested) and is slightly off. Z-stacks have no stamps (None).
@@ -50,6 +54,7 @@ more than one session is refused, not resolved to the first; `MSession_1/MUnit_0
 ```
 mesc-io info      recording.mesc                            # units, rates, pixel sizes
 mesc-io check     recording.mesc                            # what the file disagrees with itself about
+mesc-io rig-rois  recording.mesc --out rois.zip             # ROIs drawn in MESc, for Fiji (or .json)
 mesc-io export    recording.mesc MUnit_0 u0.h5              # or u0.tif — a Fiji hyperstack
 mesc-io export    recording.mesc all out_folder --tiff      # every unit, one .tif each
 mesc-io writeback recording.mesc out.mesc MUnit_0 u0.h5     # processed frames back in

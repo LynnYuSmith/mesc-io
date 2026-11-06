@@ -440,6 +440,22 @@ class MescFile:
                       "as they are", RuntimeWarning, stacklevel=2)
         return t
 
+    def rig_rois(self, unit: str) -> List["RigRoi"]:
+        """The ROIs drawn on this unit in MESc on the rig (saved in ``ViewerParamsXML``), with
+        their vertices in µm and in pixels. ``[]`` when none were saved. See `mesc_io.rig_rois`."""
+        from .rig_rois import decode_rig_rois
+        u = self.unit(unit)
+        try:
+            a = self._f[u.path].attrs
+        except KeyError:
+            return []
+        axes = []
+        for ax in "XY":
+            off = _float_or_none(_attr(a, f"{ax}AxisConversionConversionLinearOffset"))
+            sc = _float_or_none(_attr(a, f"{ax}AxisConversionConversionLinearScale"))
+            axes.append((off, sc) if off is not None and sc else None)
+        return decode_rig_rois(_attr(a, "ViewerParamsXML"), axes[0], axes[1], where=u.path)
+
     def frame_stalls(self, unit: str, channel: int = 0, factor: float = 3.0) -> List[Tuple[int, float]]:
         """Pauses in the acquisition: ``[(frame, seconds), ...]`` for every frame whose interval
         to the previous stamp exceeds `factor` × the median interval. ``frame`` is the first

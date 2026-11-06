@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
+
+import numpy as np
 
 from . import __version__
 from .errors import MescIOError
@@ -36,6 +39,54 @@ def _info(args) -> int:
             px = f"{u.pixel_size_um:.4f} um" if u.pixel_size_um else "unknown"
             print(f"  {u.path:<16}{u.n_frames:>8}{f'{u.height}x{u.width}':>12}"
                   f"{rate:>11}{px:>11}  {u.comment[:44]}")
+    return 0
+
+
+def _rig_rois(args) -> int:
+    with MescFile(args.file) as f:
+        units = [u for u in f.units() if args.unit in (None, u.name, u.path)]
+        if args.unit and not units:
+            print(f"no unit {args.unit!r} in {Path(args.file).name}", file=sys.stderr)
+            return 2
+        found = [(u, r) for u in units for r in f.rig_rois(u.path)]
+    if args.out is None:
+        print(f"{Path(args.file).name}: {len(found)} ROI(s) drawn on the rig")
+        for u, r in found:
+            ring = r.polygon_px
+            if ring is not None and len(ring) > 1 and np.allclose(ring[0], ring[-1]):
+                ring = ring[:-1]                     # a closed polygon repeats its first vertex
+            c = ring.mean(axis=0) if ring is not None and len(ring) else None
+            where = f"centre x={c[0]:.1f} y={c[1]:.1f} px" if c is not None else "no pixel geometry"
+            print(f"  {u.path:<18} {r.label:>4}  {len(r.polygon_um)} vertices  {where}  {r.colour or ''}")
+        return 0
+    out = Path(args.out)
+    if out.suffix.lower() == ".json":
+        payload = [{"unit": u.path, "label": r.label, "colour": r.colour, "uuid": r.uuid,
+                    "first_z": r.first_z, "last_z": r.last_z,
+                    "polygon_um": r.polygon_um.tolist(),
+                    "polygon_px": None if r.polygon_px is None else r.polygon_px.tolist()}
+                   for u, r in found]
+        out.write_text(json.dumps(payload, indent=1))
+    elif out.suffix.lower() == ".zip":
+        try:
+            import roifile
+        except ImportError:
+            print("the ImageJ export needs roifile — pip install mesc-io[imagej]", file=sys.stderr)
+            return 2
+        import zipfile
+        with zipfile.ZipFile(out, "w") as zf:
+            for u, r in found:
+                if r.polygon_px is None:
+                    continue
+                pts = r.polygon_px[:-1] if len(r.polygon_px) > 1 and np.allclose(r.polygon_px[0], r.polygon_px[-1]) \
+                    else r.polygon_px
+                ij = roifile.ImagejRoi.frompoints((pts + 0.5).astype(np.float32))   # pixel corners
+                ij.name = f"{u.name}_{r.label}" if len(units) > 1 else r.label
+                zf.writestr(f"{ij.name}.roi", ij.tobytes())
+    else:
+        print("--out must end in .json or .zip", file=sys.stderr)
+        return 2
+    print(f"wrote {len(found)} ROI(s) to {out}")
     return 0
 
 
@@ -206,6 +257,13 @@ def main(argv=None) -> int:
     p.add_argument("file")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=_info)
+
+    p = sub.add_parser("rig-rois", help="the ROIs drawn on the rig in MESc and saved with each unit")
+    p.add_argument("file")
+    p.add_argument("--unit", default=None, help="one unit (MUnit_3 or MSession_0/MUnit_3); default all")
+    p.add_argument("--out", default=None,
+                   help="write them: .json (µm and pixels) or .zip (ImageJ / Fiji, needs roifile)")
+    p.set_defaults(func=_rig_rois)
 
     p = sub.add_parser("check", help="report what in a .mesc disagrees with itself")
     p.add_argument("file")

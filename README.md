@@ -167,6 +167,23 @@ python tools/make_synthetic.py            # writes synthetic_view.mesc: 3 units,
 mesc-io view synthetic_view.mesc
 ```
 
+## Related tools
+
+A `.mesc` file is HDF5, so several tools open it. [roiextractors](https://github.com/catalystneuro/roiextractors)
+and [NeuroConv](https://github.com/catalystneuro/neuroconv) (`FemtonicsImagingExtractor`,
+`FemtonicsImagingInterface`) convert one unit and channel at a time to NWB;
+[Suite2p](https://github.com/MouseLand/suite2p) reads `.mesc` as HDF5 through `h5py_key`;
+[FIMAS](https://github.com/zhengkaiyu/FIMAS) (MATLAB) applies the channel conversion and tells time series from
+z-stacks; and Femtonics' own [FemtoAPI](https://github.com/Femtonics/FemtoAPI) reads and writes everything through
+a running, licensed MESc. The open Python readers we know of return the stored integers. mesc-io adds, without
+MESc installed: frames in the units MESc shows (each channel's conversion, including the PMT offset), z-stacks
+read as stacks, safe write-back into a copy of the `.mesc`, export to Fiji, and the browser viewer with mosaics.
+
+**Not handled yet.** MESc can store PMT data inverted (an invert flag added in MESc 3.5.7; some readers apply
+`65535 − x` by hand). mesc-io does not look for that flag: our files are not inverted and their values match
+MESc, but an inverted file would read upside down. Files written by MES 7 or older (`.mes`) are a different
+format and are not read.
+
 ## Development
 
 ```

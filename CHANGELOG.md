@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 — 2026-11-06
 
+- **Related tools** in the README: what roiextractors/NeuroConv, Suite2p, FIMAS and FemtoAPI already do
+  with `.mesc`, and what mesc-io adds. **Not handled yet**, said plainly: PMT data stored inverted (the MESc
+  3.5.7 invert flag) is not detected, and MES 7 `.mes` files are not read.
 - **README says only what is true.** The registration defaults are named (Suite2p non-rigid,
   64-px blocks, `maxregshift` 0.1, non-rigid cap 3 px) as the settings of our lab's private
   pipeline; the dF/F comparison tests are said to run only where that pipeline is installed and to

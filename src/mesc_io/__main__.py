@@ -254,7 +254,7 @@ def main(argv=None) -> int:
     p.add_argument("--no-browser", action="store_true",
                    help="do not open a browser; print the address and wait")
     p.add_argument("--rois", default=None,
-                   help="where the drawn regions are kept (default: beside the CWD, never "
+                   help="where the drawn regions are kept (default: ~/mesc-viewer/, never "
                         "beside the raw file — raw data is not ours to add files to)")
     p.set_defaults(func=_view)
 

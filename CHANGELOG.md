@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **README says only what is true.** The registration defaults are named (Suite2p non-rigid,
+  64-px blocks, `maxregshift` 0.1, non-rigid cap 3 px) as the settings of our lab's unpublished
+  pipeline; the dF/F comparison tests are said to run only where that pipeline is installed and to
+  be skipped in CI; the viewer's mosaic TIFF and ImageJ ROI export are said to need `[tiff]` and
+  `[imagej]`; the window is private only when Chrome, Firefox or Edge (or Brave, Chromium) is
+  found, otherwise the default browser; Fiji's generic HDF5 import is said to see only the stored
+  integers; the colour maps are credited as taken via the cmcrameri package (C. Rollo).
+- `mesc-io view --help`: `--rois` defaults to `~/mesc-viewer/` (since 0.3.8), not beside the
+  working directory.
+
 ## 0.5.0 — 2026-11-04
 
 - **The viewer's engine, mountable in another application.** `mesc_io.engine.Engine(recording, rois=…)`

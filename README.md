@@ -17,8 +17,9 @@ pip install mesc-io
 pip install "mesc-io[tiff,imagej]"     # + TIFF export, ImageJ ROI export
 ```
 
-Needs Python 3.9 or newer, numpy and h5py; nothing else for reading and viewing. Motion
-correction (`mesc-io register`) is an extra, `[register]`, and pulls in Suite2p 0.14.
+Needs Python 3.9 or newer, numpy and h5py; nothing else for reading and viewing. In the
+viewer, the mosaic's crop to TIFF needs `[tiff]` and the ImageJ ROI export needs `[imagej]`.
+Motion correction (`mesc-io register`) is an extra, `[register]`, and pulls in Suite2p 0.14.
 
 ## Python
 
@@ -53,7 +54,8 @@ mesc-io view      recording.mesc                            # the recording in a
 
 ### Opening a recording in Fiji
 
-Fiji has no reader for `.mesc` (Bio-Formats lists none for Femtonics). `export … .tif` writes what
+Fiji has no reader for `.mesc` (Bio-Formats lists none for Femtonics), and its generic HDF5
+import sees only the stored integers, without the units or the metadata. `export … .tif` writes what
 Fiji opens with File ▸ Open as a calibrated hyperstack: every channel (`--channel N` for one), in
 composite mode with each channel in its own colour and display range; the frame interval for a
 recording or the slice spacing for a z-stack; x and y pixel sizes in µm; and the unit's comment,
@@ -69,20 +71,23 @@ mesc-io preset save soma --block-size 128 --max-shift-nr 5 # name a set of setti
 mesc-io register recording.mesc out.mesc --preset soma     # use it; a flag still wins
 ```
 
-Needs `pip install "mesc-io[register]"`. The defaults are the calcium-imaging pipeline's own
-correction; z-stacks and units too short to register are skipped and said so. Groups, presets,
-where they are kept and how to share them: [docs/registration.md](docs/registration.md).
+Needs `pip install "mesc-io[register]"`. The defaults are Suite2p non-rigid registration with
+64-px blocks, `maxregshift` 0.1 and a non-rigid cap of 3 px, the settings of our lab's
+(unpublished) calcium-imaging pipeline, which they reproduce; z-stacks and units too short to
+register are skipped and said so. Groups, presets, where they are kept and how to share them: [docs/registration.md](docs/registration.md).
 
 ### The viewer
 
-`mesc-io view` opens the recording in a private browser window:
+`mesc-io view` opens the recording in a browser window: a private one when it finds Chrome,
+Firefox or Edge (or Brave or Chromium), otherwise the default browser, and it says which:
 
 - **left** — the units, a thumbnail each, and the unit's own metadata (rate, pixel size, the
   stage position and the position from the zero set on the rig);
 - **middle** — the image: scrub it, average a window of N frames, zoom into a place by dragging a box;
 - **right** — ROIs (spot, rectangle, polygon; drag to move, type a size);
-- **bottom** — every ROI's time course, raw or dF/F by our pipeline's method (`mesc_io.dff`,
-  numpy only, held against the pipeline's functions in the tests), stacked or overlaid, zoomed by
+- **bottom** — every ROI's time course, raw or dF/F by our lab's pipeline's method (`mesc_io.dff`,
+  numpy only; checked against that (unpublished) pipeline by tests that run where it is
+  installed and are skipped in CI), stacked or overlaid, zoomed by
   dragging a box.
 
 ROIs belong to the unit they were drawn on and are saved as you go, in one folder,
@@ -183,6 +188,6 @@ F. Kamari, for the idea. Claude Code, for the debugging.
 MIT — see [LICENSE](LICENSE).
 
 The viewer's colour maps include Fabio Crameri's Scientific colour maps (v8.0, MIT, © 2020 Fabio
-Crameri; [licence](src/mesc_io/third_party/crameri_LICENSE.txt)). If a figure made with them goes
+Crameri), taken via the cmcrameri package (C. Rollo; [licence](src/mesc_io/third_party/crameri_LICENSE.txt)). If a figure made with them goes
 into a paper, cite: Crameri, F. (2018). *Scientific colour maps*. Zenodo.
 https://doi.org/10.5281/zenodo.1243862

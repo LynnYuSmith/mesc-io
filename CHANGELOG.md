@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Per-frame hardware stamps: `MescFile.frame_times(unit, channel)` returns the stamp closing each frame, in
+  seconds (from the channel's `Curve_N`, found by name; the end-of-acquisition stamp dropped; None for z-stacks),
+  and `frame_stalls` lists pauses (interval > 3× median). `check` notes them as `acquisition-pause`. On the
+  recordings tested most units pause ≈0.6 s at frame 8, which a frame × period clock misses.
 - 8-bit acquisition is flagged: `Unit.acquired_bits` (`Params/BitCompression`, 8 or 16) and `Unit.sample_shift`
   (the PMT's `compression_shift_<bits>bit`; 7 for 8-bit, so single-frame values are multiples of 128). `check`
   adds a note, `8-bit-acquisition`, listing such units. Values are read unchanged.

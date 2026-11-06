@@ -34,7 +34,13 @@ with MescFile("recording.mesc") as f:
     frames = f.read("MUnit_0", reader_units=False)     # the stored integers
     for block in f.iter_frames("MUnit_0", block=500):  # bigger than memory
         ...
+    t = f.frame_times("MUnit_0")                       # hardware stamp per frame, seconds
+    f.frame_stalls("MUnit_0")                          # [(frame, seconds lost), ...]
 ```
+
+`frame_times` reads the per-frame stamps MESc records (`Curve_N`, clock ticks). They are the real times:
+the nominal period leaves out pauses in the acquisition (≈0.6 s after the first dark frames, in most of the
+recordings tested) and is slightly off. Z-stacks have no stamps (None).
 
 `read` refuses over 4 GB by default (`max_gb=None` to override). A unit name that matches in
 more than one session is refused, not resolved to the first; `MSession_1/MUnit_0` always works.

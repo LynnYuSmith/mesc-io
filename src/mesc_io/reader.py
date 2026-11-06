@@ -397,6 +397,62 @@ class MescFile:
             yield (to_reader_units(chunk, offset=ch.offset, scale=ch.scale, limits=ch.limits)
                    if reader_units else chunk)
 
+    def frame_times(self, unit: str, channel: int = 0) -> Optional[np.ndarray]:
+        """The hardware time stamp at the END of each frame, in seconds from the start of the unit.
+
+        MESc records one stamp per frame and channel in ``Curve_N/CurveDataYRawData`` (a curve
+        named after the channel, ``Comment = "INPUT;TIMESTAMP"``), in ticks of the acquisition
+        clock that the curve's own Y conversion turns into milliseconds (2e-5 ms a tick on the
+        files tested, i.e. a 50 MHz clock). The first stamp is about one frame period: it closes
+        frame 0. A curve one sample longer than the movie ends with an end-of-acquisition stamp,
+        which is dropped.
+
+        These are the real times. The nominal period (``frame_rate_hz``) leaves out any pause in
+        the acquisition — on the files tested, most recordings pause ≈0.6 s after the first few
+        dark frames — and runs about 0.04 % slow. `frame_stalls` finds the pauses.
+
+        Returns float64 of length ``n_frames``, or None when the unit has no stamps (z-stacks keep
+        an empty curve) or the file has no curves. A curve shorter than the movie (an aborted
+        recording) is returned as it is, with a warning.
+        """
+        u = self.unit(unit)
+        ch = self._channel(u, channel)
+        try:
+            grp = self._f[u.path]
+        except KeyError:
+            return None
+        curves = sorted((k for k in grp if k.startswith("Curve_")), key=_unit_sort_key)
+        named = [c for c in curves if _text(_attr(grp[c].attrs, "Name"))
+                 == _text(_attr(grp.attrs, f"{ch.name}_Name"))]
+        name = named[0] if named else (curves[ch.index] if ch.index < len(curves) else None)
+        if name is None or "CurveDataYRawData" not in grp[name]:
+            return None
+        d = grp[name]["CurveDataYRawData"]
+        if d.shape is None or not d.size:
+            return None
+        ca = grp[name].attrs
+        scale = _float_or_none(_attr(ca, "CurveDataYConversionConversionLinearScale")) or 1.0
+        offset = _float_or_none(_attr(ca, "CurveDataYConversionConversionLinearOffset")) or 0.0
+        t = (np.asarray(d[:], dtype=np.float64).ravel() * scale + offset) / 1000.0
+        if len(t) >= u.n_frames:
+            return t[:u.n_frames]
+        warnings.warn(f"{u.path}/{name} holds {len(t)} stamps for {u.n_frames} frames — returned "
+                      "as they are", RuntimeWarning, stacklevel=2)
+        return t
+
+    def frame_stalls(self, unit: str, channel: int = 0, factor: float = 3.0) -> List[Tuple[int, float]]:
+        """Pauses in the acquisition: ``[(frame, seconds), ...]`` for every frame whose interval
+        to the previous stamp exceeds `factor` × the median interval. ``frame`` is the first
+        frame whose stamp came late (the pause falls before or inside it: on the files tested,
+        frame 8, the last dark frame), ``seconds`` the time lost (interval − median). Empty when the
+        stamps are regular or absent."""
+        t = self.frame_times(unit, channel)
+        if t is None or len(t) < 3:
+            return []
+        dt = np.diff(t)
+        med = float(np.median(dt))
+        return [(int(i) + 1, float(dt[i] - med)) for i in np.flatnonzero(dt > factor * med)]
+
     def _dataset(self, u: "Unit", ch: Channel):
         """The stored frames of one channel. A recording that keeps its frames elsewhere (another
         HDF5 layout: a pipeline's master file) subclasses MescFile and overrides this and

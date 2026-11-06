@@ -126,6 +126,16 @@ def check(path) -> Report:
                 "warn", "no-conversion",
                 f"{len(no_conv)} channel(s) carry no conversion attributes — their values "
                 "cannot be put in reader units and come back as stored", tuple(no_conv)))
+        paused = {u.path: f.frame_stalls(u.name) for u in units if u.frame_rate_hz}
+        paused = {k: v for k, v in paused.items() if v}
+        if paused:
+            lost = [s for v in paused.values() for _, s in v]
+            rep.findings.append(Finding(
+                "note", "acquisition-pause",
+                f"{len(paused)} unit(s) pause during acquisition ({min(lost):.2f}–{max(lost):.2f} s, "
+                "by the frame stamps): frames after a pause are later than frame × period — use "
+                "MescFile.frame_times", tuple(f"{k} @frame {','.join(str(i) for i, _ in v)}"
+                                              for k, v in paused.items())))
         eight = tuple(u.path for u in units if u.acquired_bits == 8)
         if eight:
             rep.findings.append(Finding(

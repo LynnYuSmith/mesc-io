@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- README: the PMT inversion is the recording's `ad_invert` setting (all our files: 1), not a property of
+  the stored data; the 0.5.1 wording ("our files are not inverted") was wrong. The conversion limits that MESc
+  clamps to are named as not applied yet.
+
 ## 0.5.1 — 2026-11-06
 
 - **Related tools** in the README: what roiextractors/NeuroConv, Suite2p, FIMAS and FemtoAPI already do

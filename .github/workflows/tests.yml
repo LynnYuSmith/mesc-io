@@ -11,10 +11,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The floor and the ceiling of what pyproject claims, plus one in the middle, on the
-        # three platforms. A claim about supported versions that nothing checks is a guess.
+        # Every version pyproject claims (and the README badge shows), on the three platforms.
+        # A claim about supported versions that nothing checks is a guess.
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.9", "3.12", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4

@@ -157,7 +157,7 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   if (!(clipped > 240)) fail(`clip should hold the blobs at white: ${clipped}`);
   if (!(cutv < clipped * 0.8)) fail(`cut should remove the blobs: ${cutv} vs clip ${clipped}`);
   await setv("cut", false); await sleep(100);
-  if (await ev("document.getElementById('volCut').textContent") !== "clip") fail("the cut/clip button does not say which");
+  if (await ev("document.getElementById('volCut').textContent") !== "ceiling: off") fail("the ceiling button does not say it is off");
   await setv("ceil", 1); await setv("cut", true); await sleep(200);
   if ((await look()).sig !== full.sig) fail("a ceiling of 1 is not the picture it was before the ceiling existed");
   console.log("  ceiling     :", JSON.stringify({ blob_px: nBlob, at_blobs_clip: +clipped.toFixed(1), at_blobs_cut: +cutv.toFixed(1) }));

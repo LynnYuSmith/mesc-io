@@ -178,10 +178,12 @@ a running, licensed MESc. The other open Python readers return the stored intege
 MESc installed: frames in the units MESc shows (each channel's conversion, including the PMT offset), z-stacks
 read as stacks, safe write-back into a copy of the `.mesc`, export to Fiji, and the browser viewer with mosaics.
 
-**Not handled yet.** The PMT A/D inversion is a recording setting (`ad_invert` in the unit's
-`MeasurementParamsXML`, next to the A/D offsets; added in MESc 3.5.7). mesc-io has been tested on files recorded
-with `ad_invert = 1`, where its values match what MESc shows; a file recorded with `ad_invert = 0` has not been
-tested (some readers apply `65535 − x` by hand). Files written by MES 7 or older (`.mes`) are a different format and are not read.
+**Not tested yet.** The PMT A/D inversion is a recording setting (`ad_invert` in the unit's
+`MeasurementParamsXML`, next to the A/D offsets; added in MESc 3.5.7). mesc-io reads it per channel
+(`Channel.ad_invert`) and has been tested on files recorded with `ad_invert = 1`, where its values match what MESc
+shows. A channel recorded with `ad_invert = 0` is read, but with an `InvertWarning` on reads in reader units, and
+`mesc-io check` reports it (`pmt-not-inverted`): those values have not been compared with MESc (some readers apply
+`65535 − x` by hand). Files written by MES 7 or older (`.mes`) are a different format and are not read.
 
 ## Development
 

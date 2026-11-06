@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The PMT A/D inversion flag is read: `Channel.ad_invert` comes from the detector's `ad_invert` in
+  `MeasurementParamsXML` (matched by `channel_name`; None when the file does not say). A channel recorded with 0,
+  the untested case, raises an `InvertWarning` on reads in reader units (the stored integers stay silent and exact),
+  and `check` reports it as `pmt-not-inverted`. The XML parse is one helper now, shared with the stage position.
 - Reader units now apply each channel's conversion limits the way MESc does: the raw integers are clamped to
   `Channel_N_Conversion_LowerLimit…`/`UpperLimit…` (the Uint16 pair, else the Double pair) before scale + offset.
   `Channel.limits` carries them; `clamp_raw` is exported for code that averages the integers before converting

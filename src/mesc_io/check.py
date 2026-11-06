@@ -126,6 +126,14 @@ def check(path) -> Report:
                 "warn", "no-conversion",
                 f"{len(no_conv)} channel(s) carry no conversion attributes — their values "
                 "cannot be put in reader units and come back as stored", tuple(no_conv)))
+        not_inverted = tuple(f"{u.path}/{c.name}" for u in units for c in u.channels
+                             if c.ad_invert == 0)
+        if not_inverted:
+            rep.findings.append(Finding(
+                "warn", "pmt-not-inverted",
+                f"{len(not_inverted)} channel(s) recorded with ad_invert = 0 — reader units are "
+                "tested on ad_invert = 1 only; compare against MESc before trusting them",
+                not_inverted))
         for name, per_unit in sorted(per_channel.items()):
             distinct = set(per_unit.values())
             if len(distinct) > 1:

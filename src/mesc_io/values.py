@@ -20,11 +20,20 @@ import numpy as np
 
 from .errors import MescIOError
 
-__all__ = ["to_reader_units", "from_reader_units", "clamp_raw", "ConversionError", "ConversionWarning"]
+__all__ = ["to_reader_units", "from_reader_units", "clamp_raw", "ConversionError", "ConversionWarning",
+           "InvertWarning"]
 
 
 class ConversionError(MescIOError, ValueError):
     """A conversion cannot be applied — its scale is zero, so it has no inverse."""
+
+
+class InvertWarning(UserWarning):
+    """The channel was recorded with the PMT A/D inversion OFF (``ad_invert = 0``).
+
+    mesc-io's reader units match MESc on files recorded with ``ad_invert = 1``; no file with 0
+    has been checked, so its values may be the wrong way up or on the wrong pedestal. The
+    stored integers (``reader_units=False``) are what the file holds either way."""
 
 
 class ConversionWarning(UserWarning):

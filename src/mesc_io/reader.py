@@ -108,7 +108,7 @@ def _read(ds, frames):
     if arr.dtype == bool:
         return _frames(ds, np.flatnonzero(arr))
     return _frames(ds, [range(n)[int(i)] for i in arr.ravel()])
-from .values import ConversionWarning, to_reader_units
+from .values import ConversionWarning, InvertWarning, to_reader_units
 
 __all__ = ["MescFile", "Unit", "Channel", "MescError"]
 
@@ -154,6 +154,10 @@ class Channel:
     #: clamps the raw integers to before scaling. None when the file states none. Usually the
     #: whole uint16 range, which makes the clamp a no-op.
     limits: Optional[Tuple[float, float]] = None
+    #: The PMT A/D inversion this channel was recorded with (``ad_invert`` of its detector in
+    #: ``MeasurementParamsXML``; MESc ≥ 3.5.7). 1 is the tested case; 0 draws an
+    #: `InvertWarning` on reads in reader units. None when the file does not say.
+    ad_invert: Optional[int] = None
 
     @property
     def dataset(self) -> str:
@@ -361,6 +365,7 @@ class MescFile:
         if not reader_units:
             return block
         self._warn_unconverted(u, ch)
+        self._warn_invert(u, ch)
         return to_reader_units(block, offset=ch.offset, scale=ch.scale, limits=ch.limits)
 
     def iter_frames(self, unit: str, channel: int = 0, block: int = 500,
@@ -377,6 +382,7 @@ class MescFile:
             raise ValueError("block must be at least 1 frame")
         if reader_units:
             self._warn_unconverted(u, ch)
+            self._warn_invert(u, ch)
         for start in range(0, ds.shape[0], block):
             chunk = _read(ds, slice(start, start + block))
             yield (to_reader_units(chunk, offset=ch.offset, scale=ch.scale, limits=ch.limits)
@@ -405,6 +411,15 @@ class MescFile:
                 ConversionWarning, stacklevel=3)
 
     @staticmethod
+    def _warn_invert(u: "Unit", ch: Channel) -> None:
+        if ch.ad_invert == 0:
+            warnings.warn(
+                f"{u.path}/{ch.name} was recorded with ad_invert = 0 (PMT inversion off). mesc-io "
+                "is tested on ad_invert = 1 only: these reader units have not been checked against "
+                "MESc and may be inverted or offset. The stored integers (reader_units=False) are "
+                "exact.", InvertWarning, stacklevel=3)
+
+    @staticmethod
     def _check_size(ds, frames, reader_units, max_gb: float, what: str) -> None:
         n = ds.shape[0] if frames is None else len(range(*frames.indices(ds.shape[0]))) \
             if isinstance(frames, slice) else len(np.atleast_1d(frames))
@@ -426,6 +441,7 @@ class MescFile:
         if not chan_names:
             return None
         a = grp.attrs
+        inverts = _pmt_ad_invert(a)
         channels = []
         for i, cn in enumerate(chan_names):
             off = _float_or_none(_attr(a, f"{cn}_Conversion_ConversionLinearOffset"))
@@ -436,7 +452,8 @@ class MescFile:
                                     converted=off is not None and sc is not None,
                                     lut=_lut_bounds(_attr(a, f"{cn}_LUT_VecBounds")),
                                     colour=_lut_colour(_attr(a, f"{cn}_LUT_VecColors")),
-                                    limits=_conversion_limits(a, cn)))
+                                    limits=_conversion_limits(a, cn),
+                                    ad_invert=inverts.get(_text(_attr(a, f"{cn}_Name")))))
         first = grp[chan_names[0]]
         n, h, w = (first.shape + (0, 0, 0))[:3]
         # The third axis is TIME in a recording and DEPTH in a z-stack, and the file says
@@ -638,16 +655,8 @@ def _stage_position(attrs, attribute: str = "AttributePosition", prefix: str = "
     a µ sign that is not UTF-8. Anything unparseable is None rather than an exception — a viewer
     must open a file whose XML is odd.
     """
-    xml = _attr(attrs, "MeasurementParamsXML")
-    if xml is None:
-        return None
-    if isinstance(xml, (bytes, bytearray)):
-        xml = bytes(xml).decode("latin-1", "replace")
-    elif isinstance(xml, np.ndarray):
-        xml = bytes(int(c) for c in xml.ravel() if 0 < int(c) < 256).decode("latin-1", "replace")
-    try:
-        root = ET.fromstring(str(xml).rstrip("\x00"))
-    except ET.ParseError:
+    root = _measurement_xml(attrs)
+    if root is None:
         return None
     ids = {prefix + "X", prefix + "Y", prefix + "Z"}
     out: Dict[str, float] = {}
@@ -658,6 +667,42 @@ def _stage_position(attrs, attribute: str = "AttributePosition", prefix: str = "
             except (TypeError, ValueError):
                 pass
     return out or None
+
+
+def _measurement_xml(attrs):
+    """The parsed ``MeasurementParamsXML`` of a unit, or None when absent or unparseable.
+    Decoded as latin-1: the block carries a µ sign that is not UTF-8."""
+    xml = _attr(attrs, "MeasurementParamsXML")
+    if xml is None:
+        return None
+    if isinstance(xml, (bytes, bytearray)):
+        xml = bytes(xml).decode("latin-1", "replace")
+    elif isinstance(xml, np.ndarray):
+        xml = (xml.ravel()[0] if xml.dtype.kind == "O" else
+               bytes(int(c) for c in xml.ravel() if 0 < int(c) < 256))
+        if isinstance(xml, (bytes, bytearray)):
+            xml = bytes(xml).decode("latin-1", "replace")
+    try:
+        return ET.fromstring(str(xml).rstrip("\x00"))
+    except ET.ParseError:
+        return None
+
+
+def _pmt_ad_invert(attrs) -> Dict[str, int]:
+    """``{channel_name: ad_invert}`` from the PMT ``Gear`` blocks of ``MeasurementParamsXML``
+    (``<param name="channel_name" value="UG"/> <param name="ad_invert" value="1"/>``)."""
+    root = _measurement_xml(attrs)
+    out: Dict[str, int] = {}
+    if root is None:
+        return out
+    for gear in root.iter("Gear"):
+        p = {e.get("name"): e.get("value") for e in gear.iter("param")}
+        if p.get("channel_name") and p.get("ad_invert") is not None:
+            try:
+                out[p["channel_name"]] = int(float(p["ad_invert"]))
+            except ValueError:
+                pass
+    return out
 
 
 def _unit_sort_key(name: str):

@@ -126,6 +126,14 @@ def check(path) -> Report:
                 "warn", "no-conversion",
                 f"{len(no_conv)} channel(s) carry no conversion attributes — their values "
                 "cannot be put in reader units and come back as stored", tuple(no_conv)))
+        eight = tuple(u.path for u in units if u.acquired_bits == 8)
+        if eight:
+            rep.findings.append(Finding(
+                "note", "8-bit-acquisition",
+                f"{len(eight)} unit(s) acquired at 8 bits (stored as sample << "
+                f"{'/'.join(str(x) for x in sorted({u.sample_shift for u in units if u.acquired_bits == 8}, key=str))}) — "
+                "a single frame has a few dozen grey levels; the offset and any SNR read off it "
+                "are coarse", eight))
         not_inverted = tuple(f"{u.path}/{c.name}" for u in units for c in u.channels
                              if c.ad_invert == 0)
         if not_inverted:

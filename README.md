@@ -183,7 +183,15 @@ read as stacks, safe write-back into a copy of the `.mesc`, export to Fiji, and 
 (`Channel.ad_invert`) and has been tested on files recorded with `ad_invert = 1`, where its values match what MESc
 shows. A channel recorded with `ad_invert = 0` is read, but with an `InvertWarning` on reads in reader units, and
 `mesc-io check` reports it (`pmt-not-inverted`): those values have not been compared with MESc (some readers apply
-`65535 − x` by hand). Files written by MES 7 or older (`.mes`) are a different format and are not read.
+`65535 − x` by hand).
+
+**8-bit acquisition.** A unit acquired at 8 bits (`BitCompression = 8` in `MeasurementParamsXML`) is still stored as
+uint16, each sample shifted up (`compression_shift_8bit`, 7 on the files tested: values are multiples of 128), so
+one frame holds only a few dozen grey levels. The values are read as they are; `Unit.acquired_bits` and
+`Unit.sample_shift` say which mode it was, and `mesc-io check` notes such units (`8-bit-acquisition`), because an
+offset or an SNR read off one of their frames is coarse.
+
+Files written by MES 7 or older (`.mes`) are a different format and are not read.
 
 ## Development
 

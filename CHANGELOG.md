@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 8-bit acquisition is flagged: `Unit.acquired_bits` (`Params/BitCompression`, 8 or 16) and `Unit.sample_shift`
+  (the PMT's `compression_shift_<bits>bit`; 7 for 8-bit, so single-frame values are multiples of 128). `check`
+  adds a note, `8-bit-acquisition`, listing such units. Values are read unchanged.
 - The PMT A/D inversion flag is read: `Channel.ad_invert` comes from the detector's `ad_invert` in
   `MeasurementParamsXML` (matched by `channel_name`; None when the file does not say). A channel recorded with 0,
   the untested case, raises an `InvertWarning` on reads in reader units (the stored integers stay silent and exact),

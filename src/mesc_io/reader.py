@@ -211,6 +211,15 @@ class Unit:
     #: (Item type, Date, Creator … Frame rate, Duration), each value worked out from the
     #: attributes the panel reads. ``()`` when the unit carries none of them.
     info: Tuple[Tuple[str, str], ...] = ()
+    #: The A/D depth the unit was ACQUIRED at (``Params/BitCompression`` in
+    #: ``MeasurementParamsXML``): 16, or 8 — then the uint16 container holds 8-bit samples
+    #: shifted up by `sample_shift`, so a single frame has only a few dozen grey levels and the
+    #: −786-style offset and any SNR read off it mislead. None when the file does not say.
+    acquired_bits: Optional[int] = None
+    #: The left shift applied to each sample before storage in that mode (the PMT's
+    #: ``compression_shift_{8,16}bit``): single-frame values are multiples of ``2**sample_shift``.
+    #: Averaged frames (a z-stack's FrameLoop) are not. None when the file does not say.
+    sample_shift: Optional[int] = None
 
     @property
     def shape(self):
@@ -490,7 +499,8 @@ class MescFile:
                     stage_um=_stage_position(a),
                     stage_rel_um=_stage_position(a, "AttributeRelativePosition", "Slow"),
                     z0_um=z0, z_origin_um=z_origin,
-                    info=_mesc_info(grp, chan_names, z_step))
+                    info=_mesc_info(grp, chan_names, z_step),
+                    **dict(zip(("acquired_bits", "sample_shift"), _acquisition_bits(a))))
 
 
 #: ``ZAxisGeomRole``: 0 is the time axis of a recording, 3 the depth axis of a z-stack.
@@ -703,6 +713,31 @@ def _pmt_ad_invert(attrs) -> Dict[str, int]:
             except ValueError:
                 pass
     return out
+
+
+def _acquisition_bits(attrs) -> Tuple[Optional[int], Optional[int]]:
+    """``(BitCompression, compression_shift_<bits>bit)`` from ``MeasurementParamsXML``."""
+    root = _measurement_xml(attrs)
+    if root is None:
+        return None, None
+    bits = shift = None
+    for p in root.iter("param"):
+        if p.get("name") == "BitCompression":
+            try:
+                bits = int(float(p.get("value")))
+            except (TypeError, ValueError):
+                pass
+            break
+    if bits is not None:
+        for gear in root.iter("Gear"):
+            v = {e.get("name"): e.get("value") for e in gear.iter("param")}.get(f"compression_shift_{bits}bit")
+            if v is not None:
+                try:
+                    shift = int(float(v))
+                except ValueError:
+                    continue
+                break
+    return bits, shift
 
 
 def _unit_sort_key(name: str):

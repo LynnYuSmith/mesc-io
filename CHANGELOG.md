@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `frame_times`: a channel with no `Channel_N_Name` took the first unnamed curve (an empty name matched an empty
+  name), so channel 1 could get channel 0's stamps; unnamed channels now take their curve by position.
+- `mesc-io rig-rois --out x.zip`: ROIs with the same label no longer collide in the zip (Fiji kept one); repeats get
+  `_2`, `_3`, and names across several units carry the session (`MSession_0_MUnit_3_1`).
+- A unit's `MeasurementParamsXML` is parsed once instead of four times: `units()` is back to 0.5.1 speed.
+- Unused imports removed (`viewer`, `presets`); the `RigRoi` annotation in `reader` resolves.
+
 ## 0.6.0 — 2026-11-06
 
 - ROIs drawn on the rig: `MescFile.rig_rois(unit)` decodes the ROI list MESc saves in `ViewerParamsXML` (base64

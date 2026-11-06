@@ -126,3 +126,13 @@ def test_cli_lists_and_exports(tmp_path):
         assert zf.namelist() == ["1.roi"]
     (ij,) = roifile.roiread(str(tmp_path / "r.zip"))
     np.testing.assert_allclose(ij.coordinates().min(axis=0), [97.5, 147.5], atol=1e-4)   # corners
+
+
+def test_the_zip_keeps_every_roi_when_labels_repeat(tmp_path):
+    pytest.importorskip("roifile")
+    recs = [roi_record("1", square(50, 50), order=1), roi_record("1", square(150, 150), order=2)]
+    path = _file(tmp_path, recs)
+    subprocess.run([sys.executable, "-m", "mesc_io", "rig-rois", str(path), "--out", str(tmp_path / "d.zip")],
+                   check=True, capture_output=True)
+    with zipfile.ZipFile(tmp_path / "d.zip") as zf:
+        assert sorted(zf.namelist()) == ["1.roi", "1_2.roi"]

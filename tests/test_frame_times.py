@@ -89,3 +89,21 @@ def test_a_short_curve_is_returned_with_a_warning(tmp_path):
     with MescFile(_file(tmp_path, [("UG", _stamps(N - 5, extra=False)), ("UR", _stamps(N))])) as f:
         with pytest.warns(RuntimeWarning, match="35 stamps for 40 frames"):
             assert len(f.frame_times("MUnit_0")) == 35
+
+
+def test_unnamed_channels_take_their_curves_by_position(tmp_path):
+    # no Channel_N_Name and no curve Name: "" == "" must not hand channel 1 the curve of channel 0
+    path = tmp_path / "unnamed.mesc"
+    with h5py.File(path, "w") as f:
+        u = f.create_group("MSession_0/MUnit_0")
+        for k in range(2):
+            u.create_dataset(f"Channel_{k}", data=np.zeros((N, 2, 2), dtype=np.uint16))
+            u.attrs[f"Channel_{k}_Conversion_ConversionLinearOffset"] = -786.0
+            u.attrs[f"Channel_{k}_Conversion_ConversionLinearScale"] = 1.0
+            c = u.create_group(f"Curve_{k}")
+            c.attrs["CurveDataYConversionConversionLinearScale"] = TICK_MS
+            c.create_dataset("CurveDataYRawData", data=_stamps(N) + 1000 * k)
+        u.attrs["ZAxisConversionConversionLinearScale"] = 16.15278
+    with MescFile(path) as f:
+        d = f.frame_times("MUnit_0", channel=1) - f.frame_times("MUnit_0", channel=0)
+    np.testing.assert_allclose(d, 1000 * TICK_MS / 1000)

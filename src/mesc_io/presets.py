@@ -34,7 +34,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 
 from .errors import MescIOError
 

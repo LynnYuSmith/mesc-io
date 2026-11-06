@@ -25,7 +25,7 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -111,6 +111,9 @@ def _read(ds, frames):
 from .values import ConversionWarning, InvertWarning, to_reader_units
 
 __all__ = ["MescFile", "Unit", "Channel", "MescError"]
+
+if TYPE_CHECKING:                                   # the annotation only; imported lazily at call
+    from .rig_rois import RigRoi
 
 
 class MescError(MescIOError, RuntimeError):
@@ -422,8 +425,9 @@ class MescFile:
         except KeyError:
             return None
         curves = sorted((k for k in grp if k.startswith("Curve_")), key=_unit_sort_key)
-        named = [c for c in curves if _text(_attr(grp[c].attrs, "Name"))
-                 == _text(_attr(grp.attrs, f"{ch.name}_Name"))]
+        want = _text(_attr(grp.attrs, f"{ch.name}_Name"))
+        # an unnamed channel matches by position only: "" == "" would hand every channel curve 0
+        named = [c for c in curves if want and _text(_attr(grp[c].attrs, "Name")) == want]
         name = named[0] if named else (curves[ch.index] if ch.index < len(curves) else None)
         if name is None or "CurveDataYRawData" not in grp[name]:
             return None
@@ -522,7 +526,8 @@ class MescFile:
         if not chan_names:
             return None
         a = grp.attrs
-        inverts = _pmt_ad_invert(a)
+        xml = _measurement_xml(a)              # parsed once, read by the helpers below
+        inverts = _pmt_ad_invert(xml) if xml is not None else {}
         channels = []
         for i, cn in enumerate(chan_names):
             off = _float_or_none(_attr(a, f"{cn}_Conversion_ConversionLinearOffset"))
@@ -568,11 +573,12 @@ class MescFile:
                     pixel_size_y_um=(py if py and py > 0 and px and abs(py - px) > 1e-9
                                      else None),
                     comment=_text(_attr(a, "Comment")), channels=channels,
-                    stage_um=_stage_position(a),
-                    stage_rel_um=_stage_position(a, "AttributeRelativePosition", "Slow"),
+                    stage_um=_stage_position(xml) if xml is not None else None,
+                    stage_rel_um=(_stage_position(xml, "AttributeRelativePosition", "Slow")
+                                  if xml is not None else None),
                     z0_um=z0, z_origin_um=z_origin,
                     info=_mesc_info(grp, chan_names, z_step),
-                    **dict(zip(("acquired_bits", "sample_shift"), _acquisition_bits(a))))
+                    **dict(zip(("acquired_bits", "sample_shift"), _acquisition_bits(xml) if xml is not None else (None, None))))
 
 
 #: ``ZAxisGeomRole``: 0 is the time axis of a recording, 3 the depth axis of a z-stack.
@@ -737,7 +743,7 @@ def _stage_position(attrs, attribute: str = "AttributePosition", prefix: str = "
     a µ sign that is not UTF-8. Anything unparseable is None rather than an exception — a viewer
     must open a file whose XML is odd.
     """
-    root = _measurement_xml(attrs)
+    root = _xml_root(attrs)
     if root is None:
         return None
     ids = {prefix + "X", prefix + "Y", prefix + "Z"}
@@ -749,6 +755,14 @@ def _stage_position(attrs, attribute: str = "AttributePosition", prefix: str = "
             except (TypeError, ValueError):
                 pass
     return out or None
+
+
+def _xml_root(attrs_or_root):
+    """Accept a unit's attributes or an already parsed ``MeasurementParamsXML`` root, so one unit
+    is parsed once however many helpers read it."""
+    if isinstance(attrs_or_root, ET.Element):
+        return attrs_or_root
+    return _measurement_xml(attrs_or_root)
 
 
 def _measurement_xml(attrs):
@@ -773,7 +787,7 @@ def _measurement_xml(attrs):
 def _pmt_ad_invert(attrs) -> Dict[str, int]:
     """``{channel_name: ad_invert}`` from the PMT ``Gear`` blocks of ``MeasurementParamsXML``
     (``<param name="channel_name" value="UG"/> <param name="ad_invert" value="1"/>``)."""
-    root = _measurement_xml(attrs)
+    root = _xml_root(attrs)
     out: Dict[str, int] = {}
     if root is None:
         return out
@@ -789,7 +803,7 @@ def _pmt_ad_invert(attrs) -> Dict[str, int]:
 
 def _acquisition_bits(attrs) -> Tuple[Optional[int], Optional[int]]:
     """``(BitCompression, compression_shift_<bits>bit)`` from ``MeasurementParamsXML``."""
-    root = _measurement_xml(attrs)
+    root = _xml_root(attrs)
     if root is None:
         return None, None
     bits = shift = None

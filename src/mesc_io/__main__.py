@@ -74,6 +74,7 @@ def _rig_rois(args) -> int:
             print("the ImageJ export needs roifile — pip install mesc-io[imagej]", file=sys.stderr)
             return 2
         import zipfile
+        seen = {}
         with zipfile.ZipFile(out, "w") as zf:
             for u, r in found:
                 if r.polygon_px is None:
@@ -81,7 +82,9 @@ def _rig_rois(args) -> int:
                 pts = r.polygon_px[:-1] if len(r.polygon_px) > 1 and np.allclose(r.polygon_px[0], r.polygon_px[-1]) \
                     else r.polygon_px
                 ij = roifile.ImagejRoi.frompoints((pts + 0.5).astype(np.float32))   # pixel corners
-                ij.name = f"{u.name}_{r.label}" if len(units) > 1 else r.label
+                name = f"{u.path.replace('/', '_')}_{r.label}" if len(units) > 1 else (r.label or "roi")
+                seen[name] = seen.get(name, 0) + 1          # Fiji keeps one entry per name
+                ij.name = name if seen[name] == 1 else f"{name}_{seen[name]}"
                 zf.writestr(f"{ij.name}.roi", ij.tobytes())
     else:
         print("--out must end in .json or .zip", file=sys.stderr)

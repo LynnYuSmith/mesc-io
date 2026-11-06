@@ -58,7 +58,6 @@ Bound to 127.0.0.1.
 from __future__ import annotations
 
 import argparse
-import base64
 import io
 import json
 import os

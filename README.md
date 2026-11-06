@@ -73,7 +73,7 @@ mesc-io register recording.mesc out.mesc --preset soma     # use it; a flag stil
 
 Needs `pip install "mesc-io[register]"`. The defaults are Suite2p non-rigid registration with
 64-px blocks, `maxregshift` 0.1 and a non-rigid cap of 3 px, the settings of our lab's
-(unpublished) calcium-imaging pipeline, which they reproduce; z-stacks and units too short to
+(private) calcium-imaging pipeline, which they reproduce; z-stacks and units too short to
 register are skipped and said so. Groups, presets, where they are kept and how to share them: [docs/registration.md](docs/registration.md).
 
 ### The viewer
@@ -86,7 +86,7 @@ Firefox or Edge (or Brave or Chromium), otherwise the default browser, and it sa
 - **middle** — the image: scrub it, average a window of N frames, zoom into a place by dragging a box;
 - **right** — ROIs (spot, rectangle, polygon; drag to move, type a size);
 - **bottom** — every ROI's time course, raw or dF/F by our lab's pipeline's method (`mesc_io.dff`,
-  numpy only; checked against that (unpublished) pipeline by tests that run where it is
+  numpy only; checked against that (private) pipeline by tests that run where it is
   installed and are skipped in CI), stacked or overlaid, zoomed by
   dragging a box.
 

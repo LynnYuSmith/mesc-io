@@ -3,7 +3,7 @@
 ## Unreleased
 
 - **README says only what is true.** The registration defaults are named (Suite2p non-rigid,
-  64-px blocks, `maxregshift` 0.1, non-rigid cap 3 px) as the settings of our lab's unpublished
+  64-px blocks, `maxregshift` 0.1, non-rigid cap 3 px) as the settings of our lab's private
   pipeline; the dF/F comparison tests are said to run only where that pipeline is installed and to
   be skipped in CI; the viewer's mosaic TIFF and ImageJ ROI export are said to need `[tiff]` and
   `[imagej]`; the window is private only when Chrome, Firefox or Edge (or Brave, Chromium) is

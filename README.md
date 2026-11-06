@@ -187,7 +187,8 @@ and [NeuroConv](https://github.com/catalystneuro/neuroconv) (`FemtonicsImagingEx
 z-stacks; and Femtonics' own [FemtoAPI](https://github.com/Femtonics/FemtoAPI) reads and writes everything through
 a running, licensed MESc. The other open Python readers return the stored integers. mesc-io adds, without
 MESc installed: frames in the units MESc shows (each channel's conversion, including the PMT offset), z-stacks
-read as stacks, safe write-back into a copy of the `.mesc`, export to Fiji, and the browser viewer with mosaics.
+read as stacks, the per-frame hardware timestamps, the ROIs drawn on the rig, safe write-back into a copy of the
+`.mesc`, export to Fiji, and the browser viewer with mosaics.
 
 **Not tested yet.** The PMT A/D inversion is a recording setting (`ad_invert` in the unit's
 `MeasurementParamsXML`, next to the A/D offsets; added in MESc 3.5.7). mesc-io reads it per channel

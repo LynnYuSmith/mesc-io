@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.2 — 2026-11-09
+
+- Acquisition parameters from `MeasurementParamsXML`, read from the file rather than from what was typed into the
+  comment: `Unit.laser_pockels` (the Pockels cell's on-intensity), `Unit.pmt_reference_voltage` (`{"UG": 70.0, …}`),
+  `Unit.objective`, and `Unit.acquisition` — every device param, every `Params` entry and every attribute of every
+  stage axis, typed. On the recordings tested, the comment's numbers disagreed with the file on 34 of 413 units.
+- `Unit.info` gains rows in this reader's own words after MESc's: *Stage position (absolute)* and *Stage position
+  from the zero level* (the real stage x, y from `Virt*` / `Slow*`; MESc's "Centroid" x, y come from
+  `GeomTransTransl`, which is 0 in these files), *Objective*, *Pockels cell (on-intensity)*, *PMT reference
+  voltage*, *Acquired bits*.
+
 ## 0.6.1 — 2026-11-06
 
 - `frame_times`: a channel with no `Channel_N_Name` took the first unnamed curve (an empty name matched an empty

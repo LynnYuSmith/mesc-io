@@ -223,6 +223,21 @@ class Unit:
     #: ``compression_shift_{8,16}bit``): single-frame values are multiples of ``2**sample_shift``.
     #: Averaged frames (a z-stack's FrameLoop) are not. None when the file does not say.
     sample_shift: Optional[int] = None
+    #: The Pockels cell's on-intensity the unit was recorded with (``onintensity`` of the
+    #: ``PockelsCell`` device in ``MeasurementParamsXML``) — the laser setting, in the cell's own
+    #: units. Read from the file, not from what was typed into the comment (on our recordings the
+    #: comment disagreed on 34 of 413 units). None when the file does not say.
+    laser_pockels: Optional[float] = None
+    #: Each PMT's reference voltage by channel name (``{"UG": 70.0, "UR": 70.0}``), from the
+    #: ``PMT`` devices of ``MeasurementParamsXML``. None when the file carries no PMT block.
+    pmt_reference_voltage: Optional[Dict[str, float]] = None
+    #: ``Params/objective_name`` (e.g. "obj16x"). None when absent.
+    objective: Optional[str] = None
+    #: Every acquisition parameter of ``MeasurementParamsXML``, parsed and typed:
+    #: ``{"task": str, "devices": {name: {param: value, "type": tag/type}}, "params": {name: value},
+    #: "axes": {axis id: {attribute: value}}}``. Nothing is dropped; empty dicts when the XML is
+    #: missing or unparseable.
+    acquisition: Optional[Dict[str, object]] = None
 
     @property
     def shape(self):
@@ -567,18 +582,23 @@ class MescFile:
                 z0 = float(g[2]) + zoff
             o = _vec(a, "LabelingOriginTransl", 3)
             z_origin = float(o[2]) if o is not None and np.isfinite(o[2]) else None
+        acq = _acquisition(xml)
+        stage_abs = _stage_position(xml) if xml is not None else None
+        stage_rel = _stage_position(xml, "AttributeRelativePosition", "Slow") if xml is not None else None
+        bits = _acquisition_bits(xml) if xml is not None else (None, None)
         return Unit(name=name, session=session, n_frames=int(n), height=int(h), width=int(w),
                     dtype=str(first.dtype), frame_rate_hz=rate, z_step_um=z_step,
                     pixel_size_um=px if px and px > 0 else None,
                     pixel_size_y_um=(py if py and py > 0 and px and abs(py - px) > 1e-9
                                      else None),
                     comment=_text(_attr(a, "Comment")), channels=channels,
-                    stage_um=_stage_position(xml) if xml is not None else None,
-                    stage_rel_um=(_stage_position(xml, "AttributeRelativePosition", "Slow")
-                                  if xml is not None else None),
+                    stage_um=stage_abs, stage_rel_um=stage_rel,
                     z0_um=z0, z_origin_um=z_origin,
-                    info=_mesc_info(grp, chan_names, z_step),
-                    **dict(zip(("acquired_bits", "sample_shift"), _acquisition_bits(xml) if xml is not None else (None, None))))
+                    info=_mesc_info(grp, chan_names, z_step) + _acquisition_rows(acq, stage_abs, stage_rel, bits[0]),
+                    acquired_bits=bits[0], sample_shift=bits[1],
+                    laser_pockels=_pockels_onintensity(acq), pmt_reference_voltage=_pmt_voltages(acq),
+                    objective=(str(acq["params"]["objective_name"]) if "objective_name" in acq["params"] else None),
+                    acquisition=acq)
 
 
 #: ``ZAxisGeomRole``: 0 is the time axis of a recording, 3 the depth axis of a z-stack.
@@ -824,6 +844,78 @@ def _acquisition_bits(attrs) -> Tuple[Optional[int], Optional[int]]:
                     continue
                 break
     return bits, shift
+
+
+def _xml_value(s: Optional[str]):
+    """An XML value typed: int for an integer literal, float when it parses, else the text."""
+    if s is None:
+        return ""
+    try:
+        f = float(s)
+    except ValueError:
+        return s
+    return int(f) if s.strip().lstrip("-").isdigit() else f
+
+
+def _acquisition(attrs_or_root) -> Dict[str, object]:
+    """Every parameter of ``MeasurementParamsXML``: devices (each ``<param>`` of each element under
+    ``Devices``, plus its tag/type), ``Params``, and every attribute of every stage axis."""
+    out: Dict[str, object] = {"task": "", "devices": {}, "params": {}, "axes": {}}
+    root = _xml_root(attrs_or_root) if attrs_or_root is not None else None
+    if root is None:
+        return out
+    out["task"] = root.get("Type", "")
+    devices = root.find("Devices")
+    for dev in (devices if devices is not None else []):
+        d = {"type": dev.tag + (f"/{dev.get('type')}" if dev.get("type") else "")}
+        for p in dev.iter("param"):
+            d[p.get("name")] = _xml_value(p.get("value"))
+        out["devices"][dev.get("name") or dev.tag] = d
+    params = root.find("Params")
+    for p in (params.iter("param") if params is not None else []):
+        out["params"][p.get("name")] = _xml_value(p.get("value"))
+    for ax in root.iter("axis"):
+        if ax.get("id") and ax.get("attribute"):
+            out["axes"].setdefault(ax.get("id"), {})[ax.get("attribute")] = _xml_value(ax.get("value"))
+    return out
+
+
+def _pockels_onintensity(acq: Dict[str, object]) -> Optional[float]:
+    for name, d in acq.get("devices", {}).items():
+        if "pockels" in (name + str(d.get("type", ""))).lower() and isinstance(d.get("onintensity"), (int, float)):
+            return float(d["onintensity"])
+    return None
+
+
+def _pmt_voltages(acq: Dict[str, object]) -> Optional[Dict[str, float]]:
+    out = {str(d["channel_name"]): float(d["reference_voltage"]) for d in acq.get("devices", {}).values()
+           if "PMT" in str(d.get("type", "")) and d.get("channel_name")
+           and isinstance(d.get("reference_voltage"), (int, float))}
+    return out or None
+
+
+def _acquisition_rows(acq, stage_abs, stage_rel, bits) -> Tuple[Tuple[str, str], ...]:
+    """Rows this reader adds to the information panel — its own words, not MESc's: where the stage
+    was (absolute, and from the zero set on the rig), and the laser and detector settings. MESc's
+    "Centroid in absolute coordinates" above has x and y from ``GeomTransTransl``, which are always
+    0 in these files; the stage x, y live only in the XML (``Virt*`` absolute, ``Slow*`` relative)."""
+    rows: List[Tuple[str, str]] = []
+    xyz = lambda d: ", ".join(f"{k} = {_num_text(d[k], 6)} µm" for k in "xyz" if k in d)
+    if stage_abs:
+        rows.append(("Stage position (absolute)", xyz(stage_abs)))
+    if stage_rel:
+        rows.append(("Stage position from the zero level", xyz(stage_rel)))
+    if "objective_name" in acq.get("params", {}):
+        rows.append(("Objective", str(acq["params"]["objective_name"])))
+    pk = _pockels_onintensity(acq)
+    if pk is not None:
+        rows.append(("Pockels cell (on-intensity)", _num_text(round(pk, 2))))
+    pmt = _pmt_voltages(acq)
+    if pmt:
+        rows.append(("PMT reference voltage", ", ".join(f"{k} {_num_text(v)}" for k, v in pmt.items())))
+    if bits:
+        rows.append(("Acquired bits", str(bits)))
+    return tuple(rows)
 
 
 def _unit_sort_key(name: str):

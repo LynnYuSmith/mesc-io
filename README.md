@@ -36,15 +36,23 @@ with MescFile("recording.mesc") as f:
         ...
     t = f.frame_times("MUnit_0")                       # hardware stamp per frame, seconds
     f.frame_stalls("MUnit_0")                          # [(frame, seconds lost), ...]
+
+    u = f.unit("MUnit_0")
+    u.laser_pockels, u.pmt_reference_voltage           # 400.0, {"UG": 70.0, "UR": 70.0}
+    u.stage_um, u.stage_rel_um                         # stage x, y, z: absolute / from the zero
+    u.acquisition["devices"], u.acquisition["params"]  # every acquisition parameter, typed
 ```
+
+The laser (Pockels cell on-intensity), the PMT reference voltages, the objective and every other parameter of
+`MeasurementParamsXML` come from the file, not from what was typed into the comment, which can disagree with it.
 
 `f.rig_rois("MUnit_0")` returns the ROIs drawn on the unit in MESc. MESc saves them in the unit's
 `ViewerParamsXML` attribute, which is not XML but a base64 Qt `QDataStream`; mesc-io decodes the ROI list from the
 public Qt serialisation format and gives each ROI's vertices in µm (field coordinates, as stored) and in pixels.
 
 `frame_times` reads the per-frame stamps MESc records (`Curve_N`, clock ticks). They are the real times:
-the nominal period leaves out pauses in the acquisition (≈0.6 s after the first dark frames, in most of the
-recordings tested) and is slightly off. Z-stacks have no stamps (None).
+the nominal period leaves out pauses in the acquisition (≈0.6 s after the first dark frames when a unit is
+started with trigger mode on) and is slightly off. Z-stacks have no stamps (None).
 
 `read` refuses over 4 GB by default (`max_gb=None` to override). A unit name that matches in
 more than one session is refused, not resolved to the first; `MSession_1/MUnit_0` always works.

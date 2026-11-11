@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.3 — 2026-11-11
 
 - `write_frames` (and `mesc-io write`) builds the copy as `<out>.partial` and renames it when every frame and tag
   is in. Written straight to `out`, an interrupted run left a file of that name that opened like any other: a whole

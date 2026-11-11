@@ -107,3 +107,49 @@ def test_unnamed_channels_take_their_curves_by_position(tmp_path):
     with MescFile(path) as f:
         d = f.frame_times("MUnit_0", channel=1) - f.frame_times("MUnit_0", channel=0)
     np.testing.assert_allclose(d, 1000 * TICK_MS / 1000)
+
+
+def _unnamed(tmp_path, curves):
+    """Two unnamed channels; ``curves`` = [(comment or None, scale or None, y), ...] in file order."""
+    path = tmp_path / "unnamed_io.mesc"
+    with h5py.File(path, "w") as f:
+        u = f.create_group("MSession_0/MUnit_0")
+        for k in range(2):
+            u.create_dataset(f"Channel_{k}", data=np.zeros((N, 2, 2), dtype=np.uint16))
+            u.attrs[f"Channel_{k}_Conversion_ConversionLinearOffset"] = -786.0
+            u.attrs[f"Channel_{k}_Conversion_ConversionLinearScale"] = 1.0
+        u.attrs["ZAxisConversionConversionLinearScale"] = 16.15278
+        for k, (comment, scale, y) in enumerate(curves):
+            c = u.create_group(f"Curve_{k}")
+            if comment is not None:
+                c.attrs["Comment"] = _name(comment)
+            if scale is not None:
+                c.attrs["CurveDataYConversionConversionLinearScale"] = scale
+            c.create_dataset("CurveDataYRawData", data=y)
+    return path
+
+
+def test_an_io_signal_is_never_taken_for_the_stamps_of_an_unnamed_channel(tmp_path):
+    # an analog input recorded first: by position alone it was channel 0's "frame times"
+    analog = np.sin(np.arange(N + 1.0))
+    path = _unnamed(tmp_path, [("INPUT;ANALOG", 1.0, analog),
+                               ("INPUT;TIMESTAMP", TICK_MS, _stamps(N)),
+                               ("INPUT;TIMESTAMP", TICK_MS, _stamps(N) + 1000)])
+    with MescFile(path) as f:
+        np.testing.assert_allclose(f.frame_times("MUnit_0", channel=0), _stamps(N)[:N] * TICK_MS / 1000)
+        np.testing.assert_allclose(f.frame_times("MUnit_0", channel=1),
+                                   (_stamps(N)[:N] + 1000) * TICK_MS / 1000)
+
+
+def test_curves_that_are_all_something_else_give_no_stamps(tmp_path):
+    path = _unnamed(tmp_path, [("INPUT;ANALOG", 1.0, np.arange(N + 1.0))])
+    with MescFile(path) as f:
+        assert f.frame_times("MUnit_0") is None
+
+
+def test_stamps_without_a_tick_length_are_not_returned_as_seconds(tmp_path):
+    path = _unnamed(tmp_path, [("INPUT;TIMESTAMP", None, _stamps(N))])
+    with MescFile(path) as f:
+        with pytest.warns(RuntimeWarning, match="no Y conversion scale"):
+            assert f.frame_times("MUnit_0") is None
+        assert f.frame_stalls("MUnit_0") == []

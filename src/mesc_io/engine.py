@@ -25,6 +25,10 @@ from . import viewer as _viewer
 class _Captured(_viewer._Handler):
     """The viewer's handler, fed from memory, replying into memory. No socket, no BaseHTTPRequestHandler init."""
 
+    # the mounting application owns the socket and decides who may call; the viewer's own
+    # this-machine-only check would refuse every request that arrives under the host's name
+    _local_only = False
+
     def __init__(self, method: str, path: str, body: bytes, headers: Optional[Dict[str, str]]):  # noqa: D107
         self.command = method
         self.path = path

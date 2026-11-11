@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- `write_frames` (and `mesc-io write`) builds the copy as `<out>.partial` and renames it when every frame and tag
+  is in. Written straight to `out`, an interrupted run left a file of that name that opened like any other: a whole
+  copy, part of its frames replaced, not yet tagged. `out` naming the source itself is refused, as registration
+  already did.
+- `frame_times`: for a channel with no name, the curve taken by position must say it is a stamp curve
+  (`Comment` containing `TIMESTAMP`), so a recorded I/O signal is never returned as frame times; when no curve
+  carries a comment, position is used as before. A stamp curve with no Y conversion scale now gives `None` and a
+  warning — its ticks used to come back as "seconds" with a scale of 1.
+- The viewer answers only its own page on this machine: a request whose `Host` is not a loopback name, or whose
+  `Origin` is not the viewer itself, gets 403. Listening on 127.0.0.1 kept other machines out but not other web
+  pages in the same browser, which could start an export or copy ROIs, and through DNS rebinding read frames.
+  Scripts and curl (no `Origin`) work as before; an `Engine` mounted in another server leaves the check to its host.
+
 ## 0.6.2 — 2026-11-09
 
 - Acquisition parameters from `MeasurementParamsXML`, read from the file rather than from what was typed into the

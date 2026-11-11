@@ -248,6 +248,9 @@ def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
 
     Returns a report: which units and channels were written, and the measured agreement for
     each. Raises `WritebackError` before writing anything if any channel disagrees.
+
+    The copy is written as `<out>.partial` and renamed to `out` only when it is complete, so a
+    run that fails or is interrupted leaves no file under the final name.
     """
     source, out = Path(source), Path(out)
     if not source.exists():
@@ -273,14 +276,25 @@ def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
                     report["warnings"].append(
                         f"{unit_path}/{channel}: {lead} frame(s) shorter — aligned to the end")
 
+    if out.exists() and out.resolve() == source.resolve():
+        raise WritebackError(f"{out} is the source itself — the output must be a new file")
+    # The copy is built under `<out>.partial` and renamed when every frame and tag is in. Written
+    # straight to `out`, a run killed half way left a file of that name that opened like any other:
+    # a whole copy, some of its frames replaced, and no tag yet to say it had been touched.
+    partial_out = out.with_name(out.name + ".partial")
     out.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, out)
-    with _Output(out, tag=tag, chunk=chunk) as dest:
-        for unit_path, channel, a, convert, lead in plan:
-            dest.write(unit_path, channel, a, convert, lead)
-            report["written"].append(f"{unit_path}/{channel}")
-        for unit_path in dict.fromkeys(u for u, *_ in plan):
-            dest.tag(unit_path)
+    shutil.copy2(source, partial_out)
+    try:
+        with _Output(partial_out, tag=tag, chunk=chunk) as dest:
+            for unit_path, channel, a, convert, lead in plan:
+                dest.write(unit_path, channel, a, convert, lead)
+                report["written"].append(f"{unit_path}/{channel}")
+            for unit_path in dict.fromkeys(u for u, *_ in plan):
+                dest.tag(unit_path)
+    except BaseException:
+        partial_out.unlink(missing_ok=True)
+        raise
+    os.replace(partial_out, out)
     return report
 
 

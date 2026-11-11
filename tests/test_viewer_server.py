@@ -677,3 +677,41 @@ def test_a_slab_can_be_its_maximum_instead_of_its_mean(server, recording):
         v = f.read("MSession_0/MUnit_0", channel=0, frames=slice(2, 7), reader_units=True).max(axis=0)
     want = np.clip(np.round((v - 0) / 4000 * 255), 0, 255)
     assert np.abs(a - want).max() <= 1 and a.mean() >= m.mean()
+
+
+# --- only this machine's own page is answered ----------------------------------------------
+
+def _status(url, method="GET", data=None, headers=None):
+    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def test_a_name_that_is_not_this_machine_is_refused(server):
+    # DNS rebinding: evil.example resolves to 127.0.0.1 and the browser sends its name as Host
+    port = server.rsplit(":", 1)[1]
+    assert _status(server + "/api/file", headers={"Host": f"evil.example:{port}"}) == 403
+    assert _status(server + "/api/file", headers={"Host": f"localhost:{port}"}) == 200
+    assert _status(server + "/api/file") == 200
+
+
+def test_another_pages_post_is_refused_and_writes_nothing(two_unit_server, tmp_path):
+    put_json(two_unit_server + "/api/rois", {"unit": "MSession_0/MUnit_0", "rois": [SPOT]})
+    body = json.dumps({"from": "MSession_0/MUnit_0", "to": "MSession_0/MUnit_1"}).encode()
+    # a cross-site form post needs no preflight with this content type, so the browser sends it
+    foreign = {"Origin": "https://evil.example", "Content-Type": "text/plain"}
+    assert _status(two_unit_server + "/api/rois/copy", "POST", body, foreign) == 403
+    assert get_json(two_unit_server + "/api/rois?unit=MSession_0/MUnit_1")["rois"] == []
+    own = {"Origin": two_unit_server, "Content-Type": "application/json"}
+    assert _status(two_unit_server + "/api/rois/copy", "POST", body, own) == 200
+    assert len(get_json(two_unit_server + "/api/rois?unit=MSession_0/MUnit_1")["rois"]) == 1
+
+
+def test_a_mounted_engine_leaves_the_question_to_its_host(recording, tmp_path):
+    from mesc_io.engine import Engine
+    eng = Engine(recording, rois=tmp_path / "eng_rois.json")
+    status, _, _ = eng.handle("GET", "/api/file", headers={"Host": "lab-server.example"})
+    assert status == 200

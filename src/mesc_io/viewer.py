@@ -302,6 +302,16 @@ def _png_grau(a: np.ndarray) -> bytes:
             + chunk(b"IEND", b""))
 
 
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def _hostname(host: str) -> str:
+    """The name of a ``Host`` header without its port: ``127.0.0.1:8020``, ``[::1]:8020``."""
+    if host.startswith("["):
+        return host[1:].split("]", 1)[0]
+    return host.rsplit(":", 1)[0] if ":" in host else host
+
+
 class _Handler(BaseHTTPRequestHandler):
     mesc_path: Path = None          # set by serve()
     rois_path: Path = None          # ""
@@ -329,6 +339,32 @@ class _Handler(BaseHTTPRequestHandler):
     def _fail(self, exc: Exception, code: int = 400):
         self._json({"error": f"{type(exc).__name__}: {exc}"}, code)
 
+    #: True for the viewer's own server: only this machine's browser, on this server's own page,
+    #: is answered. A host that mounts the routes in its own server (`mesc_io.engine`) decides
+    #: who may call them, and switches this off.
+    _local_only = True
+
+    def _refused(self) -> bool:
+        """Refuse (403) a request that did not come from the viewer's own page on this machine.
+
+        Listening on 127.0.0.1 keeps other machines out, not other web pages: any page open in
+        the same browser can send a request here, and a name that resolves to 127.0.0.1 makes
+        this server look like that page's own (DNS rebinding) and lets it read the answers —
+        frames of a recording nobody has published. So the ``Host`` must be a loopback name,
+        and an ``Origin``, when the browser sends one, must be this server. A request with
+        neither (curl, a script) is not a browser's and is answered.
+        """
+        if not self._local_only:
+            return False
+        host = (self.headers.get("Host") or "").strip().lower()
+        origin = (self.headers.get("Origin") or "").strip().lower()
+        ok = not host or _hostname(host) in _LOOPBACK
+        if ok and origin:
+            ok = bool(host) and origin == f"http://{host}"
+        if not ok:
+            self._json({"error": "this viewer answers only its own page on this machine"}, 403)
+        return not ok
+
     #: How to open the recording. None = the `.mesc` at mesc_path. A host serving another kind of
     #: recording (a master file) passes a zero-argument callable returning an object with
     #: MescFile's reading interface — usually a MescFile subclass (see MescFile._dataset).
@@ -344,6 +380,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- routes -----------------------------------------------------------
     def do_GET(self):                                        # noqa: N802
+        if self._refused():
+            return
         url = urlparse(self.path)
         q = parse_qs(url.query)
         parts = [p for p in url.path.split("/") if p]
@@ -404,6 +442,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._fail(exc)
 
     def do_PUT(self):                                        # noqa: N802
+        if self._refused():
+            return
         url = urlparse(self.path)
         try:
             parts = [p for p in url.path.split("/") if p]
@@ -450,6 +490,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._fail(exc)
 
     def do_POST(self):                                       # noqa: N802
+        if self._refused():
+            return
         url = urlparse(self.path)
         try:
             route = [p for p in url.path.split("/") if p]

@@ -430,7 +430,8 @@ class MescFile:
         dark frames — and runs about 0.04 % slow. `frame_stalls` finds the pauses.
 
         Returns float64 of length ``n_frames``, or None when the unit has no stamps (z-stacks keep
-        an empty curve) or the file has no curves. A curve shorter than the movie (an aborted
+        an empty curve), the file has no curves, no stamp curve can be told to be this channel's,
+        or the curve states no tick length (with a warning). A curve shorter than the movie (an aborted
         recording) is returned as it is, with a warning.
         """
         u = self.unit(unit)
@@ -443,14 +444,31 @@ class MescFile:
         want = _text(_attr(grp.attrs, f"{ch.name}_Name"))
         # an unnamed channel matches by position only: "" == "" would hand every channel curve 0
         named = [c for c in curves if want and _text(_attr(grp[c].attrs, "Name")) == want]
-        name = named[0] if named else (curves[ch.index] if ch.index < len(curves) else None)
+        if named:
+            name = named[0]
+        else:
+            # By position, but only among curves that say they are stamps. A unit also keeps its
+            # recorded I/O signals as curves: taking "the curve at the channel's index" could hand
+            # back an analog input as frame times. When no curve carries a comment at all there is
+            # nothing to tell them apart by, and position is all that is left (as before).
+            notes = {c: _text(_attr(grp[c].attrs, "Comment")).upper() for c in curves}
+            stamps = [c for c in curves if "TIMESTAMP" in notes[c]]
+            pool = stamps if any(notes.values()) else curves
+            name = pool[ch.index] if ch.index < len(pool) else None
         if name is None or "CurveDataYRawData" not in grp[name]:
             return None
         d = grp[name]["CurveDataYRawData"]
         if d.shape is None or not d.size:
             return None
         ca = grp[name].attrs
-        scale = _float_or_none(_attr(ca, "CurveDataYConversionConversionLinearScale")) or 1.0
+        scale = _float_or_none(_attr(ca, "CurveDataYConversionConversionLinearScale"))
+        if not scale:
+            # ticks with no stated tick length are not times: 1.0 in its place returned the raw
+            # counter as "seconds"
+            warnings.warn(f"{u.path}/{name} states no Y conversion scale — its stamps are clock "
+                          "ticks of unknown length, so no frame times are returned",
+                          RuntimeWarning, stacklevel=2)
+            return None
         offset = _float_or_none(_attr(ca, "CurveDataYConversionConversionLinearOffset")) or 0.0
         t = (np.asarray(d[:], dtype=np.float64).ravel() * scale + offset) / 1000.0
         if len(t) >= u.n_frames:

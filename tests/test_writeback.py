@@ -98,3 +98,30 @@ def test_an_unknown_unit_or_channel_is_named(mesc, tmp_path):
         write_frames(mesc, tmp_path / "x.mesc", {"MUnit_9": {"Channel_0": _shifted(mesc)}})
     with pytest.raises(WritebackError, match="Channel_7"):
         write_frames(mesc, tmp_path / "x.mesc", {"MUnit_0": {"Channel_7": _shifted(mesc)}})
+
+
+def test_an_interrupted_write_leaves_nothing_under_the_final_name(mesc, tmp_path, monkeypatch):
+    # killed half way, the copy used to sit at `out`: whole, part of its frames replaced, untagged
+    from mesc_io import writeback
+
+    def dies(*a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(writeback, "_write_channel", dies)
+    out = tmp_path / "out.mesc"
+    with pytest.raises(KeyboardInterrupt):
+        write_frames(mesc, out, {"MUnit_0": {"Channel_0": _shifted(mesc)}})
+    assert not out.exists()
+    assert list(tmp_path.glob("out.mesc*")) == []
+
+
+def test_a_finished_write_leaves_no_partial_file(mesc, tmp_path):
+    out = tmp_path / "out.mesc"
+    write_frames(mesc, out, {"MUnit_0": {"Channel_0": _shifted(mesc)}})
+    assert [p.name for p in tmp_path.glob("out.mesc*")] == ["out.mesc"]
+
+
+def test_writing_over_the_source_is_refused(mesc):
+    before = mesc.read_bytes()
+    with pytest.raises(WritebackError, match="source itself"):
+        write_frames(mesc, mesc, {"MUnit_0": {"Channel_0": _shifted(mesc)}})
+    assert mesc.read_bytes() == before

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.5 — 2026-11-12
 
 - Viewer: a new look — the palette of [NERV Theme](https://github.com/wongmjane/nerv-theme) by Jane Manchun Wong (MIT):
   green-black, near-white text, buttons without borders; what is on is a lighter field with a hairline orange outline,

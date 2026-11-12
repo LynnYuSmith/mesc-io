@@ -21,8 +21,8 @@
           /* the saved sizes are wishes, not orders: whatever the window, the image keeps at least
              240 × 200 px and the tools and traces give way (a size saved on a big screen, or a
              splitter dragged to the edge, used to push panes off the window) */
-          grid-template-columns:var(--units-w, 230px) minmax(240px, 1fr) min(var(--tools-w, 661px), calc(100vw - var(--units-w, 230px) - 240px));
-          grid-template-rows:minmax(200px, 1fr) min(var(--traces-h, 338px), calc(100vh - 200px));
+          grid-template-columns:var(--units-w, 167px) minmax(240px, 1fr) min(var(--tools-w, 661px), calc(100vw - var(--units-w, 167px) - 240px));
+          grid-template-rows:minmax(200px, 1fr) min(var(--traces-h, 275px), calc(100vh - 200px));
           grid-template-areas:"units image tools" "traces traces traces" }
   h1 { font-size:13px; font-weight:600; margin:0; padding:10px 12px 6px; color:var(--muted);
        letter-spacing:.02em; text-transform:lowercase }
@@ -243,6 +243,18 @@
   .dd-body input[type=range] { width:110px }
   .dd-body input[type=number] { width:60px; font-size:11px; padding:1px 4px }
   .dd-body [hidden] { display:none }
+  /* the guide (12 Nov 2026): '?' in the top-right corner, a card over the page */
+  #guideBtn { position:fixed; top:6px; right:10px; z-index:60; width:24px; height:24px; padding:0; border-radius:50%;
+              font-weight:600; font-size:12px; line-height:22px; text-align:center; background:var(--panel-2) }
+  #guideBox { position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center }
+  #guideBox[hidden] { display:none }
+  #guideCard { width:min(760px, calc(100vw - 32px)); max-height:calc(100vh - 48px); overflow-y:auto; background:var(--panel);
+               border:1px solid var(--line); border-radius:8px; padding:6px 18px 16px; box-shadow:0 8px 32px rgba(0,0,0,.6) }
+  #guideCard h2 { display:flex; align-items:center; margin:10px 0 4px }
+  #guideCard h2 button { margin-left:auto; padding:2px 8px }
+  #guideBody h3 { margin:12px 0 2px; font-size:11px; color:var(--accent); text-transform:uppercase; letter-spacing:.06em }
+  #guideBody p { margin:2px 0; font-size:12.5px; line-height:1.5 }
+  #guideBody b { color:var(--ink); font-weight:600 }
   .dd-body h5 { margin:2px 0 0; font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em }
   .onscreen { margin-top:8px; padding-top:6px; border-top:1px solid var(--line) }
   .onscreen .sub { font-size:10px; color:var(--faint); margin-bottom:4px }
@@ -438,13 +450,9 @@
     </details>
 
     <h2 class="roih">rois <span id="roiCount" class="faint"></span> <span id="roiUnit" class="faint" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
-      <span class="h2r"><select id="copyFrom" style="font-size:11px;padding:1px 4px;display:none"></select><details class="dd"><summary title="clear them all, or take the set away">ROIs</summary><div class="dd-body right"><div class="ddrow"><button id="clearAll" title="remove every ROI (asks first)">clear all</button><button id="dlZip" title="the ROI set as an ImageJ zip — Fiji opens it, the pipeline reads it">export ROIs</button><a id="dlJson" href="#" title="the ROI set as stored">json</a></div></div></details></span></h2>
+      <span class="h2r"><span id="saveState" class="faint" title="the view and the ROIs save themselves">saved</span><select id="copyFrom" style="font-size:11px;padding:1px 4px;display:none"></select><details class="dd"><summary title="clear them all, or take the set away">ROIs</summary><div class="dd-body right"><div class="ddrow"><button id="clearAll" title="remove every ROI (asks first)">clear all</button><button id="dlZip" title="the ROI set as an ImageJ zip — Fiji opens it, the pipeline reads it">export ROIs</button><a id="dlJson" href="#" title="the ROI set as stored">json</a></div></div></details></span></h2>
     <input id="roiFilter" placeholder="filter by name" type="text">
     <div id="roiList"></div>
-    <div id="exports">
-      <button id="doTraces" title="one pass over the recording (Enter)">traces ⏎</button><span class="gap"></span><details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
-      <span id="saveState" title="the view and the ROIs save themselves">saved</span>
-    </div>
   </aside>
 
   <section id="tracesRow">
@@ -463,13 +471,55 @@
       <details class="dd"><summary title="y limits, the grid, how to zoom">axis</summary><div class="dd-body right"><div class="ddrow"><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label></div>
 <div class="ddrow"><button id="gridBtn" class="on" title="time and value grid">grid</button></div>
 <span class="hint">drag a box to zoom · double-click resets · ← → slide</span></div></details>
-      <button id="traceReset" title="whole recording">⤢</button>
+      <details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
     </div>
     <div id="traceScroll"><div id="traceCursor"></div><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
   </section>
 
 </div>
 
+<button id="guideBtn" title="how this viewer works (?)">?</button>
+<div id="guideBox" hidden>
+  <div id="guideCard">
+    <h2>how it works <button id="guideClose" title="esc">✕</button></h2>
+    <div id="guideBody">
+      <h3>units</h3>
+      <p>The recordings of the file, left. Click one to open it; drag the column's right edge to resize it. Below: the
+      unit's own metadata (<b>all…</b> lists every attribute).</p>
+      <h3>image</h3>
+      <p><b>Wheel</b> zooms about the cursor, <b>drag a box</b> zooms to it, <b>double-click</b> shows the whole frame.
+      <b>Space</b> plays, <b>← →</b> step a frame (<b>shift</b>: ten). <b>mean</b> / <b>max</b> collapse the recording,
+      <b>AVG</b> averages that many frames around the slider, <b>↕ MESc</b> shows it upside down as MESc does (the picture
+      only), <b>PNG</b> saves what is on screen.</p>
+      <h3>ROIs</h3>
+      <p>Pick <b>spot</b>, <b>rect</b> or <b>polygon</b> and click the image (polygon: click the corners, double-click to
+      close); <b>r</b> / <b>w × h</b> set the size of new ones. <b>Drag</b> an ROI to move it, <b>↑ ↓</b> select,
+      <b>Delete</b> removes the selected one, double-click a name in the list to rename it. <b>ruler</b> measures in µm
+      (Esc clears). <b>copy from…</b> takes the ROIs of another unit; <b>ROIs ▾</b>: clear all, the set as an ImageJ zip
+      or as json. ROIs are kept beside the viewer, never in the raw file.</p>
+      <h3>contrast</h3>
+      <p><b>fixed</b>: one window in the recording's units for every frame (starts at the file's own LUT, <b>file</b>
+      brings it back); <b>auto %</b>: stretched on percentiles of the whole recording. <b>brightness / contrast /
+      gamma</b> (slider or a typed number) change the picture on screen only — gamma below 1 lifts dim boutons.</p>
+      <h3>traces</h3>
+      <p>They compute themselves half a second after the ROIs change (<b>Enter</b> recomputes). <b>raw</b> | <b>dF/F</b>
+      — dF/F by the pipeline's method; <b>baseline ▾</b> sets its rolling quantile and window. <b>filter ▾</b>:
+      Gaussian or Savitzky–Golay smoothing of what is drawn — the csv and the exports stay unfiltered.
+      <b>stack</b> | <b>overlay</b>; <b>axis ▾</b>: type y limits, <b>auto</b>, the grid. <b>Drag a box</b> zooms time
+      (in overlay the values too), <b>double-click</b> shows the whole recording, <b>← →</b> slide a zoomed window;
+      a click puts the movie on that frame. <b>export ▾</b>: csv, or the traces as drawn as a PNG.</p>
+      <h3>z-stacks</h3>
+      <p><b>3D</b>: drag turns, wheel comes closer; <b>window ▾</b>, <b>view ▾</b>, <b>box ▾</b>, <b>measure ▾</b> hold
+      the rest. <b>XYZ</b>: three cuts through one crosshair. <b>mosaic</b>: every stack with a stage position in one
+      field — edit, auto-stitch, crop, TIFF.</p>
+      <h3>keys</h3>
+      <p><b>Space</b> play · <b>← →</b> frame / slide (shift: ×10) · <b>↑ ↓</b> select ROI · <b>Delete</b> remove ROI ·
+      <b>Enter</b> recompute traces · <b>Esc</b> close a menu, else cancel the draft / ruler / last 3D point.</p>
+      <p class="faint">Menus (<b>name ▾</b>) open one at a time and close on Esc or a click outside; a menu with
+      something switched on inside it shows its name in blue. The view and the ROIs save themselves.</p>
+    </div>
+  </div>
+</div>
 <div id="allMetaBox" hidden>
   <div id="allMetaCard">
     <h2>every attribute <small id="allMetaUnit"></small>
@@ -506,7 +556,7 @@ const V = {
   tfilt: { kind: "off", sigma: 2, sgWin: 7, sgOrder: 2 },
   disp: { b: 100, c: 100, g: 100 },         // the picture on screen: brightness %, contrast %, gamma ×100 (12 Nov 2026, as the report's display)   // a DISPLAY filter of the traces (12 Nov 2026): off | gauss | sg; the data, csv and exports stay unfiltered
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
-  tracesH: 338, metaH: 300, toolsW: 661, unitsW: 230,           // defaults = her layout, 12 Nov 2026 (the grid still caps them on a small window)
+  tracesH: 275, metaH: 300, toolsW: null, unitsW: 167,          // her start layout, 12 Nov 2026; toolsW null = fit the image to the file's shape (see fitTools)
 };
 let FILE = null, unit = null;
 // playback lives in MescIO.player; `playing` stays readable by that name — the real-Chrome checks watch it
@@ -588,6 +638,15 @@ const esc = s => String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const fileLut = (u, ch) => (u && Array.isArray(u.luts) && u.luts[ch]) || null;   // the window saved in the file, reader units
 const pickKeys = (o, ks) => Object.fromEntries(ks.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
 
+/* The start layout (her ask, 12 Nov 2026): the image takes the file's own shape — square for a square unit — and
+   the instruments get the rest of the width. Only until she drags the edge: then her width is kept (V.toolsW). */
+function fitTools() {
+  const W = window.innerWidth, H = window.innerHeight, units = V.unitsW || 167, traces = V.tracesH || 275;
+  const playerH = ($("player") && $("player").offsetHeight) || 46;
+  const aspect = unit && unit.width && unit.height ? unit.width / unit.height : 1;
+  const imgW = Math.max(240, (H - traces - playerH) * aspect);
+  return Math.round(Math.max(200, Math.min(W * .5, W - units - imgW)));
+}
 function applyStatic() {                 // controls that reflect V without a unit
   $("lo").value = V.lo; $("hi").value = V.hi; $("loVal").textContent = V.lo + " %"; $("hiVal").textContent = V.hi + " %";
   $("avgN").value = V.avg; $("flipBtn").classList.toggle("on", !!V.flipY);
@@ -601,8 +660,8 @@ function applyStatic() {                 // controls that reflect V without a un
   $("dffKnobs").style.visibility = V.signal === "dff" ? "" : "hidden";   // keeps its room: the bar must not jump
   document.documentElement.style.setProperty("--traces-h", V.tracesH + "px");
   document.documentElement.style.setProperty("--meta-h", V.metaH + "px");
-  document.documentElement.style.setProperty("--tools-w", V.toolsW + "px");
-  document.documentElement.style.setProperty("--units-w", (V.unitsW || 230) + "px");
+  document.documentElement.style.setProperty("--tools-w", (V.toolsW || fitTools()) + "px");
+  document.documentElement.style.setProperty("--units-w", (V.unitsW || 167) + "px");
 }
 
 function pick(i, restoring) {
@@ -1343,7 +1402,7 @@ window.addEventListener("keydown", e => {
     const row = $("roiList").querySelector(".r.sel"); if (row) row.scrollIntoView({ block: "nearest" });
   } else if (e.key === "Delete" || e.key === "Backspace") {   // only where the ROIs are seen: not under a 3D or XYZ view
     if (!view2D()) return; e.preventDefault(); if (V.sel >= 0) delRoi(V.sel); }
-  else if (e.key === "Enter") { if (ROIS.length && unit) { e.preventDefault(); $("doTraces").click(); } }
+  else if (e.key === "Enter") { if (ROIS.length && unit) { e.preventDefault(); traceFail = null; computeTraces(); } }
   else if (e.key === "Escape") { draft = []; ruler = []; rulerHover = null; paint(); volEscape(e.shiftKey); }
 });
 
@@ -1389,6 +1448,7 @@ async function loadRois() {
   document.body.dataset.roisFor = unit.path;      // set LAST: a driver waiting on it sees the menu too
 }
 async function saveRois() {
+  roiGen++; scheduleTraces();          // any change to the ROIs: the traces follow by themselves
   if (!unit) return;
   try { const r = await fetch(API.base + "/api/rois", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit: unit.path, rois: ROIS }) });
         badge(r.ok ? "saved" : "ROIs NOT saved", !r.ok);
@@ -1500,7 +1560,17 @@ $("dlJson").onclick = e => { e.preventDefault(); location.href = API.base + "/ap
 
 /* ------------------------------------------------------------------------------------------
    traces: full width, stack or overlay, a real grid, zoom in time, the frame cursor */
-$("doTraces").onclick = async () => {
+/* Traces compute themselves (12 Nov 2026: the 'traces ⏎' button is gone, at her ask): half a second after the
+   ROIs, the unit or the channel change. Enter still recomputes by hand. A reply with an error is not retried
+   until the ROIs change again, so a failing server is not asked in a loop. */
+let tracesTimer = 0, roiGen = 0, traceFail = null;
+function scheduleTraces() {
+  if (!unit || !ROIS.length) return;
+  const k = `${unit.path}|${V.ch}|${roiGen}`;
+  if (traceFail === k) return;
+  clearTimeout(tracesTimer); tracesTimer = setTimeout(() => computeTraces(), 500);
+}
+async function computeTraces() {
   if (!unit) return;
   if (!ROIS.length) { $("traceLbl").textContent = "draw something first"; return; }
   $("traceLbl").textContent = "one pass over the recording…";
@@ -1509,9 +1579,9 @@ $("doTraces").onclick = async () => {
   // the reply may arrive after the unit or channel changed under it, or after a newer request:
   // then it describes something that is no longer on screen and must not be shown as if it were
   if (seq !== tracesSeq || !unit || unit.path !== forUnit || V.ch !== forCh) return;
-  if (d.error) { $("traceLbl").textContent = d.error; return; }
-  TR = d; plotTraces(); paint();
-};
+  if (d.error) { traceFail = `${forUnit}|${forCh}|${roiGen}`; $("traceLbl").textContent = d.error; return; }
+  traceFail = null; TR = d; plotTraces(); paint();
+}
 function visibleTraces() {
   if (!TR) return [];
   const src = V.signal === "dff" && TR.dff ? TR.dff : TR.traces;
@@ -1631,8 +1701,8 @@ function plotTraces() {
 function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
-  if (!TR) { lastAuto = null; syncYBoxes(); $("traceLbl").textContent = ROIS.length ? "traces — press to compute" : "traces"; g.fillStyle = "#5d656e"; g.font = "12px sans-serif";
-             g.fillText(ROIS.length ? "press ‹traces› to read every ROI's time course in one pass" : "draw an ROI on the image, then ‹traces›", 12, 24); return; }
+  if (!TR) { lastAuto = null; syncYBoxes(); $("traceLbl").textContent = ROIS.length ? "traces — computing…" : "traces"; scheduleTraces(); g.fillStyle = "#5d656e"; g.font = "12px sans-serif";
+             g.fillText(ROIS.length ? "reading every ROI's time course in one pass…" : "draw an ROI on the image — its trace appears here", 12, 24); return; }
   const L = TL, R = TR_, T = TT, B = TB;
   const X = f => L + (f - t0) / Math.max(1, t1 - t0) * (W - L - R);
   $("traceLbl").textContent = `${ts.length} of ${TR.names.length} ROIs · ${n} frames` + (V.traceZoom ? ` · ${t0}–${t1}` : "")
@@ -1817,7 +1887,6 @@ $("trace").onwheel = ev => {
   a = Math.max(0, Math.min(n - 1 - span, a));
   V.traceZoom = span >= n - 1 ? null : [a, Math.round(a + span)]; V.valueZoom = null; plotTraces(); saveView();
 };
-$("traceReset").onclick = () => { V.traceZoom = null; V.valueZoom = null; plotTraces(); saveView(); };
 /* raw | dF/F is a switch over the same payload -- both come back from one pass. Changing q
    or the window is a recompute, so it refetches (the pass is repeated; the file is the cost). */
 function setSignal(sig) {
@@ -1833,7 +1902,7 @@ function applyDffKnobs() {
   const q = Math.min(0.95, Math.max(0.05, +$("dffQ").value || 0.3)), w = Math.max(1, +$("dffWin").value || 60);
   if (q === V.dffQ && w === V.dffWin) return;
   V.dffQ = q; V.dffWin = w; applyStatic(); saveView();
-  if (TR) $("doTraces").click();
+  if (TR) computeTraces();
 }
 ["dffQ", "dffWin"].forEach(id => { $(id).onchange = applyDffKnobs; $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { applyDffKnobs(); $(id).blur(); } }; });
 function syncFilt() {
@@ -1875,8 +1944,8 @@ $("gridBtn").onclick = () => { V.grid = !V.grid; applyStatic(); plotTraces(); sa
 let sdown = null;
 $("splitter").onmousedown = ev => { sdown = { which: "traces", y: ev.clientY, h: V.tracesH }; ev.preventDefault(); };
 $("metaSplit").onmousedown = ev => { sdown = { which: "meta", y: ev.clientY, h: V.metaH }; ev.preventDefault(); };
-$("unitsSplit").onmousedown = ev => { sdown = { which: "units", x: ev.clientX, w: V.unitsW || 230 }; ev.preventDefault(); };
-$("toolsSplit").onmousedown = ev => { sdown = { which: "tools", x: ev.clientX, w: V.toolsW }; ev.preventDefault(); };
+$("unitsSplit").onmousedown = ev => { sdown = { which: "units", x: ev.clientX, w: V.unitsW || 167 }; ev.preventDefault(); };
+$("toolsSplit").onmousedown = ev => { sdown = { which: "tools", x: ev.clientX, w: V.toolsW || fitTools() }; ev.preventDefault(); };
 window.addEventListener("mousemove", ev => {
   if (!sdown) return;
   if (sdown.which === "units") { V.unitsW = Math.max(150, Math.min(window.innerWidth * .4, sdown.w + (ev.clientX - sdown.x))); applyStatic(); paint(); return; }
@@ -4035,7 +4104,7 @@ $("mosJson").onclick = () => {
   a.download = exportName([FILE.file.replace(/\.mesc$/i, ""), "mosaic_layout"]).replace(/\.png$/, ".json");
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 };
-window.addEventListener("resize", () => { if (V.mos.on) mosDraw(); });
+window.addEventListener("resize", () => { if (V.mos.on) mosDraw(); if (!V.toolsW) { applyStatic(); paint(); } });   // the fitted layout follows the window
 
 /* Dropdown panels (12 Nov 2026, like the report's playground): one open at a time; a click outside closes
    them; Esc closes an open panel and does nothing else (it would otherwise also remove the last point/ROI). */
@@ -4047,11 +4116,16 @@ document.addEventListener("toggle", e => {
 document.addEventListener("mousedown", e => {
   document.querySelectorAll("details.dd[open]").forEach(d => { if (!d.contains(e.target)) d.open = false; });
 }, true);
+$("guideBtn").onclick = () => { $("guideBox").hidden = false; };
+$("guideClose").onclick = () => { $("guideBox").hidden = true; };
+$("guideBox").onclick = e => { if (e.target === $("guideBox")) $("guideBox").hidden = true; };   // a click beside the card
 window.addEventListener("keydown", e => {
+  if (e.key === "?" && !(e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName || ""))) { $("guideBox").hidden = !$("guideBox").hidden; if (e.preventDefault) e.preventDefault(); return; }
   if (e.key !== "Escape") return;
+  if ($("guideBox").hidden === false) { $("guideBox").hidden = true; e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); return; }
   const open = document.querySelectorAll("details.dd[open]");
   if (!open.length) return;
-  open.forEach(d => { d.open = false; }); e.preventDefault(); e.stopImmediatePropagation();
+  open.forEach(d => { d.open = false; }); e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
 }, true);
 </script>
 </body>

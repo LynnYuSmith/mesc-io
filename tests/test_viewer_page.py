@@ -89,7 +89,7 @@ try {
 // let boot()'s fetches and the deferred image load resolve, then exercise the wiring a click would
 setTimeout(() => {
   try {
-    for (const id of ["meanBtn", "modeOverlay", "modeStack", "gridBtn", "sigDff", "sigRaw", "toolRect", "toolSpot", "traceReset", "yAuto", "doTraces", "playBtn", "playBtn", "avgN"]) {
+    for (const id of ["meanBtn", "modeOverlay", "modeStack", "gridBtn", "sigDff", "sigRaw", "toolRect", "toolSpot", "yAuto", "playBtn", "playBtn", "avgN", "fGauss", "fSg", "dispReset"]) {
       const b = byId.get(id); if (b && b.onclick) b.onclick({ preventDefault() {}, stopPropagation() {} });
     }
     // the inputs' handlers too: the slider, the AVG field, the y-limits, the dF/F knobs

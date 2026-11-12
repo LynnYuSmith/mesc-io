@@ -75,7 +75,7 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (await ev("ROIS.length") !== 1) fail("the zoom drag's release added a spot: " + await ev("ROIS.length"));
 
   // 2. traces: compute, then drag a box in stack mode -> time zoom, with the rubber shown mid-drag
-  await ev("document.getElementById('doTraces').click(); 'ok'"); await sleep(2000);
+  await ev("computeTraces(); 'ok'"); await sleep(2000);
   const tr = JSON.parse(await ev("JSON.stringify(document.getElementById('trace').getBoundingClientRect())"));
   const y = tr.top + tr.height / 2, x0 = tr.left + 200, x1 = tr.left + 500;
   await mouse("mouseMoved", x0, y); await mouse("mousePressed", x0, y, { clickCount: 1 });
@@ -107,7 +107,7 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 }); await sleep(100);
   if (await ev("V.valueZoom") !== null) fail("the value box survived a change of the time window");
   console.log("  y limits adapt after the window moves");
-  await ev("document.getElementById('traceReset').click(); 'ok'");
+  await ev("V.traceZoom = null; V.valueZoom = null; plotTraces(); 'ok'");
 
   // 2b. keys: with a time zoom, → slides the window; a click on a ROW then Delete removes the ROI
   await ev("V.traceZoom=[100,200]; plotTraces(); 'ok'");
@@ -194,7 +194,7 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   const savedH = (await getJSON(URL_ + "api/view")).view.metaH; if (savedH !== h1) fail("the metadata height was not saved: " + savedH);
 
   // 2f. typed vertical limits: apply in both modes, survive a time zoom, 'auto' releases them
-  await ev("document.getElementById('doTraces').click(); 'ok'"); for (let i = 0; i < 40; i++) { await sleep(250); if (await ev("TR !== null")) break; }
+  await ev("computeTraces(); 'ok'"); for (let i = 0; i < 40; i++) { await sleep(250); if (await ev("TR !== null")) break; }
   await ev("V.traceZoom=null; V.valueZoom=null; V.yFixed=null; document.getElementById('modeOverlay').click(); 'ok'"); await sleep(200);
   const autoPh = await ev("document.getElementById('yLo').placeholder");
   await ev("(()=>{const a=document.getElementById('yLo'), b=document.getElementById('yHi'); a.value='-400'; b.value='-100'; b.dispatchEvent(new Event('change'));})(); 'ok'"); await sleep(200);
@@ -211,7 +211,7 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (await ev("V.yFixed") !== null) fail("'auto' did not release the limits");
   if (await ev("document.getElementById('yLo').value") !== "") fail("the boxes did not clear on auto");
   console.log("  y limits: typed, kept across zoom and mode, inverted refused, auto releases");
-  await ev("document.getElementById('traceReset').click(); 'ok'");
+  await ev("V.traceZoom = null; V.valueZoom = null; plotTraces(); 'ok'");
 
   // 2g. hover readouts: the pixel under the cursor on the image, the value under it on a trace
   await ev("V.mean=true; applyStatic(); draw(); 'ok'"); await sleep(300);
@@ -253,9 +253,9 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   console.log("  typed limits kept per signal across the switch:", "raw", yb, "dff", JSON.parse(await ev("JSON.stringify(V.yFixedBy.dff)")));
   await ev("document.getElementById('yAuto').click(); 'ok'");
   // the bar does not jump between raw and dF/F
-  const posRaw = JSON.parse(await ev("JSON.stringify(['modeStack','gridBtn','yLo','traceReset'].map(i=>Math.round(document.getElementById(i).getBoundingClientRect().left)))"));
+  const posRaw = JSON.parse(await ev("JSON.stringify(['modeStack','modeOverlay','sigDff','sigRaw'].map(i=>Math.round(document.getElementById(i).getBoundingClientRect().left)))"));
   await ev("document.getElementById('sigDff').click(); 'ok'"); await sleep(100);
-  const posDff = JSON.parse(await ev("JSON.stringify(['modeStack','gridBtn','yLo','traceReset'].map(i=>Math.round(document.getElementById(i).getBoundingClientRect().left)))"));
+  const posDff = JSON.parse(await ev("JSON.stringify(['modeStack','modeOverlay','sigDff','sigRaw'].map(i=>Math.round(document.getElementById(i).getBoundingClientRect().left)))"));
   console.log("  bar x (raw):", posRaw, "(dff):", posDff);
   if (JSON.stringify(posRaw) !== JSON.stringify(posDff)) fail("the trace bar's buttons moved between raw and dF/F");
   await ev("document.getElementById('sigRaw').click(); 'ok'");
@@ -273,7 +273,7 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   // 2j. traces requested on one unit, unit switched before the reply: the reply is dropped
   await pickUnit(0);
   await ev("ROIS.length=0; addRoi(makeSpot(30,40,3)); 'ok'"); await sleep(400);
-  await ev("document.getElementById('doTraces').click(); 'ok'");          // in flight for MUnit_0…
+  await ev("computeTraces(); 'ok'");          // in flight for MUnit_0…
   await pickUnit(1);                                                        // …switch before it lands
   await sleep(3000);
   const trUnit = await ev("TR ? TR.unit : null");
@@ -306,7 +306,7 @@ const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; 
   if (png.corner.slice(0, 3).join() !== "22,33,62") fail("the caption strip is not the report's background: " + png.corner);
   await ev("ruler=[]; V.proj=''; paint(); 'ok'");
   // the traces PNG: the whole plot as drawn, every ROI's band, plus the caption strip
-  await ev("ROIS.length=0; addRoi(makeSpot(30,40,3)); addRoi(makeSpot(60,40,3)); document.getElementById('doTraces').click(); 'ok'");
+  await ev("ROIS.length=0; addRoi(makeSpot(30,40,3)); addRoi(makeSpot(60,40,3)); computeTraces(); 'ok'");
   for (let i = 0; i < 40 && !(await ev("!!(TR && TR.names && TR.names.length===2)")); i++) await sleep(250);
   await sleep(400);
   await ev("window.__png=null; savePng=(c,n)=>{ const g=c.getContext('2d'), d=g.getImageData(0,0,c.width,c.height-40).data; let lit=0; for(let i=0;i<d.length;i+=4) lit+=(d[i]+d[i+1]+d[i+2])>60; window.__png={w:c.width,h:c.height,name:n,lit,src:[document.getElementById('trace').width,document.getElementById('trace').height]}; }; exportTracePng(); 'ok'");

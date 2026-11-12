@@ -243,6 +243,27 @@
   .dd-body input[type=range] { width:110px }
   .dd-body input[type=number] { width:60px; font-size:11px; padding:1px 4px }
   .dd-body [hidden] { display:none }
+  .dd-body h5 { margin:2px 0 0; font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em }
+  .dd-body .krow { display:grid; grid-template-columns:70px 1fr 44px; gap:8px; align-items:center; color:var(--muted) }
+  .dd-body .krow input[type=range] { width:100% }
+  .dd-body a { color:var(--accent); text-decoration:none; padding:2px 6px }
+  /* ---- the instruments in groups (12 Nov 2026, her sketch): quick actions in sight, each group one compact row;
+     the rarer ones in a menu at the row's end ---- */
+  .grp { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 12px 0; padding:6px 8px;
+         border:1px solid var(--line); border-radius:6px; font-size:12px }
+  .grp button { padding:3px 9px }
+  .grp .glbl { color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:.06em; width:38px }
+  .grp .gap, .frow .gap, #exports .gap { flex:1 1 auto }
+  .grp .sizes { display:inline-flex; gap:4px; align-items:center }
+  details.grpd { margin:6px 12px 0; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:12px }
+  details.grpd > summary { color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:.06em }
+  .frow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; font-size:11px; color:var(--muted) }
+  .frow button { padding:3px 9px }
+  .frow input[type=number] { width:72px }
+  .frow select { flex:0 1 220px }
+  h2.roih { display:flex; align-items:center; gap:6px }
+  h2.roih .h2r { margin-left:auto; display:flex; gap:6px; align-items:center; text-transform:none; letter-spacing:0; font-weight:400 }
+  h2.roih .h2r select { font-size:11px; padding:1px 4px }
   #roiFilter { margin:0 12px 6px; width:calc(100% - 24px) }
   #roiList { flex:1; overflow-y:auto; min-height:0; border-top:1px solid var(--line) }
   .r { display:grid; grid-template-columns:16px 10px 1fr auto 18px; gap:6px; align-items:center;
@@ -284,6 +305,7 @@
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="dispGamma" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR id="dispGR" type="gamma" amplitude="1" exponent="1" offset="0"/><feFuncG id="dispGG" type="gamma" amplitude="1" exponent="1" offset="0"/><feFuncB id="dispGB" type="gamma" amplitude="1" exponent="1" offset="0"/></feComponentTransfer></filter></svg>
 <div id="wrap">
 
   <aside id="unitsCol">
@@ -380,40 +402,27 @@
   <aside id="toolsCol">
     <div id="toolsSplit" title="drag to resize"></div>
     <h2>instruments</h2>
-    <div class="instr">
-      <button id="addRoi" title="add an ROI (click on the image)">+</button>
-      <button id="delRoi" title="remove the selected ROI" disabled>−</button>
-      <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button>
-      <button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button>
-      <button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button>
-      <button id="mosBtn" hidden title="every z-stack of the file with a stage position, laid out as one field: stitch it from the overlaps, move tiles by hand, flatten it on the surface, cut a piece out as a TIFF">mosaic</button>
-      <button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
-      <details class="dd"><summary title="average frames, flip like MESc, save a PNG">view</summary><div class="dd-body right"><div class="ddrow"><label class="stepper" title="average this many frames around the slider (1 = the raw frame)"><span>AVG</span><input type="number" id="avgN" min="1" max="999" step="1" value="1"></label></div>
-<div class="ddrow"><button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button><button id="pngBtn" title="save what is on screen as a PNG: the image at its own pixels (whole pixels, no blur) with the ROIs, the ruler, a µm scale bar and a caption — or the 3D view when it is open">PNG</button></div></div></details>
-    </div>
-    <div class="instr" style="margin-top:6px">
-      <button id="toolSpot" class="on" title="a disc where you click">spot</button>
-      <button id="toolRect" title="a rectangle centred where you click">rect</button>
-      <button id="toolPoly" title="click the corners, double-click to close">polygon</button>
-      <button id="toolRuler" title="a ruler: click two points, read the distance between them in µm (Esc clears it)">ruler</button>
-      <button id="clearAll" title="remove every ROI (asks first)" style="margin-left:auto">clear all</button>
-    </div>
-    <div class="instr sizes" style="margin-top:6px" id="sizeRow">
+    <div class="grp"><span class="glbl">roi</span>
+      <button id="toolSpot" class="on" title="a disc where you click">spot</button><button id="toolRect" title="a rectangle centred where you click">rect</button><button id="toolPoly" title="click the corners, double-click to close">polygon</button><button id="toolRuler" title="a ruler: click two points, read the distance between them in µm (Esc clears it)">ruler</button>
+      <span class="sizes" id="sizeRow">
       <label id="sizeSpot"><span>r</span><input type="number" id="spotR" min="1" max="200" step="0.5" value="3"> px</label>
       <label id="sizeRect" style="display:none"><span>w</span><input type="number" id="rectW" min="1" max="1000" step="1" value="8"> × <input type="number" id="rectH" min="1" max="1000" step="1" value="8"> px</label>
       <span class="hint" id="sizeWho">for new ROIs</span>
+    </span>
+      <span class="gap"></span><button id="addRoi" title="add an ROI (click on the image)">+</button><button id="delRoi" title="remove the selected ROI" disabled>−</button>
     </div>
-    <details>
+    <div class="grp"><span class="glbl">image</span>
+      <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button><button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button><label class="stepper" title="average this many frames around the slider (1 = the raw frame)"><span>AVG</span><input type="number" id="avgN" min="1" max="999" step="1" value="1"></label><button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button><button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button><button id="mosBtn" hidden title="every z-stack of the file with a stage position, laid out as one field: stitch it from the overlaps, move tiles by hand, flatten it on the surface, cut a piece out as a TIFF">mosaic</button><button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
+      <span class="gap"></span><details class="dd"><summary title="save a PNG; brightness, contrast and gamma of the picture on screen">view</summary><div class="dd-body right"><div class="ddrow"><button id="pngBtn" title="save what is on screen as a PNG: the image at its own pixels (whole pixels, no blur) with the ROIs, the ruler, a µm scale bar and a caption — or the 3D view when it is open">PNG</button></div><h5>on screen — the picture only (ROIs, numbers and exports of data untouched)</h5><div class="krow"><span>brightness</span><input type="range" id="dispB" min="20" max="400" step="5" value="100"><span id="dispBV"></span></div><div class="krow"><span>contrast</span><input type="range" id="dispC" min="20" max="400" step="5" value="100"><span id="dispCV"></span></div><div class="krow"><span>gamma</span><input type="range" id="dispG" min="30" max="200" step="5" value="100"><span id="dispGV"></span></div><div class="ddrow"><button id="dispReset" title="brightness, contrast and gamma back to 100 % / 1.00">reset</button></div></div></details>
+    </div>
+    <details class="grpd">
       <summary>contrast</summary>
-      <div class="row">
-        <button id="winFixed" title="the same window for every frame, in reader units — a dimmer frame IS darker. Starts at the window the recording was saved with on the rig (the file's LUT)">fixed</button>
-        <button id="winPct" title="the whole recording stretched on its percentiles — one window for every frame, worked out once from frames spread over the unit, so scrubbing does not flicker">auto %</button>
-      </div>
-      <div id="fixedKnobs" class="row"><span>min</span><input type="number" id="vmin" step="10" style="width:64px">
+      <div class="frow"><button id="winFixed" title="the same window for every frame, in reader units — a dimmer frame IS darker. Starts at the window the recording was saved with on the rig (the file's LUT)">fixed</button><button id="winPct" title="the whole recording stretched on its percentiles — one window for every frame, worked out once from frames spread over the unit, so scrubbing does not flicker">auto %</button><span class="gap"></span></div>
+      <div id="fixedKnobs" class="frow"><span>min</span><input type="number" id="vmin" step="10" style="width:64px">
         <span>max</span><input type="number" id="vmax" step="10" style="width:64px">
         <button id="winFile" title="back to the window saved in the file">file</button></div>
       <div id="fixedNote" class="hint faint"></div>
-      <div id="cmapRow" class="row"><span>colour</span><select id="cmap"></select></div>
+      <div id="cmapRow" class="frow"><span>colour</span><select id="cmap"></select></div>
       <div id="chanRows"></div>
       <div id="pctKnobs">
       <div class="row"><span>low</span><input type="range" id="lo" min="0" max="20" step="0.5" value="1"><span id="loVal">1 %</span></div>
@@ -421,16 +430,12 @@
       </div>
     </details>
 
-    <h2>rois <span id="roiCount" class="faint"></span> <span id="roiUnit" class="faint" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
-      <select id="copyFrom" style="float:right;font-size:11px;padding:1px 4px;margin-top:-3px;display:none"></select></h2>
+    <h2 class="roih">rois <span id="roiCount" class="faint"></span> <span id="roiUnit" class="faint" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+      <span class="h2r"><select id="copyFrom" style="font-size:11px;padding:1px 4px;display:none"></select><details class="dd"><summary title="clear them all, or take the set away">ROIs</summary><div class="dd-body right"><div class="ddrow"><button id="clearAll" title="remove every ROI (asks first)">clear all</button><button id="dlZip" title="the ROI set as an ImageJ zip — Fiji opens it, the pipeline reads it">export ROIs</button><a id="dlJson" href="#" title="the ROI set as stored">json</a></div></div></details></span></h2>
     <input id="roiFilter" placeholder="filter by name" type="text">
     <div id="roiList"></div>
     <div id="exports">
-      <button id="doTraces" title="one pass over the recording (Enter)">traces ⏎</button>
-      <a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a>
-      <a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a>
-      <button id="dlZip" title="the ROI set as an ImageJ zip — Fiji opens it, the pipeline reads it">export ROIs</button>
-      <a id="dlJson" href="#" title="the ROI set as stored">json</a>
+      <button id="doTraces" title="one pass over the recording (Enter)">traces ⏎</button><span class="gap"></span><details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
       <span id="saveState" title="the view and the ROIs save themselves">saved</span>
     </div>
   </aside>
@@ -491,7 +496,8 @@ const V = {
   yFixedBy: { raw: null, dff: null },       // the typed limits of each signal, kept across the raw | dF/F switch
   signal: "raw",                            // raw | dff
   dffQ: 0.3, dffWin: 60,                    // the baseline's quantile and window (s)
-  tfilt: { kind: "off", sigma: 2, sgWin: 7, sgOrder: 2 },   // a DISPLAY filter of the traces (12 Nov 2026): off | gauss | sg; the data, csv and exports stay unfiltered
+  tfilt: { kind: "off", sigma: 2, sgWin: 7, sgOrder: 2 },
+  disp: { b: 100, c: 100, g: 100 },         // the picture on screen: brightness %, contrast %, gamma ×100 (12 Nov 2026, as the report's display)   // a DISPLAY filter of the traces (12 Nov 2026): off | gauss | sg; the data, csv and exports stay unfiltered
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
   tracesH: 338, metaH: 300, toolsW: 661, unitsW: 230,           // defaults = her layout, 12 Nov 2026 (the grid still caps them on a small window)
 };
@@ -554,7 +560,7 @@ async function boot() {
     im.onerror = () => { if (++tries > 3) return; setTimeout(() => { im.src = src0 + "&retry=" + tries; }, 800 * tries); };
   });
   const saved = (await (await fetch(API.base + "/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","tfilt","sel","shown","tracesH","metaH","toolsW","unitsW","vol","flipY","mos"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","tfilt","disp","sel","shown","tracesH","metaH","toolsW","unitsW","vol","flipY","mos"]));
   V.vol = volState(V.vol); V.mos = mosState(V.mos);
   if (V.win !== "pct") V.win = "fixed";
   if (!V.fixBy || typeof V.fixBy !== "object" || Array.isArray(V.fixBy)) V.fixBy = {};
@@ -584,7 +590,7 @@ function applyStatic() {                 // controls that reflect V without a un
   $("modeOverlay").classList.toggle("on", V.traceMode === "overlay");
   $("gridBtn").classList.toggle("on", V.grid);
   $("sigRaw").classList.toggle("on", V.signal === "raw"); $("sigDff").classList.toggle("on", V.signal === "dff");
-  $("dffQ").value = V.dffQ; $("dffWin").value = V.dffWin; if (typeof syncFilt === "function" && $("fGauss")) syncFilt();
+  $("dffQ").value = V.dffQ; $("dffWin").value = V.dffWin; if (typeof syncFilt === "function" && $("fGauss")) syncFilt(); if (typeof syncDisp === "function" && $("dispB")) syncDisp();
   $("dffKnobs").style.visibility = V.signal === "dff" ? "" : "hidden";   // keeps its room: the bar must not jump
   document.documentElement.style.setProperty("--traces-h", V.tracesH + "px");
   document.documentElement.style.setProperty("--meta-h", V.metaH + "px");
@@ -900,6 +906,21 @@ function mapping() {
   const s = $("stage");
   return MescIO.image.mapping(s.clientWidth, s.clientHeight, V.zoom, unit.width, unit.height, V.flipY);
 }
+/* brightness / contrast / gamma of the picture on screen (and its PNG), like the report's 'display': a canvas
+   filter on the frame only — the ROIs, the numbers and every data export stay as they are. Gamma below 1 lifts
+   dim boutons. */
+function dispFilter() {
+  const d = V.disp || { b: 100, c: 100, g: 100 };
+  if (d.b === 100 && d.c === 100 && d.g === 100) return "none";
+  const e = (d.g / 100).toFixed(3);                          // out = in^g: g < 1 lifts the dim, as the report's slider reads
+  ["dispGR", "dispGG", "dispGB"].forEach(id => $(id).setAttribute("exponent", e));
+  return (d.g !== 100 ? "url(#dispGamma) " : "") + `brightness(${d.b / 100}) contrast(${d.c / 100})`;
+}
+function syncDisp() {
+  const d = V.disp || (V.disp = { b: 100, c: 100, g: 100 });
+  $("dispB").value = d.b; $("dispC").value = d.c; $("dispG").value = d.g;
+  $("dispBV").textContent = d.b + " %"; $("dispCV").textContent = d.c + " %"; $("dispGV").textContent = (d.g / 100).toFixed(2);
+}
 function paint() {
   if (!unit) return;
   paintTo($("view"), mapping());
@@ -908,7 +929,9 @@ function paintTo(c, m) {                 // the screen and the PNG export draw t
   const g = c.getContext("2d");
   c.width = m.W; c.height = m.H;
   g.fillStyle = "#000"; g.fillRect(0, 0, m.W, m.H);
+  g.save(); g.filter = dispFilter();
   MescIO.image.drawFrame(g, imgEl, m, unit.width, unit.height);
+  g.restore();
   overlay(g, m);
 }
 function overlay(g, m) {
@@ -1819,6 +1842,10 @@ numIn("fSigma", v => setFilt({ sigma: Math.min(50, Math.max(0.3, v || 2)) }));
 numIn("fSgWin", v => { let w = Math.min(201, Math.max(3, Math.round(v || 7))); if (w % 2 === 0) w += 1;
                        setFilt({ sgWin: w, sgOrder: Math.min(w - 1, (V.tfilt || {}).sgOrder ?? 2) }); });
 numIn("fSgOrd", v => setFilt({ sgOrder: Math.min(((V.tfilt || {}).sgWin || 7) - 1, Math.max(0, Math.round(v || 0))) }));
+["dispB", "dispC", "dispG"].forEach(id => { $(id).oninput = () => {
+  V.disp = { b: +$("dispB").value, c: +$("dispC").value, g: +$("dispG").value }; syncDisp(); paint(); };
+  $(id).onchange = () => saveView(); });
+$("dispReset").onclick = () => { V.disp = { b: 100, c: 100, g: 100 }; syncDisp(); paint(); saveView(); };
 $("modeStack").onclick = () => { V.traceMode = "stack"; V.valueZoom = null; applyStatic(); plotTraces(); saveView(); };
 $("modeOverlay").onclick = () => { V.traceMode = "overlay"; applyStatic(); plotTraces(); saveView(); };
 $("gridBtn").onclick = () => { V.grid = !V.grid; applyStatic(); plotTraces(); saveView(); };

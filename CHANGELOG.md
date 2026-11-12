@@ -7,6 +7,10 @@
   filter) lights its name. Traces: `baseline ▾`, `filter ▾`, `axis ▾`; 3D: `window ▾`, `view ▾`, `box ▾`,
   `measure ▾`; mosaic: `show ▾`, `crop ▾`, `export ▾`; instruments: `view ▾` (AVG, ↕ MESc, PNG). Every control keeps
   its id and behaviour.
+- Viewer: the instruments in groups — a `roi` row (spot, rect, polygon, ruler, size, + −), an `image` row (mean,
+  max, AVG, ↕ MESc, 3D / mosaic / XYZ, `view ▾`), contrast on one compact row; `ROIs ▾` (clear all, zip, json) by
+  the ROI list and `export ▾` (csv, png) by `traces ⏎`. `view ▾` adds the report's on-screen brightness, contrast and
+  gamma (gamma < 1 lifts the dim): a canvas filter on the frame only — ROIs, numbers and data exports untouched.
 - Viewer: display filters for the traces — Gaussian (σ in frames, with the ms it equals) and Savitzky–Golay (window,
   order; mirrored at the ends, the same numbers as `scipy.signal.savgol_filter(mode="mirror")`). Only what is drawn:
   the axis limits and the hover read the filtered line, the PNG says the filter in its caption, the csv and the zip

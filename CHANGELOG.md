@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.4 — 2026-11-12
 
 - Viewer: a hand icon (pan) beside spot / rect / polygon / ruler — drag the image to move a zoomed view (the grabbed point stays
   under the cursor, so it is right in the MESc flip too; the view stays inside the frame). A click with it adds nothing.

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Viewer: `bg (auto)` under the ROI list — the darkest patch the dF/F subtracts (the dashed box on the image) drawn as
+  a trace like the ROIs, in its colour; raw only (it has no dF/F of its own: it is what the dF/F takes away). The
+  label counts it apart (`1 of 1 ROIs + bg`).
+- Viewer: the browser's own controls (number spinners, selects, checkboxes) in the dark theme (`color-scheme: dark`)
+  instead of white.
 - Viewer: traces compute themselves half a second after the ROIs, the unit or the channel change — the `traces ⏎`
   button is gone (Enter still recomputes; a failing reply is not retried until the ROIs change). `export ▾` (csv,
   png) moved to the traces bar; the `⤢` whole-recording button is gone (double-click on the traces does it).

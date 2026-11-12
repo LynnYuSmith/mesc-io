@@ -9,6 +9,7 @@
      are the working panel; the traces get the whole width because time is horizontal.
      Layout drawn by hand on 2026-09-18 — docs/viewer_design.md. */
   :root {
+    color-scheme: dark;   /* the browser's own controls — number spinners, selects, checkboxes — dark, as the page (12 Nov 2026) */
     --bg:#121417; --panel:#181b1f; --panel-2:#1e2228; --line:#2a2f36;
     --ink:#e6e8ea; --muted:#8b939c; --faint:#5d656e; --sel:#232a33;
     --accent:#4ea3dd; --warn:#e0a33a; --bad:#e05a5a;
@@ -554,7 +555,8 @@ const V = {
   signal: "raw",                            // raw | dff
   dffQ: 0.3, dffWin: 60,                    // the baseline's quantile and window (s)
   tfilt: { kind: "off", sigma: 2, sgWin: 7, sgOrder: 2 },
-  disp: { b: 100, c: 100, g: 100 },         // the picture on screen: brightness %, contrast %, gamma ×100 (12 Nov 2026, as the report's display)   // a DISPLAY filter of the traces (12 Nov 2026): off | gauss | sg; the data, csv and exports stay unfiltered
+  disp: { b: 100, c: 100, g: 100 },
+  showBg: false,                            // draw the auto background trace with the ROIs (raw only), 12 Nov 2026         // the picture on screen: brightness %, contrast %, gamma ×100 (12 Nov 2026, as the report's display)   // a DISPLAY filter of the traces (12 Nov 2026): off | gauss | sg; the data, csv and exports stay unfiltered
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
   tracesH: 275, metaH: 300, toolsW: null, unitsW: 167,          // her start layout, 12 Nov 2026; toolsW null = fit the image to the file's shape (see fitTools)
 };
@@ -572,7 +574,8 @@ let ruler = [], rulerHover = null;
 let volMeas = [];
 const PALETTE = ["#e74c3c","#2ecc71","#9b59b6","#e67e22","#1abc9c","#3498db",
                  "#f1c40f","#e84393","#7f8c8d","#00cec9"];
-const colour = i => PALETTE[i % PALETTE.length];
+const BG_I = -2, BG_COLOUR = "#e0a33a";                 // the auto background trace (the dashed 'bg' box): its index and colour
+const colour = i => i === BG_I ? BG_COLOUR : PALETTE[i % PALETTE.length];
 const fs = () => (unit && unit.frame_rate_hz) || 0;
 /* which ROIs are drawn in the trace strip, for the unit on screen */
 const shown = () => { if (!unit) return {}; if (typeof V.shown[unit.path] !== "object" || !V.shown[unit.path]) V.shown[unit.path] = {}; return V.shown[unit.path]; };
@@ -617,7 +620,7 @@ async function boot() {
     im.onerror = () => { if (++tries > 3) return; setTimeout(() => { im.src = src0 + "&retry=" + tries; }, 800 * tries); };
   });
   const saved = (await (await fetch(API.base + "/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","tfilt","disp","sel","shown","tracesH","metaH","toolsW","unitsW","vol","flipY","mos"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","tfilt","disp","showBg","sel","shown","tracesH","metaH","toolsW","unitsW","vol","flipY","mos"]));
   V.vol = volState(V.vol); V.mos = mosState(V.mos);
   if (V.win !== "pct") V.win = "fixed";
   if (!V.fixBy || typeof V.fixBy !== "object" || Array.isArray(V.fixBy)) V.fixBy = {};
@@ -1483,6 +1486,13 @@ function renderRois() {
       <span class="px">${kindOf(r)} · ${sizeOf(r)}</span>
       <span class="x" data-del="${i}" title="remove">×</span>
     </div>`).join("") : `<div class="r"><span></span><span></span><span class="px">${ROIS.length ? "nothing matches" : "click the image to add one"}</span></div>`;
+  if (ROIS.length) $("roiList").insertAdjacentHTML("beforeend", `
+    <div class="r bgrow" title="the darkest patch the dF/F subtracts as its background (the dashed box on the image), as a trace">
+      <input type="checkbox" class="bgShow" ${V.showBg ? "checked" : ""} title="draw the background trace (raw only)">
+      <span class="sw" style="background:${BG_COLOUR}"></span>
+      <span class="nm">bg (auto)</span>
+      <span class="px">${V.signal === "dff" ? "raw only" : "darkest patch"}</span><span></span>
+    </div>`);
   /* The name used to be a text input filling the row, so a click on the row focused it and
      the Delete key edited the name instead of removing the ROI. Now it is a label; a
      double-click turns it into an input for as long as the rename takes. */
@@ -1508,7 +1518,9 @@ function renderRois() {
       inp.onclick = ev => ev.stopPropagation();
     };
   });
-  $("roiList").querySelectorAll("input[type=checkbox]").forEach(cb => {
+  const bgcb = $("roiList").querySelector(".bgShow");
+  if (bgcb) bgcb.onclick = e => { e.stopPropagation(); V.showBg = bgcb.checked; plotTraces(); saveView(); };
+  $("roiList").querySelectorAll("input[data-show]").forEach(cb => {
     cb.onclick = e => { e.stopPropagation(); shown()[ROIS[+cb.dataset.show].name] = cb.checked; plotTraces(); saveView(); };
   });
   $("roiList").querySelectorAll("[data-del]").forEach(b => { b.onclick = e => { e.stopPropagation(); delRoi(+b.dataset.del); }; });
@@ -1585,8 +1597,12 @@ async function computeTraces() {
 function visibleTraces() {
   if (!TR) return [];
   const src = V.signal === "dff" && TR.dff ? TR.dff : TR.traces;
-  return TR.names.map((n, i) => ({ name: n, i, v: filtered(src, i), area: TR.areas_px[i] }))
+  const ts = TR.names.map((n, i) => ({ name: n, i, v: filtered(src, i), area: TR.areas_px[i] }))
                  .filter(t => shown()[t.name] !== false);
+  // the darkest-patch background the dF/F subtracts, as a trace like the others (her ask, 12 Nov 2026). Raw only:
+  // it has no dF/F of its own — it IS what the dF/F takes away.
+  if (V.showBg && V.signal !== "dff" && TR.bg_trace) ts.push({ name: "bg (auto)", i: BG_I, v: filtered({ [BG_I]: TR.bg_trace }, BG_I), area: null });
+  return ts;
 }
 /* ---- display filters (12 Nov 2026): what is DRAWN is smoothed; TR keeps the numbers as computed, and the
    csv and the zip read those. Edges and NaNs: the Gaussian renormalises over the finite samples it has;
@@ -1705,7 +1721,7 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
              g.fillText(ROIS.length ? "reading every ROI's time course in one pass…" : "draw an ROI on the image — its trace appears here", 12, 24); return; }
   const L = TL, R = TR_, T = TT, B = TB;
   const X = f => L + (f - t0) / Math.max(1, t1 - t0) * (W - L - R);
-  $("traceLbl").textContent = `${ts.length} of ${TR.names.length} ROIs · ${n} frames` + (V.traceZoom ? ` · ${t0}–${t1}` : "")
+  $("traceLbl").textContent = `${ts.filter(t => t.i >= 0).length} of ${TR.names.length} ROIs` + (ts.some(t => t.i === BG_I) ? " + bg" : "") + ` · ${n} frames` + (V.traceZoom ? ` · ${t0}–${t1}` : "")
     + (V.signal === "dff" ? " · dF/F" : " · raw") + (filtDesc() ? " · " + filtDesc() + " (display)" : "");
   $("dffNote").textContent = V.signal === "dff" && TR.params
     ? `dark ${TR.dark} · bg patch ${TR.patch[1]},${TR.patch[0]} · eps ${TR.eps}` + (TR.head ? ` · head ${TR.head} fr` : "") : "";
@@ -1894,7 +1910,7 @@ function setSignal(sig) {
   V.yFixedBy[V.signal] = V.yFixed;                 // remember this signal's typed limits…
   V.signal = sig; V.valueZoom = null;
   V.yFixed = (V.yFixedBy && V.yFixedBy[sig]) || null;   // …and bring back the other's
-  applyStatic(); plotTraces(); saveView();
+  applyStatic(); renderRois(); plotTraces(); saveView();   // renderRois: the bg row says 'raw only' under dF/F
 }
 $("sigRaw").onclick = () => setSignal("raw");
 $("sigDff").onclick = () => setSignal("dff");

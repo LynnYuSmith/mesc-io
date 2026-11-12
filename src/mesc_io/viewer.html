@@ -103,6 +103,7 @@
   #player { display:flex; align-items:center; gap:10px; padding:6px 12px; background:var(--panel);
             border-top:1px solid var(--line) }
   #player input[type=range] { flex:1 }
+  #playBtn.wait { opacity:.5 }               /* playing, but the next frame is still on its way */
   #frameLbl { min-width:150px; text-align:right; font-variant-numeric:tabular-nums }
   #chans button { padding:2px 8px; font-size:11px }
   .readout { position:absolute; left:8px; top:8px; font-size:11px; color:var(--ink); font-variant-numeric:tabular-nums;
@@ -604,7 +605,12 @@ const V = {
 let FILE = null, unit = null;
 // playback lives in MescIO.player; `playing` stays readable by that name — the real-Chrome checks watch it
 const player = MescIO.player.createPlayer(40);
-Object.defineProperty(window, "playing", { get: () => player.playing });
+/* ▶ plays from a buffer (12 Nov 2026, her «плавний програш відео як у репорті»): frames come in blocks of
+   16 from the frames-block endpoint, up to 64 ahead, and are shown every 40 ms; a frame not yet there is waited for, never
+   skipped. `player` (one frame per request) is kept for the hosts that still use it. */
+const stream = MescIO.player.createStreamPlayer({ intervalMs: 40, block: 16, inflight: 2, ahead: 64 });
+const isPlaying = () => player.playing || stream.playing;
+Object.defineProperty(window, "playing", { get: isPlaying });
 let ROIS = [], tool = "spot", draft = [], TR = null;   // TR = last traces payload
 /* The ruler: two points in image coordinates (sub-pixel, as clicked), and the cursor while the
    second is still to come. It is not an ROI — nothing is saved or exported — and it measures in
@@ -709,7 +715,7 @@ function applyStatic() {                 // controls that reflect V without a un
 }
 
 function pick(i, restoring) {
-  if (player.playing) togglePlay();
+  if (isPlaying()) togglePlay();
   unit = FILE.units[i]; ruler = []; rulerHover = null;   // a ruler is in one unit's pixels
   volMeas = V.vol.measBy[unit.path] || (V.vol.measBy[unit.path] = []);   // the 3D ruler: this unit's, kept with the view
   document.querySelectorAll(".u").forEach((d, k) => d.classList.toggle("on", k === i));
@@ -890,7 +896,30 @@ function lut32Pair(pa, pb) {               // every (a, b) grey pair once, summe
   }
   return (_lut32Cache[key] = T);
 }
-let _compTmp = null;
+let _compTmp = null, _streamCanvas = null;
+/* composite() for frames that arrived as bytes (playback): the same palettes, the same sums, without
+   decoding a PNG and reading it back. One canvas, reused: it always holds the frame on screen. */
+function compositeGrey(greys, chans) {
+  const w = unit.width, h = unit.height, N = w * h;
+  if (!_streamCanvas) _streamCanvas = document.createElement("canvas");
+  const out = _streamCanvas; if (out.width !== w || out.height !== h) { out.width = w; out.height = h; }
+  const og = out.getContext("2d"), od = og.createImageData(w, h);
+  if (LITTLE && greys.length <= 2) {
+    const o32 = new Uint32Array(od.data.buffer), s0 = greys[0];
+    if (greys.length === 1) { const T = lut32Of(paletteFor(chans[0])); for (let i = 0; i < N; i++) o32[i] = T[s0[i]]; }
+    else { const T = lut32Pair(paletteFor(chans[0]), paletteFor(chans[1])), s1 = greys[1];
+           for (let i = 0; i < N; i++) o32[i] = T[s0[i] << 8 | s1[i]]; }
+  } else {
+    const acc = new Uint16Array(N * 3);
+    greys.forEach((px, j) => { const L = lutOf(paletteFor(chans[j]));
+      for (let i = 0, p = 0; i < N; i++, p += 3) { const c = L[px[i]]; acc[p] += c[0]; acc[p + 1] += c[1]; acc[p + 2] += c[2]; } });
+    for (let i = 0, p = 0; i < od.data.length; i += 4, p += 3) {
+      od.data[i] = Math.min(255, acc[p]); od.data[i + 1] = Math.min(255, acc[p + 1]); od.data[i + 2] = Math.min(255, acc[p + 2]); od.data[i + 3] = 255;
+    }
+  }
+  og.putImageData(od, 0, 0);
+  return out;
+}
 function composite(images, chans) {
   const w = unit.width, h = unit.height;
   if (images.length === 1 && paletteFor(chans[0]) === "grey" && images[0].naturalWidth === w && images[0].naturalHeight === h) return images[0];
@@ -983,6 +1012,9 @@ function draw() {
   // A stack's third axis is depth, so the slider counts slices and the label says microns.
   // Calling a slice a "frame" and offering it in seconds is how a 1 um step became "1000 Hz"
   // one layer down; the same axis deserves its own name here too.
+  frameLabel();
+}
+function frameLabel() {
   const dz = unit.z_step_um;
   $("frameLbl").textContent = V.proj
     ? (V.proj === "max" ? "brightest over " : "mean over ") + (dz ? "depth" : "the recording")
@@ -1342,10 +1374,27 @@ $("stage").onwheel = ev => {
 /* ---- player ---- */
 $("frame").oninput = () => { V.frame = +$("frame").value; showFrames(); draw(); plotTraces(); saveView(); };
 function togglePlay() {
-  if (player.playing) { player.stop(); $("playBtn").textContent = "▶"; return; }
+  if (isPlaying()) { player.stop(); stream.stop(); $("playBtn").textContent = "▶"; $("playBtn").classList.remove("wait"); draw(); return; }
   showFrames(); $("playBtn").textContent = "❚❚";
-  player.start({ range: V.traceZoom || [0, unit.frames - 1], frame: () => V.frame, isBusy: () => frameLoader.busy,
-                 onFrame: f => { V.frame = f; $("frame").value = V.frame; draw(); plotTraces(); } });
+  const forUnit = unit, N = unit.width * unit.height;
+  stream.start({
+    range: V.traceZoom || [0, unit.frames - 1], frame: () => V.frame,
+    // what the bytes depend on; the palettes are not here — they are applied on the way to the screen
+    key: () => [unit.path, shownChans().map(c => c + ":" + winQuery(c)).join(","), V.avg].join("|"),
+    fetch: (s, n) => {
+      const chans = shownChans();
+      return Promise.all(chans.map(c => fetch(`${API.base}/api/frames/${unit.path}/${c}/${s}?${winQuery(c)}&n=${V.avg}&count=${n}`)
+        .then(r => { if (!r.ok) throw new Error("frames " + r.status); return r.arrayBuffer(); })))
+        .then(bufs => { const out = []; for (let k = 0; k < n; k++) out.push(bufs.map(b => new Uint8Array(b, k * N, N))); return out; });
+    },
+    onFrame: (f, greys) => {
+      if (unit !== forUnit) return;
+      V.frame = f; $("frame").value = f;
+      imgEl = compositeGrey(greys, shownChans()); paint(); frameLabel(); plotTraces();
+    },
+    onWait: w => $("playBtn").classList.toggle("wait", w),
+    onError: () => { $("playBtn").textContent = "▶"; $("playBtn").classList.remove("wait"); badge("playback: frames failed to load", true); },
+  });
 }
 $("playBtn").onclick = togglePlay;
 function showFrames() { V.proj = ""; $("meanBtn").classList.remove("on");
@@ -4060,7 +4109,7 @@ function mosKey(e) {
 }
 $("mosBtn").onclick = () => {
   V.mos.on = !V.mos.on;
-  if (V.mos.on) { V.vol.on = false; V.vol.ortho = false; volShow(); if (player.playing) togglePlay(); }
+  if (V.mos.on) { V.vol.on = false; V.vol.ortho = false; volShow(); if (isPlaying()) togglePlay(); }
   mosShow(); saveView();
 };
 $("mosEdit").onclick = () => { V.mos.edit = !V.mos.edit; mosDraw(); saveView(); };

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import socket
 import threading
+import urllib.error
 import urllib.request
 from http.server import HTTPServer
 from pathlib import Path
@@ -18,6 +19,7 @@ import numpy as np
 import pytest
 
 from mesc_io import MescFile
+from mesc_io import viewer as viewer_mod
 from mesc_io.viewer import _Handler
 
 OFFSET = -786.0
@@ -715,3 +717,36 @@ def test_a_mounted_engine_leaves_the_question_to_its_host(recording, tmp_path):
     eng = Engine(recording, rois=tmp_path / "eng_rois.json")
     status, _, _ = eng.handle("GET", "/api/file", headers={"Host": "lab-server.example"})
     assert status == 200
+
+
+# --- playback blocks (12 Nov 2026) ------------------------------------------------------------
+
+def _get_full(url):
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return r.read(), dict(r.headers)
+
+
+@pytest.mark.parametrize("query", ["n=1&lo=0&hi=100", "n=4&lo=1&hi=99", "n=1&vmin=900&vmax=1600",
+                                   "n=3&vmin=0&vmax=2000"])
+def test_a_block_of_frames_is_the_frames_png_pixel_for_pixel(server, query):
+    """/api/frames is only a faster road to the same picture: every frame of the block equals the
+    PNG /api/frame sends for it, whatever the averaging window and the display window."""
+    body, hd = _get_full(server + f"/api/frames/MSession_0/MUnit_0/0/3?count=5&{query}")
+    start, count, h, w = (int(x) for x in hd["X-Frames"].split(","))
+    assert (start, count, h, w) == (3, 5, 6, 8)
+    assert hd["Content-Type"] == "application/octet-stream"
+    block = np.frombuffer(body, dtype=np.uint8).reshape(count, h, w)
+    for k in range(count):
+        png, _ = get(server + f"/api/frame/MSession_0/MUnit_0/0/{3 + k}?{query}")
+        assert np.array_equal(block[k], _decode_grey_png(png)), f"frame {3 + k} differs ({query})"
+    _, hd1 = _get_full(server + f"/api/frame/MSession_0/MUnit_0/0/3?{query}")
+    assert hd["X-Window"] == hd1["X-Window"]
+
+
+def test_a_block_stops_at_the_end_of_the_recording_and_is_capped(server):
+    body, hd = _get_full(server + "/api/frames/MSession_0/MUnit_0/0/7?count=16&lo=0&hi=100")
+    assert hd["X-Frames"] == "7,3,6,8" and len(body) == 3 * 6 * 8      # frames 7, 8, 9 — never past 9
+    _, hd = _get_full(server + "/api/frames/MSession_0/MUnit_0/0/0?count=999&lo=0&hi=100")
+    assert int(hd["X-Frames"].split(",")[1]) == min(10, viewer_mod.MAX_STREAM_FRAMES)
+    with pytest.raises(urllib.error.HTTPError):
+        get(server + "/api/frames/MSession_0/MUnit_0/0/10?count=2")

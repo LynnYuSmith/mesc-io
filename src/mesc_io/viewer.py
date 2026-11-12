@@ -20,6 +20,11 @@ Endpoints:
                                               LUT — or ?lo=&hi= percentiles of the whole unit,
                                               ?n= average of n frames centred on i;
                                               ?win_unit= the percentiles of another unit)
+    GET  /api/frames/{unit}/{ch}/{start}    → frames start… as 8-bit bytes, row-major, one after another
+                                              (?count= at most MAX_STREAM_FRAMES, clipped at the end;
+                                              the same window and ?n= as /api/frame, the same pixels as
+                                              its PNG). X-Frames: start,count,height,width. For smooth
+                                              playback: one request per block instead of one per frame.
     GET  /api/mean/{unit}/{ch}              → PNG of the mean image  (?lo=&hi=)
     GET  /api/pixel/{unit}/{ch}?x=&y=&i=&n=  → one pixel's value in reader units (n frames averaged;
                                               i omitted = the mean image), for the hover readout
@@ -92,6 +97,8 @@ _STATIC_NAME = re.compile(r"^[a-z][a-z0-9_]*\.js$")
 #: is 0.5 GB as float64 -- already a lot for a hover; unbounded, a URL could ask for the whole
 #: recording and take the machine down (2026-09-18 review).
 MAX_AVG_FRAMES = 256
+#: Frames per /api/frames block: 32 frames of 512² are 8 MB of bytes, about one second of playback.
+MAX_STREAM_FRAMES = 32
 #: The reader's memory guard, kept on for every read this server does. A slice that would
 #: exceed it answers 400 with the reader's own message instead of being attempted.
 MAX_READ_GB = 2.0
@@ -270,10 +277,16 @@ def _png(img: np.ndarray, window) -> bytes:
         lo, hi = float(p), float(q)
     else:
         lo, hi = np.percentile(a, [p, q])
+    return _png_grau(_to_u8(a, lo, hi))
+
+
+def _to_u8(a: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    """Values in reader units → 0…255 through the window [lo, hi]. The one mapping /api/frame's PNG
+    and /api/frames' bytes share, so a frame looks the same whichever way it travelled."""
+    a = np.asarray(a, dtype=np.float32)
     if hi <= lo:
         hi = lo + 1.0
-    b = np.clip((a - lo) / (hi - lo), 0, 1)
-    return _png_grau((b * 255).astype(np.uint8))
+    return (np.clip((a - lo) / (hi - lo), 0, 1) * 255).astype(np.uint8)
 
 
 def _png_grau(a: np.ndarray) -> bytes:
@@ -406,6 +419,8 @@ class _Handler(BaseHTTPRequestHandler):
             # page showed a blank field with nothing in the log.
             if parts[:2] == ["api", "frame"] and len(parts) >= 5:
                 return self._frame("/".join(parts[2:-2]), int(parts[-2]), int(parts[-1]), q)
+            if parts[:2] == ["api", "frames"] and len(parts) >= 5:
+                return self._frames("/".join(parts[2:-2]), int(parts[-2]), int(parts[-1]), q)
             if parts[:2] == ["api", "mean"] and len(parts) >= 4:
                 return self._mean("/".join(parts[2:-1]), int(parts[-1]), q)
             if parts[:2] == ["api", "pixel"] and len(parts) >= 4:
@@ -988,6 +1003,38 @@ class _Handler(BaseHTTPRequestHandler):
         # the floor / ceiling actually used, in reader units: a host switching from auto to a fixed window
         # starts from the picture already on screen (X-Window, as /api/volume sends it)
         self._send(_png(img, win), "image/png", headers={"X-Window": f"{float(win[1]):.6g},{float(win[2]):.6g}"})
+
+    def _frames(self, unit, ch, start, q):
+        """A block of frames for playback: what /api/frame gives for start, start+1, … — the same
+        averaging window, the same display window, the same 0…255 pixels as its PNG — as raw bytes
+        in one answer. One round trip per block instead of per frame is what lets a lab PC on a
+        network drive play without stalls; no PNG to encode or decode either."""
+        n = max(1, min(MAX_AVG_FRAMES, int(float(q.get("n", ["1"])[0]))))
+        op = "max" if q.get("proj", ["mean"])[0] == "max" else "mean"
+        count = max(1, min(MAX_STREAM_FRAMES, int(float(q.get("count", ["16"])[0]))))
+        with self._file() as f:
+            u = f.unit(unit)
+            if not (0 <= start < u.n_frames):
+                raise ValueError(f"frame {start} is outside 0..{u.n_frames - 1}")
+            count = min(count, u.n_frames - start)
+            if n == 1:
+                imgs = f.read(unit, channel=ch, frames=slice(start, start + count), reader_units=True,
+                              max_gb=MAX_READ_GB)
+            else:                                   # each frame its own centred window, as /api/frame
+                imgs = []
+                for i in range(start, start + count):
+                    lo = max(0, i - n // 2)
+                    hi = min(u.n_frames, lo + n)
+                    imgs.append(_reduce(f, unit, ch, slice(max(0, hi - n), hi), op))
+                imgs = np.stack(imgs)
+            h, w = u.height, u.width
+        win = self._window(q)
+        if win[0] == "pct":
+            win = ("fixed", *self._unit_window((q.get("win_unit") or [unit])[0], ch, win[1], win[2], n, op))
+        body = _to_u8(imgs, float(win[1]), float(win[2])).tobytes()
+        self._send(body, "application/octet-stream",
+                   headers={"X-Frames": f"{start},{count},{h},{w}",
+                            "X-Window": f"{float(win[1]):.6g},{float(win[2]):.6g}"})
 
     #: How many frames (or n-frame averages) the whole-recording percentile window is taken from.
     PCT_SAMPLE = 64

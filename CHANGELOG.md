@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Viewer: smooth playback. ▶ used to ask for one PNG, wait for it, then ask for the next; on a lab PC reading a
+  network drive every frame paid the whole round trip and the picture jerked (≈ 8 frames/s at 80 ms per request).
+  Frames now come in blocks of 16 from `/api/frames/{unit}/{ch}/{start}?count=` as 8-bit bytes, up to 64 ahead,
+  shown every 40 ms; a frame not yet there is waited for, never skipped. Measured in Chrome on a real recording
+  (256², 80 ms latency, CPU 4× slower): 123 frames in 5 s at a steady 35 ms, against 42 at 117 ms before; with an
+  averaging window of 10, 119 against 62 even on a fast line. The block's pixels are the PNG's, byte for byte
+  (tested on the server, and in Chrome on the picture on screen). `MescIO.player.createStreamPlayer` is the
+  engine part, for the report's playground too. `tests/view_playback_real_chrome.js` is the check.
+
 ## 0.6.5 — 2026-11-12
 
 - Viewer: a new look — the palette of [NERV Theme](https://github.com/wongmjane/nerv-theme) by Jane Manchun Wong (MIT):

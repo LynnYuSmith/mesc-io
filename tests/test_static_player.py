@@ -65,3 +65,51 @@ def test_viewer_serves_player_js(standalone):
 
 
 from test_engine import standalone  # noqa: E402,F401
+
+
+STREAM = r"""
+const vm = require("node:vm"), fs = require("node:fs");
+let ticks = [];
+const sb = { console, setInterval: f => { ticks.push(f); return 7; }, clearInterval: () => { ticks = []; } };
+sb.window = sb;
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), vm.createContext(sb));
+const P = sb.MescIO.player, out = { fetched: [], shown: [], waits: [] };
+const pending = [];                                  // fetches resolve when the test says so
+let frame = 0, key = "a";
+const pl = P.createStreamPlayer({ intervalMs: 40, block: 4, inflight: 2, ahead: 8 });
+const flush = () => new Promise(r => setTimeout(r, 0));
+(async () => {
+  pl.start({ range: [0, 9], frame: () => frame, key: () => key,
+             fetch: (s, n) => { out.fetched.push([s, n]); return new Promise(ok => pending.push(() => ok(Array.from({ length: n }, (_, k) => "p" + (s + k))))); },
+             onFrame: (f, p) => { frame = f; out.shown.push([f, p]); }, onWait: w => out.waits.push(w) });
+  out.first_requests = out.fetched.slice();          // two blocks asked for at once, before any tick
+  ticks[0]();                                        // nothing has arrived: wait, do not skip
+  out.frame_while_waiting = frame;
+  pending.shift()(); await flush();                  // block 1..4 lands
+  ticks[0](); ticks[0](); ticks[0]();                // 1, 2, 3 — one per tick
+  pending.shift()(); await flush();
+  for (let i = 0; i < 8; i++) { ticks[0](); while (pending.length) { pending.shift()(); await flush(); } }
+  out.after_loop = frame;
+  key = "b"; ticks[0](); out.after_key_change_buffered = pl.buffered;
+  pl.stop(); out.playing_after_stop = pl.playing;
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+@pytest.mark.skipif(not NODE, reason="node is not on this machine")
+def test_stream_player_buffers_ahead_waits_never_skips_and_loops(tmp_path):
+    js = tmp_path / "s.js"
+    js.write_text(STREAM, encoding="utf-8")
+    r = subprocess.run([NODE, str(js), str(PLAYER)], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    o = json.loads(r.stdout)
+    assert o["first_requests"] == [[1, 4], [5, 4]]               # blocks, ahead of the frame on screen
+    assert o["frame_while_waiting"] == 0 and o["waits"][0] is True
+    seen = [f for f, _ in o["shown"]]
+    assert seen[:3] == [1, 2, 3]
+    assert all(p == "p" + str(f) for f, p in o["shown"])          # each frame with its own payload
+    assert all((b - a) % 10 == 1 for a, b in zip(seen, seen[1:]))  # never a skipped frame; 9 → 0 loops
+    assert 0 in seen[3:]                                          # it went round the loop
+    assert o["after_key_change_buffered"] == 0                    # a new window: old frames dropped
+    assert o["playing_after_stop"] is False

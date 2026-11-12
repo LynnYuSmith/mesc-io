@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Viewer: the automatic y-limits of the traces no longer cut the peaks off. The top was the 99th percentile of
+  the visible frames, and a calcium transient is exactly the top 1 % of a sparse trace — on a trace with a few
+  short transients the window showed only the noise. The bottom stays on the 1st percentile (a black head or a
+  dropped frame still does not flatten the rest); the top is now the true maximum. NaNs are dropped before the
+  limits are taken. The margin each side is 3 % of the range (was 6 %).
+
 ## 0.6.3 — 2026-11-11
 
 - `write_frames` (and `mesc-io write`) builds the copy as `<out>.partial` and renames it when every frame and tag

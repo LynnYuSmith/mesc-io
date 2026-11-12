@@ -1599,9 +1599,9 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
   }
   syncYBoxes();
 }
-/* Axis limits adapt to what is on screen: the 1st and 99th percentile of the visible frames,
-   padded a little. Min/max let a single odd frame (the black head, a saturated flash) flatten
-   everything else into a line. */
+/* Axis limits adapt to what is on screen: the 1st percentile of the visible frames below (a black
+   head or a dropped frame would flatten everything else into a line) and the true maximum above
+   (a transient is the top of the trace — see limits()), padded a little. */
 /* The overlay's auto limits, cached for the window on screen: the hover readout asked for
    them on every mouse move, which meant a copy and a sort of every visible sample per move.
    Keyed by the payload itself, not its unit and channel: a refetch with a new q is new numbers. */
@@ -1620,11 +1620,15 @@ function bandLimits(t, t0, t1) {
   if (!v) { v = limits(t.v.slice(t0, t1 + 1)); bandCache.map.set(t.i, v); }
   return v;
 }
+/* The bottom on the 1st percentile (a black head or a dropped frame must not squash the trace),
+   the top on the true maximum: a calcium transient IS the top 1 % of the frames, and a 99th
+   percentile top cut every peak off (12 Nov 2026). NaNs are dropped first — sorted, they
+   land at the end of the array and used to become the upper limit. */
 function limits(vals) {
-  if (!vals.length) return [0, 1];
-  const a = Float64Array.from(vals).sort();
-  const lo = a[Math.floor(0.01 * (a.length - 1))], hi = a[Math.ceil(0.99 * (a.length - 1))];
-  const pad = (hi - lo) * 0.06 || 1;
+  const a = Float64Array.from(vals).filter(Number.isFinite).sort();
+  if (!a.length) return [0, 1];
+  const lo = a[Math.floor(0.01 * (a.length - 1))], hi = a[a.length - 1];
+  const pad = (hi - lo) * 0.03 || 1;   // a 3 % margin each side (her 2–4 %): the peak never touches the frame
   return [lo - pad, hi + pad];
 }
 let lastAuto = null;

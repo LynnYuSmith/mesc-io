@@ -244,6 +244,11 @@
   .dd-body input[type=number] { width:60px; font-size:11px; padding:1px 4px }
   .dd-body [hidden] { display:none }
   .dd-body h5 { margin:2px 0 0; font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em }
+  .onscreen { margin-top:8px; padding-top:6px; border-top:1px solid var(--line) }
+  .onscreen .sub { font-size:10px; color:var(--faint); margin-bottom:4px }
+  .onscreen .krow { display:grid; grid-template-columns:70px 1fr 44px; gap:8px; align-items:center; font-size:11px; color:var(--muted) }
+  .onscreen .krow input[type=range] { width:100% }
+  .onscreen .ddrow { display:flex; gap:6px; margin-top:4px }
   .dd-body .krow { display:grid; grid-template-columns:70px 1fr 44px; gap:8px; align-items:center; color:var(--muted) }
   .dd-body .krow input[type=range] { width:100% }
   .dd-body a { color:var(--accent); text-decoration:none; padding:2px 6px }
@@ -413,7 +418,7 @@
     </div>
     <div class="grp"><span class="glbl">image</span>
       <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button><button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button><label class="stepper" title="average this many frames around the slider (1 = the raw frame)"><span>AVG</span><input type="number" id="avgN" min="1" max="999" step="1" value="1"></label><button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button><button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button><button id="mosBtn" hidden title="every z-stack of the file with a stage position, laid out as one field: stitch it from the overlaps, move tiles by hand, flatten it on the surface, cut a piece out as a TIFF">mosaic</button><button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
-      <span class="gap"></span><details class="dd"><summary title="save a PNG; brightness, contrast and gamma of the picture on screen">view</summary><div class="dd-body right"><div class="ddrow"><button id="pngBtn" title="save what is on screen as a PNG: the image at its own pixels (whole pixels, no blur) with the ROIs, the ruler, a µm scale bar and a caption — or the 3D view when it is open">PNG</button></div><h5>on screen — the picture only (ROIs, numbers and exports of data untouched)</h5><div class="krow"><span>brightness</span><input type="range" id="dispB" min="20" max="400" step="5" value="100"><span id="dispBV"></span></div><div class="krow"><span>contrast</span><input type="range" id="dispC" min="20" max="400" step="5" value="100"><span id="dispCV"></span></div><div class="krow"><span>gamma</span><input type="range" id="dispG" min="30" max="200" step="5" value="100"><span id="dispGV"></span></div><div class="ddrow"><button id="dispReset" title="brightness, contrast and gamma back to 100 % / 1.00">reset</button></div></div></details>
+      <button id="pngBtn" title="save what is on screen as a PNG: the image at its own pixels (whole pixels, no blur) with the ROIs, the ruler, a µm scale bar and a caption — or the 3D view when it is open">PNG</button>
     </div>
     <details class="grpd">
       <summary>contrast</summary>
@@ -428,6 +433,7 @@
       <div class="row"><span>low</span><input type="range" id="lo" min="0" max="20" step="0.5" value="1"><span id="loVal">1 %</span></div>
       <div class="row"><span>high</span><input type="range" id="hi" min="90" max="100" step="0.1" value="99.5"><span id="hiVal">99.5 %</span></div>
       </div>
+          <div class="onscreen"><div class="sub">on screen — the picture only; ROIs, numbers and data exports untouched</div><div class="krow"><span>brightness</span><input type="range" id="dispB" min="20" max="400" step="5" value="100"><span id="dispBV"></span></div><div class="krow"><span>contrast</span><input type="range" id="dispC" min="20" max="400" step="5" value="100"><span id="dispCV"></span></div><div class="krow"><span>gamma</span><input type="range" id="dispG" min="30" max="200" step="5" value="100"><span id="dispGV"></span></div><div class="ddrow"><button id="dispReset" title="brightness, contrast and gamma back to 100 % / 1.00">reset</button></div></div>
     </details>
 
     <h2 class="roih">rois <span id="roiCount" class="faint"></span> <span id="roiUnit" class="faint" style="font-weight:400;text-transform:none;letter-spacing:0"></span>

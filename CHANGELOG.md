@@ -13,7 +13,7 @@
 - Viewer: a guide behind `?` in the top-right corner (or the ? key): units, image, ROIs, contrast, traces, z-stacks,
   keys. Esc, ✕ or a click beside it closes it.
 - Viewer: the start layout fits the image to the file's shape — square for a square unit — with units 167 px and
-  traces 275 px; the instruments take the rest until their edge is dragged (then that width is kept).
+  traces 275 px; the instruments take the rest until their edge is dragged (then that width is kept). Traces open in overlay.
 - Viewer: secondary controls moved into dropdown panels (`name ▾`), like the report's playground — one open at a
   time, a click outside or Esc closes it, and a panel with a mode switched on inside (box, measure, crop, a trace
   filter) lights its name. Traces: `baseline ▾`, `filter ▾` (the y limits and the grid stay on the bar); 3D: `window ▾`, `view ▾`, `box ▾`,

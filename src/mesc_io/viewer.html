@@ -467,8 +467,8 @@
 <span class="hint" id="dffNote"></span></div></details>
       <details class="dd modes"><summary title="smooth the traces on screen: Gaussian or Savitzky–Golay. Only what is drawn — the numbers, the csv and the exports stay as computed">filter</summary><div class="dd-body right"><div class="ddrow"><button id="fGauss" title="Gaussian smoothing, σ in frames (click again: off)">Gauss</button><label title="σ of the Gaussian, in frames">σ<input type="number" id="fSigma" min="0.3" max="50" step="0.5"></label><span class="hint" id="fSigmaMs"></span></div><div class="ddrow"><button id="fSg" title="Savitzky–Golay: a polynomial fitted in a sliding window — keeps the height and width of a peak better than a Gaussian (click again: off)">SavGol</button><label title="window in frames (odd)">win<input type="number" id="fSgWin" min="3" max="201" step="2"></label><label title="polynomial order (below the window)">order<input type="number" id="fSgOrd" min="0" max="6" step="1"></label></div><span class="hint">display only — csv and exports are unfiltered</span></div></details>
       <span style="width:8px"></span>
-      <button id="modeStack" class="on" title="one line per ROI, with an offset">stack</button>
-      <button id="modeOverlay" title="all on one axis">overlay</button>
+      <button id="modeStack" title="one line per ROI, with an offset">stack</button>
+      <button id="modeOverlay" class="on" title="all on one axis">overlay</button>
       <button id="gridBtn" class="on" title="time and value grid">grid</button><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label>
       <details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
     </div>
@@ -546,7 +546,7 @@ const V = {
   cmapBy: {},                               // "unit|ch" -> palette name; "file" = the channel's own colour
   overlay: false,                           // all channels at once, each through its own window and colour, added
   zoom: { x: 0, y: 0, w: 0, h: 0 },        // in image pixels; w=0 means the whole frame
-  traceMode: "stack", grid: true, traceZoom: null,   // [t0, t1] in frames, or null
+  traceMode: "overlay", grid: true, traceZoom: null,   // [t0, t1] in frames, or null
   valueZoom: null,                          // overlay only: [lo, hi] in reader units, or null
   yFixed: null,                             // typed limits [lo, hi] for the signal on screen; apply to every band and the overlay until 'auto'
   yFixedBy: { raw: null, dff: null },       // the typed limits of each signal, kept across the raw | dF/F switch

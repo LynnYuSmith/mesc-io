@@ -230,7 +230,6 @@
   details.dd > summary { list-style:none; cursor:pointer; user-select:none; white-space:nowrap; padding:4px 10px;
                          border:1px solid var(--line); background:var(--panel-2); color:var(--ink); border-radius:5px }
   details.dd > summary::-webkit-details-marker { display:none }
-  details.dd > summary.ddmini { padding:4px 6px }   /* a bare ▾ beside the button it belongs to */
   #volBar details.dd > summary, #mosBar details.dd > summary { padding:2px 8px }   /* as small as the buttons beside it */
   details.dd > summary::after { content:" \25BE"; color:var(--muted) }
   details.dd > summary:hover, details.dd[open] > summary { border-color:var(--accent) }
@@ -470,7 +469,7 @@
       <span style="width:8px"></span>
       <button id="modeStack" title="one line per ROI, with an offset">stack</button>
       <button id="modeOverlay" class="on" title="all on one axis">overlay</button>
-      <button id="gridBtn" class="on" title="time and value grid">grid</button><details class="dd"><summary class="ddmini" title="grid options: minor ticks, steps, the zero line"></summary><div class="dd-body right"><div class="ddrow"><button id="gMinor" title="minor ticks between the labelled lines (a fifth of a step)">minor</button><button id="gZero" title="the zero line, marked">zero line</button></div><div class="ddrow"><label title="time step in seconds (empty: auto)">time step<input type="number" id="gTStep" min="0.01" step="any" placeholder="auto"><span>s</span></label></div><div class="ddrow"><label title="value step in the signal's units — reader units for raw, dF/F for dF/F (empty: auto)">value step<input type="number" id="gVStep" min="0" step="any" placeholder="auto"></label></div></div></details><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label>
+      <details class="dd modes"><summary title="the grid: on or off, minor ticks, steps, the zero line">grid</summary><div class="dd-body right"><div class="ddrow"><button id="gridBtn" class="on" title="time and value grid on or off">grid</button><button id="gMinor" title="minor ticks between the labelled lines (a fifth of a step)">minor</button><button id="gZero" title="the zero line, marked">zero line</button></div><div class="ddrow"><label title="time step in seconds (empty: auto)">time step<input type="number" id="gTStep" min="0.01" step="any" placeholder="auto"><span>s</span></label></div><div class="ddrow"><label title="value step in the signal's units — reader units for raw, dF/F for dF/F (empty: auto)">value step<input type="number" id="gVStep" min="0" step="any" placeholder="auto"></label></div></div></details><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label>
       <details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
     </div>
     <div id="traceScroll"><div id="traceCursor"></div><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
@@ -505,7 +504,7 @@
       <p>They compute themselves half a second after the ROIs change (<b>Enter</b> recomputes). <b>raw</b> | <b>dF/F</b>
       — dF/F by the pipeline's method; <b>baseline ▾</b> sets its rolling quantile and window. <b>filter ▾</b>:
       Gaussian or Savitzky–Golay smoothing of what is drawn — the csv and the exports stay unfiltered.
-      <b>stack</b> | <b>overlay</b>; <b>grid</b> (its <b>▾</b>: minor ticks, fixed steps, the zero line); <b>y</b> limits typed, or <b>auto</b>. <b>Drag a box</b> zooms time
+      <b>stack</b> | <b>overlay</b>; <b>grid ▾</b>: the grid on or off, minor ticks, fixed steps, the zero line; <b>y</b> limits typed, or <b>auto</b>. <b>Drag a box</b> zooms time
       (in overlay the values too), <b>double-click</b> shows the whole recording, <b>← →</b> slide a zoomed window;
       a click puts the movie on that frame. <b>export ▾</b>: csv, or the traces as drawn as a PNG.</p>
       <h3>z-stacks</h3>

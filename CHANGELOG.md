@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Viewer: secondary controls moved into dropdown panels (`name ▾`), like the report's playground — one open at a
+  time, a click outside or Esc closes it, and a panel with a mode switched on inside (box, measure, crop, a trace
+  filter) lights its name. Traces: `baseline ▾`, `filter ▾`, `axis ▾`; 3D: `window ▾`, `view ▾`, `box ▾`,
+  `measure ▾`; mosaic: `show ▾`, `crop ▾`, `export ▾`; instruments: `view ▾` (AVG, ↕ MESc, PNG). Every control keeps
+  its id and behaviour.
+- Viewer: display filters for the traces — Gaussian (σ in frames, with the ms it equals) and Savitzky–Golay (window,
+  order; mirrored at the ends, the same numbers as `scipy.signal.savgol_filter(mode="mirror")`). Only what is drawn:
+  the axis limits and the hover read the filtered line, the PNG says the filter in its caption, the csv and the zip
+  stay unfiltered.
+- Viewer: the units column resizes by dragging its edge, like the instruments and the traces. Default sizes: traces
+  338 px, instruments 661 px (the grid still caps them on a small window).
 - Viewer: the automatic y-limits of the traces no longer cut the peaks off. The top was the 99th percentile of
   the visible frames, and a calcium transient is exactly the top 1 % of a sparse trace — on a trace with a few
   short transients the window showed only the noise. The bottom stays on the 1st percentile (a black head or a

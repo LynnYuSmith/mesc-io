@@ -21,8 +21,8 @@
           /* the saved sizes are wishes, not orders: whatever the window, the image keeps at least
              240 × 200 px and the tools and traces give way (a size saved on a big screen, or a
              splitter dragged to the edge, used to push panes off the window) */
-          grid-template-columns:230px minmax(240px, 1fr) min(var(--tools-w, 260px), calc(100vw - 470px));
-          grid-template-rows:minmax(200px, 1fr) min(var(--traces-h, 260px), calc(100vh - 200px));
+          grid-template-columns:var(--units-w, 230px) minmax(240px, 1fr) min(var(--tools-w, 661px), calc(100vw - var(--units-w, 230px) - 240px));
+          grid-template-rows:minmax(200px, 1fr) min(var(--traces-h, 338px), calc(100vh - 200px));
           grid-template-areas:"units image tools" "traces traces traces" }
   h1 { font-size:13px; font-weight:600; margin:0; padding:10px 12px 6px; color:var(--muted);
        letter-spacing:.02em; text-transform:lowercase }
@@ -42,7 +42,7 @@
   .faint { color:var(--faint) }
 
   /* ---- units (left) ---- */
-  #unitsCol { grid-area:units; display:flex; flex-direction:column; min-height:0;
+  #unitsCol { position:relative; grid-area:units; display:flex; flex-direction:column; min-height:0;
               background:var(--panel); border-right:1px solid var(--line) }
   #units { flex:1 1 auto; overflow-y:auto; min-height:120px }
   .u { display:grid; grid-template-columns:44px 1fr; gap:8px; align-items:center;
@@ -202,6 +202,8 @@
               background:var(--panel); border-left:1px solid var(--line) }
   #toolsSplit { position:absolute; left:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:2 }
   #toolsSplit:hover { background:var(--accent) }
+  #unitsSplit { position:absolute; right:-3px; top:0; bottom:0; width:6px; cursor:col-resize; z-index:2 }   /* 12 Nov 2026: the units column resizes too */
+  #unitsSplit:hover { background:var(--accent) }
   .instr { display:flex; gap:6px; padding:0 12px; flex-wrap:wrap }
   .instr button { flex:0 0 auto; min-width:40px }
   .stepper { display:inline-flex; align-items:center; border:1px solid var(--line);
@@ -215,11 +217,32 @@
   .sizes label { display:inline-flex; align-items:center; gap:4px }
   .sizes input[type=number] { width:52px; padding:2px 4px; font-size:11px }
   .sizes span { color:var(--faint) }
-  details { margin:8px 12px 0; font-size:12px }
-  summary { cursor:pointer; color:var(--muted); user-select:none }
-  details .row { display:grid; grid-template-columns:52px 1fr 48px; gap:8px; align-items:center;
+  details:not(.dd) { margin:8px 12px 0; font-size:12px }
+  details:not(.dd) > summary { cursor:pointer; color:var(--muted); user-select:none }
+  details:not(.dd) .row { display:grid; grid-template-columns:52px 1fr 48px; gap:8px; align-items:center;
                  margin-top:6px; font-size:11px; color:var(--muted) }
-  details .row input[type=range] { width:100% }
+  details:not(.dd) .row input[type=range] { width:100% }
+  /* ---- dropdown panels (12 Nov 2026, like the report's playground): the main buttons stay in the bar, the
+     rest opens under a 'name ▾'; one open at a time, a click outside or Esc closes it. A panel with a mode
+     switched on inside it (.modes) lights its name, so a closed panel never hides an active mode. ---- */
+  details.dd { position:relative; display:inline-block; margin:0; font-size:inherit }
+  details.dd > summary { list-style:none; cursor:pointer; user-select:none; white-space:nowrap; padding:4px 10px;
+                         border:1px solid var(--line); background:var(--panel-2); color:var(--ink); border-radius:5px }
+  details.dd > summary::-webkit-details-marker { display:none }
+  #volBar details.dd > summary, #mosBar details.dd > summary { padding:2px 8px }   /* as small as the buttons beside it */
+  details.dd > summary::after { content:" \25BE"; color:var(--muted) }
+  details.dd > summary:hover, details.dd[open] > summary { border-color:var(--accent) }
+  details.dd[open] > summary, details.dd.modes:has(button.on) > summary { color:var(--accent); border-color:var(--accent) }
+  .dd-body { position:absolute; z-index:40; top:calc(100% + 4px); left:0; min-width:200px; max-width:min(560px, 80vw);
+             padding:8px 10px; background:var(--panel); border:1px solid var(--line); border-radius:6px;
+             box-shadow:0 4px 16px rgba(0,0,0,.5); display:flex; flex-direction:column; gap:6px; font-size:11px }
+  .dd-body.right { left:auto; right:0 }
+  .dd-body .ddrow { display:flex; gap:6px; align-items:center; flex-wrap:wrap }
+  .dd-body label { display:flex; align-items:center; gap:4px; color:var(--muted) }
+  .dd-body button { padding:2px 8px; font-size:11px }
+  .dd-body input[type=range] { width:110px }
+  .dd-body input[type=number] { width:60px; font-size:11px; padding:1px 4px }
+  .dd-body [hidden] { display:none }
   #roiFilter { margin:0 12px 6px; width:calc(100% - 24px) }
   #roiList { flex:1; overflow-y:auto; min-height:0; border-top:1px solid var(--line) }
   .r { display:grid; grid-template-columns:16px 10px 1fr auto 18px; gap:6px; align-items:center;
@@ -264,6 +287,7 @@
 <div id="wrap">
 
   <aside id="unitsCol">
+    <div id="unitsSplit" title="drag to resize"></div>
     <h1>units <small id="fname">loading…</small></h1>
     <div id="units"></div>
     <div id="metaSplit" title="drag to resize"></div>
@@ -282,33 +306,26 @@
         <button id="volMip" title="the brightest voxel along each line of sight">MIP</button>
         <button id="volGlass" title="semi-transparent: every voxel adds light and hides a little of what is behind it">glass</button>
         <button id="volDepth" title="MIP coloured by the depth the brightest voxel sits at — an axon's colour says how deep it runs">depth</button>
-        <label id="volThrL" title="below this, a voxel is not shown (fraction of the window). It only says what is shown — how bright the rest is comes from the window (contrast), gain and gamma, and does not change with it. Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"><input type="number" id="volThrN" class="vnum" step="any" title="the floor in the recording's own units (type a value, Enter)"></label>
-        <span id="volChs" hidden title="overlay: each channel in its own colour, through its own window (instruments), with its own floor; click a channel's name to hide or show it"></span>
-        <label id="volCeilL" title="above this, a voxel is not shown (with cut on): the brightest blobs stop hiding what is around and behind them. It does not rescale the brightness of the rest — that is the window (contrast), gain and gamma">ceiling <input type="range" id="volCeil" min="0.05" max="1" step="0.01"><input type="number" id="volCeilN" class="vnum" step="any" title="the ceiling in the recording's own units (type a value, Enter)"></label>
-        <button id="volCut" title="the ceiling on or off: on, a voxel above it is not shown, so a bright blob disappears and what is behind it shows; off, every voxel is shown at its own brightness">cut</button>
+        <details class="dd"><summary title="what is shown and how bright: floor, ceiling, density, gain, gamma">window</summary><div class="dd-body"><div class="ddrow"><label id="volThrL" title="below this, a voxel is not shown (fraction of the window). It only says what is shown — how bright the rest is comes from the window (contrast), gain and gamma, and does not change with it. Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"><input type="number" id="volThrN" class="vnum" step="any" title="the floor in the recording's own units (type a value, Enter)"></label></div>
+<span id="volChs" hidden title="overlay: each channel in its own colour, through its own window (instruments), with its own floor; click a channel's name to hide or show it"></span>
+<div class="ddrow"><label id="volCeilL" title="above this, a voxel is not shown (with cut on): the brightest blobs stop hiding what is around and behind them. It does not rescale the brightness of the rest — that is the window (contrast), gain and gamma">ceiling <input type="range" id="volCeil" min="0.05" max="1" step="0.01"><input type="number" id="volCeilN" class="vnum" step="any" title="the ceiling in the recording's own units (type a value, Enter)"></label><button id="volCut" title="the ceiling on or off: on, a voxel above it is not shown, so a bright blob disappears and what is behind it shows; off, every voxel is shown at its own brightness">cut</button></div>
+<div class="ddrow"><label title="how much a voxel hides what is behind it (glass only)">density <input type="range" id="volDen" min="0.02" max="1" step="0.01"></label></div>
+<div class="ddrow"><label title="brightness">gain <input type="range" id="volGain" min="0.5" max="4" step="0.05"></label></div>
+<span id="volGam" class="vgams"></span></div></details>
         <button id="volAuto" title="the floor back at the stack's own percentile — 99.7 for MIP and depth, 97 for glass: the background empty, what stands out of it kept">auto</button>
-        <label title="how much a voxel hides what is behind it (glass only)">density <input type="range" id="volDen" min="0.02" max="1" step="0.01"></label>
-        <label title="brightness">gain <input type="range" id="volGain" min="0.5" max="4" step="0.05"></label>
-        <span id="volGam" class="vgams"></span>
-        <label title="stretch depth. ×1 is the true proportion; anything else exaggerates it and says so">z ×<input type="range" id="volZ" min="1" max="8" step="0.5"><span id="volZv"></span></label>
+        <details class="dd"><summary title="turn the stack, which end is up, stretch depth">view</summary><div class="dd-body"><div class="ddrow"><button id="volAxY" title="look along y: the stack from its side, depth running down">side y</button><button id="volAxX" title="look along x: the stack from its other side, depth running down">side x</button><button id="volDeep" title="which end of the stack is up: slice 0 (off) or the last slice, as MESc draws it (on). Which end is the surface depends on how the stack was taken — in a stack recorded upward, slice 0 is the deepest; the surface tool in XYZ finds the tissue side by brightness">surface ↑</button></div>
+<div class="ddrow"><label title="stretch depth. ×1 is the true proportion; anything else exaggerates it and says so">z ×<input type="range" id="volZ" min="1" max="8" step="0.5"><span id="volZv"></span></label></div></div></details>
         <button id="volReset" title="look straight down the stack again, from the surface (double-click does the same)">reset</button>
-        <button id="volAxY" title="look along y: the stack from its side, depth running down">side y</button>
-        <button id="volAxX" title="look along x: the stack from its other side, depth running down">side x</button>
-        <button id="volDeep" title="which end of the stack is up: slice 0 (off) or the last slice, as MESc draws it (on). Which end is the surface depends on how the stack was taken — in a stack recorded upward, slice 0 is the deepest; the surface tool in XYZ finds the tissue side by brightness">surface ↑</button>
-        <button id="volPoint" title="mark points: a click (not a drag — a drag still turns) puts a numbered point on the brightest voxel under the cursor, snapped to the brightest of its 3×3×3 neighbours; the XYZ crosshair goes there. Esc removes the last, shift+Esc all">point</button>
-        <button id="volBox" title="clip the stack to a box: six limits, x y z from and to (fractions of the stack, in the file's own axes — a flip or deepest-up does not change which part is kept). The box is drawn in yellow; full brings the whole stack back">box</button>
-        <button id="volSlab" title="a thick-slab MIP: only the slices within the thickness around the slider's slice are drawn, as MIP; the slider moves the slab through the stack">slab</button>
-        <label id="volSlabL" hidden title="the slab's thickness in µm, centred on the slider's slice (Enter)"><input type="number" id="volSlabN" class="vnum" min="0.1" step="any" style="width:52px">µm</label>
-        <span id="volBoxRow" hidden>
-          <label title="x from / to: fractions of the stack's width">x <input type="range" id="volBx0" min="0" max="1" step="0.01"><input type="range" id="volBx1" min="0" max="1" step="0.01"></label>
-          <label title="y (rows) from / to: fractions of the stack's height, in the file's rows">y <input type="range" id="volBy0" min="0" max="1" step="0.01"><input type="range" id="volBy1" min="0" max="1" step="0.01"></label>
-          <label title="z from / to: fractions of the stack's depth, slice 0 = 0">z <input type="range" id="volBz0" min="0" max="1" step="0.01"><input type="range" id="volBz1" min="0" max="1" step="0.01"></label>
-          <span id="volBoxTxt" class="hint"></span>
-          <button id="volBoxFull" title="the whole stack again">full</button>
-        </span>
-        <button id="volMeasure" title="a ruler in 3D: each click puts a point exactly where the cursor meets the CURRENT plane (the slice selected by the slider or the XYZ crosshair, lit blue in the view) — no snapping to anything bright; change the plane between clicks to measure across depth. Read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button>
-        <button id="volObject" title="an object: a click picks a seed as point does, then grows the connected region around it — every voxel of that channel at least the given share of the seed's peak, joined face to face, no further than the radius from the seed. Its volume in µm³, centre, extent and each channel's mean are listed; it is outlined in XYZ. Esc removes the last, shift+Esc all">object</button>
-        <label id="volObjL" hidden title="what the next object keeps: voxels at least this share of the seed's peak (of the window, as the bytes are), within this radius of the seed. Changing either grows the last object again (Enter)">≥<input type="number" id="volObjF" class="vnum" min="5" max="99" step="1" style="width:44px">% of peak · within<input type="number" id="volObjR" class="vnum" min="0.5" step="any" style="width:48px">µm</label>
+        <details class="dd modes"><summary title="clip the stack to a box, or a thick slab">box</summary><div class="dd-body"><div class="ddrow"><button id="volBox" title="clip the stack to a box: six limits, x y z from and to (fractions of the stack, in the file's own axes — a flip or deepest-up does not change which part is kept). The box is drawn in yellow; full brings the whole stack back">box</button><button id="volSlab" title="a thick-slab MIP: only the slices within the thickness around the slider's slice are drawn, as MIP; the slider moves the slab through the stack">slab</button><label id="volSlabL" hidden title="the slab's thickness in µm, centred on the slider's slice (Enter)"><input type="number" id="volSlabN" class="vnum" min="0.1" step="any" style="width:52px">µm</label></div>
+<span id="volBoxRow" hidden>
+<label title="x from / to: fractions of the stack's width">x <input type="range" id="volBx0" min="0" max="1" step="0.01"><input type="range" id="volBx1" min="0" max="1" step="0.01"></label>
+<label title="y (rows) from / to: fractions of the stack's height, in the file's rows">y <input type="range" id="volBy0" min="0" max="1" step="0.01"><input type="range" id="volBy1" min="0" max="1" step="0.01"></label>
+<label title="z from / to: fractions of the stack's depth, slice 0 = 0">z <input type="range" id="volBz0" min="0" max="1" step="0.01"><input type="range" id="volBz1" min="0" max="1" step="0.01"></label>
+<span id="volBoxTxt" class="hint"></span>
+<button id="volBoxFull" title="the whole stack again">full</button>
+</span></div></details>
+        <details class="dd modes"><summary title="points, a 3D ruler, objects">measure</summary><div class="dd-body"><div class="ddrow"><button id="volPoint" title="mark points: a click (not a drag — a drag still turns) puts a numbered point on the brightest voxel under the cursor, snapped to the brightest of its 3×3×3 neighbours; the XYZ crosshair goes there. Esc removes the last, shift+Esc all">point</button><button id="volMeasure" title="a ruler in 3D: each click puts a point exactly where the cursor meets the CURRENT plane (the slice selected by the slider or the XYZ crosshair, lit blue in the view) — no snapping to anything bright; change the plane between clicks to measure across depth. Read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button><button id="volObject" title="an object: a click picks a seed as point does, then grows the connected region around it — every voxel of that channel at least the given share of the seed's peak, joined face to face, no further than the radius from the seed. Its volume in µm³, centre, extent and each channel's mean are listed; it is outlined in XYZ. Esc removes the last, shift+Esc all">object</button></div>
+<label id="volObjL" hidden title="what the next object keeps: voxels at least this share of the seed's peak (of the window, as the bytes are), within this radius of the seed. Changing either grows the last object again (Enter)">≥<input type="number" id="volObjF" class="vnum" min="5" max="99" step="1" style="width:44px">% of peak · within<input type="number" id="volObjR" class="vnum" min="0.5" step="any" style="width:48px">µm</label></div></details>
       </div>
       <canvas id="volMarks" hidden></canvas>
       <div id="volPts" hidden></div>
@@ -335,19 +352,13 @@
           <button id="mosAuto" title="stitch: every overlapping pair matched across (on its projection) and in depth, one correction per tile by least squares; held still: the tile selected in edit, else the first. Starts from the layout as it is, so a hand-made one is refined, not thrown away; each pair's correlation and what is left of it are shown on its seam">auto</button>
           <button id="mosFlat" title="put every tile's surface (marked in XYZ ▸ surface) on one plane — the selected tile's, else the median — by moving tiles in depth">flatten</button>
           <button id="mosUndo" title="undo the last change to the layout (⌘Z)">undo</button>
-          <button id="mosSeams" title="hard seams: each pixel from the tile whose centre is nearest, or from the last in the order (top puts a tile last)">seams: nearest</button>
-          <button id="mosChan" title="both channels (green + magenta) or one, through the first tile's window">overlay</button>
           <input type="range" id="mosPlane" title="the depth of the mosaic: right is shallower (shift+wheel, or ↑ shallower / ↓ deeper; PageUp/PageDown ten)"><span class="hint" id="mosPlaneL"></span>
           <span class="hint" title="each tile drawn as the maximum of this many slices around the plane: a sparse axon reads as a line instead of a few dots (1: the slice itself)">slab <input type="number" id="mosSlab" min="1" max="64" step="1"> sl</span>
           <input id="mosGo" placeholder="go: x y [z] µm" title="centre the map on a point: x y in µm (the frame the hover reads, from the rig's zero when every tile has one), and z to go to that depth; Enter">
-          <button id="mosMiniBtn" class="on" title="the overview map of the whole field, with the part on screen framed; click or drag on it to go there">map</button>
-          <button id="mosCrop" title="drag a rectangle to cut out (Esc clears it); the TIFF takes the crop and the planes from–to">crop</button>
-          <span class="hint">planes <input type="number" id="mosZ0" title="from (empty: all)"> – <input type="number" id="mosZ1" title="to (empty: all)"></span>
-          <button id="mosTif" title="the crop (or the whole field) over the planes from–to, as a Fiji hyperstack, written beside the view file — float reader units, 0 where no tile reaches, the layout in its Info">TIFF</button>
-          <button id="mosPng" title="the mosaic as on screen">PNG</button>
-          <button id="mosJson" title="the layout: each tile's stage position, its correction and its corner in the mosaic, as JSON">layout</button>
-          <button id="mosListBtn" title="the list of tiles">tiles</button>
-          <button id="mosMarksBtn" class="on" title="the tiles' outlines and names and the seams' report; off: the picture alone (for a PNG)">labels</button>
+          <details class="dd"><summary title="seams, channels, the map, the tile list, labels">show</summary><div class="dd-body"><div class="ddrow"><button id="mosSeams" title="hard seams: each pixel from the tile whose centre is nearest, or from the last in the order (top puts a tile last)">seams: nearest</button><button id="mosChan" title="both channels (green + magenta) or one, through the first tile's window">overlay</button></div>
+<div class="ddrow"><button id="mosMiniBtn" class="on" title="the overview map of the whole field, with the part on screen framed; click or drag on it to go there">map</button><button id="mosListBtn" title="the list of tiles">tiles</button><button id="mosMarksBtn" class="on" title="the tiles' outlines and names and the seams' report; off: the picture alone (for a PNG)">labels</button></div></div></details>
+          <details class="dd modes"><summary title="cut out a rectangle and a range of planes (for the TIFF)">crop</summary><div class="dd-body"><div class="ddrow"><button id="mosCrop" title="drag a rectangle to cut out (Esc clears it); the TIFF takes the crop and the planes from–to">crop</button><span class="hint">planes <input type="number" id="mosZ0" title="from (empty: all)"> – <input type="number" id="mosZ1" title="to (empty: all)"></span></div></div></details>
+          <details class="dd"><summary title="the crop as a TIFF, the view as a PNG, the layout as JSON">export</summary><div class="dd-body right"><div class="ddrow"><button id="mosTif" title="the crop (or the whole field) over the planes from–to, as a Fiji hyperstack, written beside the view file — float reader units, 0 where no tile reaches, the layout in its Info">TIFF</button><button id="mosPng" title="the mosaic as on screen">PNG</button><button id="mosJson" title="the layout: each tile's stage position, its correction and its corner in the mosaic, as JSON">layout</button></div></div></details>
           <button id="mosFitBtn" title="the whole field in view">fit</button>
           <span class="hint" id="mosWait"></span>
         </div>
@@ -372,16 +383,13 @@
     <div class="instr">
       <button id="addRoi" title="add an ROI (click on the image)">+</button>
       <button id="delRoi" title="remove the selected ROI" disabled>−</button>
-      <label class="stepper" title="average this many frames around the slider (1 = the raw frame)">
-        <span>AVG</span><input type="number" id="avgN" min="1" max="999" step="1" value="1">
-      </label>
       <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button>
       <button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button>
       <button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button>
-      <button id="pngBtn" title="save what is on screen as a PNG: the image at its own pixels (whole pixels, no blur) with the ROIs, the ruler, a µm scale bar and a caption — or the 3D view when it is open">PNG</button>
-      <button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button>
       <button id="mosBtn" hidden title="every z-stack of the file with a stage position, laid out as one field: stitch it from the overlaps, move tiles by hand, flatten it on the surface, cut a piece out as a TIFF">mosaic</button>
       <button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
+      <details class="dd"><summary title="average frames, flip like MESc, save a PNG">view</summary><div class="dd-body right"><div class="ddrow"><label class="stepper" title="average this many frames around the slider (1 = the raw frame)"><span>AVG</span><input type="number" id="avgN" min="1" max="999" step="1" value="1"></label></div>
+<div class="ddrow"><button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button><button id="pngBtn" title="save what is on screen as a PNG: the image at its own pixels (whole pixels, no blur) with the ROIs, the ruler, a µm scale bar and a caption — or the 3D view when it is open">PNG</button></div></div></details>
     </div>
     <div class="instr" style="margin-top:6px">
       <button id="toolSpot" class="on" title="a disc where you click">spot</button>
@@ -434,21 +442,16 @@
       <span class="grow"></span>
       <button id="sigRaw" class="on" title="the ROI's mean intensity, reader units">raw</button>
       <button id="sigDff" title="dF/F by the pipeline's method: dark current, Savitzky–Golay, darkest-patch background, rolling quantile baseline">dF/F</button>
-      <label class="ylim" id="dffKnobs" title="the baseline: rolling quantile q over a window of seconds — the pipeline's 0.3 and 60 s by default">
-        <span>q</span><input type="number" id="dffQ" step="0.05" min="0.05" max="0.95" value="0.3">
-        <span>win</span><input type="number" id="dffWin" step="5" min="1" value="60"><span>s</span>
-      </label>
-      <span class="hint" id="dffNote"></span>
+      <details class="dd"><summary title="the dF/F baseline: rolling quantile and window; what the dF/F was computed with">baseline</summary><div class="dd-body right"><div class="ddrow"><label class="ylim" id="dffKnobs" title="the baseline: rolling quantile q over a window of seconds — the pipeline's 0.3 and 60 s by default"><span>q</span><input type="number" id="dffQ" step="0.05" min="0.05" max="0.95" value="0.3"><span>win</span><input type="number" id="dffWin" step="5" min="1" value="60"><span>s</span></label></div>
+<span class="hint" id="dffNote"></span></div></details>
+      <details class="dd modes"><summary title="smooth the traces on screen: Gaussian or Savitzky–Golay. Only what is drawn — the numbers, the csv and the exports stay as computed">filter</summary><div class="dd-body right"><div class="ddrow"><button id="fGauss" title="Gaussian smoothing, σ in frames (click again: off)">Gauss</button><label title="σ of the Gaussian, in frames">σ<input type="number" id="fSigma" min="0.3" max="50" step="0.5"></label><span class="hint" id="fSigmaMs"></span></div><div class="ddrow"><button id="fSg" title="Savitzky–Golay: a polynomial fitted in a sliding window — keeps the height and width of a peak better than a Gaussian (click again: off)">SavGol</button><label title="window in frames (odd)">win<input type="number" id="fSgWin" min="3" max="201" step="2"></label><label title="polynomial order (below the window)">order<input type="number" id="fSgOrd" min="0" max="6" step="1"></label></div><span class="hint">display only — csv and exports are unfiltered</span></div></details>
       <span style="width:8px"></span>
       <button id="modeStack" class="on" title="one line per ROI, with an offset">stack</button>
       <button id="modeOverlay" title="all on one axis">overlay</button>
-      <button id="gridBtn" class="on" title="time and value grid">grid</button>
-      <label class="ylim" title="vertical limits in reader units — type them, or leave on auto">
-        <span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto">
-        <button id="yAuto" title="back to limits that follow the data">auto</button>
-      </label>
+      <details class="dd"><summary title="y limits, the grid, how to zoom">axis</summary><div class="dd-body right"><div class="ddrow"><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label></div>
+<div class="ddrow"><button id="gridBtn" class="on" title="time and value grid">grid</button></div>
+<span class="hint">drag a box to zoom · double-click resets · ← → slide</span></div></details>
       <button id="traceReset" title="whole recording">⤢</button>
-      <span class="hint">drag a box to zoom · double-click resets · ← → slide</span>
     </div>
     <div id="traceScroll"><div id="traceCursor"></div><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
   </section>
@@ -488,8 +491,9 @@ const V = {
   yFixedBy: { raw: null, dff: null },       // the typed limits of each signal, kept across the raw | dF/F switch
   signal: "raw",                            // raw | dff
   dffQ: 0.3, dffWin: 60,                    // the baseline's quantile and window (s)
+  tfilt: { kind: "off", sigma: 2, sgWin: 7, sgOrder: 2 },   // a DISPLAY filter of the traces (12 Nov 2026): off | gauss | sg; the data, csv and exports stay unfiltered
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
-  tracesH: 260, metaH: 300, toolsW: 260,
+  tracesH: 338, metaH: 300, toolsW: 661, unitsW: 230,           // defaults = her layout, 12 Nov 2026 (the grid still caps them on a small window)
 };
 let FILE = null, unit = null;
 // playback lives in MescIO.player; `playing` stays readable by that name — the real-Chrome checks watch it
@@ -550,7 +554,7 @@ async function boot() {
     im.onerror = () => { if (++tries > 3) return; setTimeout(() => { im.src = src0 + "&retry=" + tries; }, 800 * tries); };
   });
   const saved = (await (await fetch(API.base + "/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","sel","shown","tracesH","metaH","toolsW","vol","flipY","mos"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","tfilt","sel","shown","tracesH","metaH","toolsW","unitsW","vol","flipY","mos"]));
   V.vol = volState(V.vol); V.mos = mosState(V.mos);
   if (V.win !== "pct") V.win = "fixed";
   if (!V.fixBy || typeof V.fixBy !== "object" || Array.isArray(V.fixBy)) V.fixBy = {};
@@ -580,11 +584,12 @@ function applyStatic() {                 // controls that reflect V without a un
   $("modeOverlay").classList.toggle("on", V.traceMode === "overlay");
   $("gridBtn").classList.toggle("on", V.grid);
   $("sigRaw").classList.toggle("on", V.signal === "raw"); $("sigDff").classList.toggle("on", V.signal === "dff");
-  $("dffQ").value = V.dffQ; $("dffWin").value = V.dffWin;
+  $("dffQ").value = V.dffQ; $("dffWin").value = V.dffWin; if (typeof syncFilt === "function" && $("fGauss")) syncFilt();
   $("dffKnobs").style.visibility = V.signal === "dff" ? "" : "hidden";   // keeps its room: the bar must not jump
   document.documentElement.style.setProperty("--traces-h", V.tracesH + "px");
   document.documentElement.style.setProperty("--meta-h", V.metaH + "px");
   document.documentElement.style.setProperty("--tools-w", V.toolsW + "px");
+  document.documentElement.style.setProperty("--units-w", (V.unitsW || 230) + "px");
 }
 
 function pick(i, restoring) {
@@ -1029,7 +1034,7 @@ function exportVolPng() {
 function exportTracePng() {
   const src = $("trace");
   if (!TR || !src.width) { badge("draw the traces first", true); return; }
-  withCaption(src, [captionLines()[0], `traces · ${V.signal === "dff" ? "dF/F" : "raw"} · ${TR.names.length} ROIs`],
+  withCaption(src, [captionLines()[0], `traces · ${V.signal === "dff" ? "dF/F" : "raw"}${filtDesc() ? " · " + filtDesc() + " (display filter)" : ""} · ${TR.names.length} ROIs`],
               exportName([FILE.file.replace(/\.mesc$/i, ""), unit.name, "traces", V.signal]));
 }
 function imgPoint(ev) {
@@ -1477,8 +1482,59 @@ $("doTraces").onclick = async () => {
 function visibleTraces() {
   if (!TR) return [];
   const src = V.signal === "dff" && TR.dff ? TR.dff : TR.traces;
-  return TR.names.map((n, i) => ({ name: n, i, v: src[i], area: TR.areas_px[i] }))
+  return TR.names.map((n, i) => ({ name: n, i, v: filtered(src, i), area: TR.areas_px[i] }))
                  .filter(t => shown()[t.name] !== false);
+}
+/* ---- display filters (12 Nov 2026): what is DRAWN is smoothed; TR keeps the numbers as computed, and the
+   csv and the zip read those. Edges and NaNs: the Gaussian renormalises over the finite samples it has;
+   Savitzky–Golay mirrors at the ends and keeps the raw sample where its window holds a NaN. ---- */
+const fCache = { key: "", map: new Map() };
+const filtDesc = () => { const f = V.tfilt || {}; return f.kind === "gauss" ? `gauss σ ${f.sigma} fr` : f.kind === "sg" ? `savgol ${f.sgWin}/${f.sgOrder}` : ""; };
+function filtered(src, i) {
+  const f = V.tfilt || { kind: "off" };
+  if (f.kind !== "gauss" && f.kind !== "sg") return src[i];
+  const key = [trId(TR), src === TR.dff ? "dff" : "raw", filtDesc()].join("|");
+  if (fCache.key !== key) { fCache.key = key; fCache.map = new Map(); }
+  let v = fCache.map.get(i);
+  if (!v) { v = f.kind === "gauss" ? gaussSmooth(src[i], f.sigma) : sgSmooth(src[i], f.sgWin, f.sgOrder); fCache.map.set(i, v); }
+  return v;
+}
+function gaussSmooth(y, sigma) {
+  const s = Math.max(0.3, +sigma || 1), r = Math.ceil(4 * s), k = new Float64Array(2 * r + 1);
+  for (let j = -r; j <= r; j++) k[j + r] = Math.exp(-0.5 * (j / s) ** 2);
+  const n = y.length, out = new Array(n);
+  for (let t = 0; t < n; t++) {
+    let acc = 0, w = 0;
+    for (let j = -r; j <= r; j++) { const u = t + j; if (u < 0 || u >= n) continue; const x = y[u]; if (x == null || !isFinite(x)) continue; acc += k[j + r] * x; w += k[j + r]; }
+    out[t] = w > 0 ? acc / w : y[t];
+  }
+  return out;
+}
+function sgCoeffs(win, order) {      // smoothing weights: row 0 of (AᵀA)⁻¹Aᵀ, A[j][p] = j^p for j = -m..m
+  const m = (win - 1) / 2, P = order + 1, ATA = Array.from({ length: P }, () => new Float64Array(P));
+  for (let j = -m; j <= m; j++) for (let a = 0; a < P; a++) for (let b = 0; b < P; b++) ATA[a][b] += j ** (a + b);
+  // solve ATA · x = e0 (Gauss–Jordan), then c_j = Σ_p x_p j^p
+  const M = ATA.map((r, a) => [...r, a === 0 ? 1 : 0]);
+  for (let c = 0; c < P; c++) {
+    let piv = c; for (let r = c + 1; r < P; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    const d = M[c][c]; for (let k = c; k <= P; k++) M[c][k] /= d;
+    for (let r = 0; r < P; r++) if (r !== c) { const f = M[r][c]; for (let k = c; k <= P; k++) M[r][k] -= f * M[c][k]; }
+  }
+  const x = M.map(r => r[P]), c = new Float64Array(win);
+  for (let j = -m; j <= m; j++) { let v = 0; for (let p = 0; p < P; p++) v += x[p] * j ** p; c[j + m] = v; }
+  return c;
+}
+function sgSmooth(y, win, order) {
+  let w = Math.max(3, Math.round(+win || 7)); if (w % 2 === 0) w += 1;
+  const o = Math.max(0, Math.min(w - 1, Math.round(+order || 0))), c = sgCoeffs(w, o), m = (w - 1) / 2, n = y.length, out = new Array(n);
+  const at = u => y[u < 0 ? -u : u >= n ? 2 * (n - 1) - u : u];      // mirrored at the ends
+  for (let t = 0; t < n; t++) {
+    let acc = 0, bad = false;
+    for (let j = -m; j <= m; j++) { const x = at(t + j); if (x == null || !isFinite(x)) { bad = true; break; } acc += c[j + m] * x; }
+    out[t] = bad ? y[t] : acc;
+  }
+  return out;
 }
 /* The strip is two layers. The traces, grid and labels are drawn on the canvas, and only when
    something they show has changed: the payload, the time or value window, the mode, the signal,
@@ -1525,7 +1581,7 @@ function plotTraces() {
   const H = stack ? Math.max(box.clientHeight, ts.length * ROW_H + 22) : box.clientHeight;
   const n = TR ? TR.traces[0].length : 0, [t0, t1] = V.traceZoom || [0, n - 1];
   traceCursor(W, H, t0, t1);
-  const key = JSON.stringify([trId(TR), ROIS.length > 0, n, t0, t1, V.signal, V.traceMode, V.grid, V.sel, V.yFixed,
+  const key = JSON.stringify([trId(TR), ROIS.length > 0, n, t0, t1, V.signal, filtDesc(), V.traceMode, V.grid, V.sel, V.yFixed,
     stack ? null : V.valueZoom, W, H, dpr, fs(), ts.map(t => t.i)]);
   if (key === traceKey) { syncYBoxes(); return; }
   traceKey = key;
@@ -1547,7 +1603,7 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
   const L = TL, R = TR_, T = TT, B = TB;
   const X = f => L + (f - t0) / Math.max(1, t1 - t0) * (W - L - R);
   $("traceLbl").textContent = `${ts.length} of ${TR.names.length} ROIs · ${n} frames` + (V.traceZoom ? ` · ${t0}–${t1}` : "")
-    + (V.signal === "dff" ? " · dF/F" : " · raw");
+    + (V.signal === "dff" ? " · dF/F" : " · raw") + (filtDesc() ? " · " + filtDesc() + " (display)" : "");
   $("dffNote").textContent = V.signal === "dff" && TR.params
     ? `dark ${TR.dark} · bg patch ${TR.patch[1]},${TR.patch[0]} · eps ${TR.eps}` + (TR.head ? ` · head ${TR.head} fr` : "") : "";
   if (TR.head && TR.head > t0) {                     // the black head: frames before the shutter opened
@@ -1747,6 +1803,22 @@ function applyDffKnobs() {
   if (TR) $("doTraces").click();
 }
 ["dffQ", "dffWin"].forEach(id => { $(id).onchange = applyDffKnobs; $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { applyDffKnobs(); $(id).blur(); } }; });
+function syncFilt() {
+  const f = V.tfilt || (V.tfilt = { kind: "off", sigma: 2, sgWin: 7, sgOrder: 2 });
+  $("fGauss").classList.toggle("on", f.kind === "gauss"); $("fSg").classList.toggle("on", f.kind === "sg");
+  if (document.activeElement !== $("fSigma")) $("fSigma").value = f.sigma;
+  if (document.activeElement !== $("fSgWin")) $("fSgWin").value = f.sgWin;
+  if (document.activeElement !== $("fSgOrd")) $("fSgOrd").value = f.sgOrder;
+  $("fSigmaMs").textContent = fs() ? `≈ ${(1000 * f.sigma / fs()).toFixed(0)} ms` : "";
+}
+function setFilt(patch) { V.tfilt = { ...(V.tfilt || {}), ...patch }; syncFilt(); plotTraces(); saveView(); }
+$("fGauss").onclick = () => setFilt({ kind: (V.tfilt || {}).kind === "gauss" ? "off" : "gauss" });
+$("fSg").onclick = () => setFilt({ kind: (V.tfilt || {}).kind === "sg" ? "off" : "sg" });
+const numIn = (id, fn) => { $(id).onchange = () => fn(+$(id).value); $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { fn(+$(id).value); $(id).blur(); } }; };
+numIn("fSigma", v => setFilt({ sigma: Math.min(50, Math.max(0.3, v || 2)) }));
+numIn("fSgWin", v => { let w = Math.min(201, Math.max(3, Math.round(v || 7))); if (w % 2 === 0) w += 1;
+                       setFilt({ sgWin: w, sgOrder: Math.min(w - 1, (V.tfilt || {}).sgOrder ?? 2) }); });
+numIn("fSgOrd", v => setFilt({ sgOrder: Math.min(((V.tfilt || {}).sgWin || 7) - 1, Math.max(0, Math.round(v || 0))) }));
 $("modeStack").onclick = () => { V.traceMode = "stack"; V.valueZoom = null; applyStatic(); plotTraces(); saveView(); };
 $("modeOverlay").onclick = () => { V.traceMode = "overlay"; applyStatic(); plotTraces(); saveView(); };
 $("gridBtn").onclick = () => { V.grid = !V.grid; applyStatic(); plotTraces(); saveView(); };
@@ -1757,9 +1829,11 @@ $("gridBtn").onclick = () => { V.grid = !V.grid; applyStatic(); plotTraces(); sa
 let sdown = null;
 $("splitter").onmousedown = ev => { sdown = { which: "traces", y: ev.clientY, h: V.tracesH }; ev.preventDefault(); };
 $("metaSplit").onmousedown = ev => { sdown = { which: "meta", y: ev.clientY, h: V.metaH }; ev.preventDefault(); };
+$("unitsSplit").onmousedown = ev => { sdown = { which: "units", x: ev.clientX, w: V.unitsW || 230 }; ev.preventDefault(); };
 $("toolsSplit").onmousedown = ev => { sdown = { which: "tools", x: ev.clientX, w: V.toolsW }; ev.preventDefault(); };
 window.addEventListener("mousemove", ev => {
   if (!sdown) return;
+  if (sdown.which === "units") { V.unitsW = Math.max(150, Math.min(window.innerWidth * .4, sdown.w + (ev.clientX - sdown.x))); applyStatic(); paint(); return; }
   if (sdown.which === "tools") { V.toolsW = Math.max(200, Math.min(window.innerWidth * .5, sdown.w + (sdown.x - ev.clientX))); applyStatic(); paint(); return; }
   const h = sdown.h + (sdown.y - ev.clientY);
   if (sdown.which === "traces") V.tracesH = Math.max(120, Math.min(window.innerHeight * .7, h));
@@ -3916,6 +3990,23 @@ $("mosJson").onclick = () => {
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 };
 window.addEventListener("resize", () => { if (V.mos.on) mosDraw(); });
+
+/* Dropdown panels (12 Nov 2026, like the report's playground): one open at a time; a click outside closes
+   them; Esc closes an open panel and does nothing else (it would otherwise also remove the last point/ROI). */
+document.addEventListener("toggle", e => {
+  const d = e.target;
+  if (!d.classList || !d.classList.contains("dd") || !d.open) return;
+  document.querySelectorAll("details.dd[open]").forEach(o => { if (o !== d) o.open = false; });
+}, true);
+document.addEventListener("mousedown", e => {
+  document.querySelectorAll("details.dd[open]").forEach(d => { if (!d.contains(e.target)) d.open = false; });
+}, true);
+window.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  const open = document.querySelectorAll("details.dd[open]");
+  if (!open.length) return;
+  open.forEach(d => { d.open = false; }); e.preventDefault(); e.stopImmediatePropagation();
+}, true);
 </script>
 </body>
 </html>

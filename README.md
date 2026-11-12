@@ -21,6 +21,17 @@ Needs Python 3.9 or newer, numpy and h5py; nothing else for reading and viewing.
 viewer, the mosaic's crop to TIFF needs `[tiff]` and the ImageJ ROI export needs `[imagej]`.
 Motion correction (`mesc-io register`) is an extra, `[register]`, and pulls in Suite2p 0.14.
 
+On Windows, a Python from conda or python.org often has no `Scripts` folder on the PATH, and the
+console then answers that `pip` or `mesc-io` is "not recognized". Go through Python instead:
+
+```
+py -m pip install mesc-io
+py -m mesc_io view "C:\path\to\recording.mesc"
+```
+
+(Inside an activated conda environment `pip` and `mesc-io` work as written.) The viewer runs while
+its console window stays open; Ctrl+C there stops it.
+
 ## Python
 
 ```python

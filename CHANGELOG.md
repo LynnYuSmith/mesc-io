@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.6 — 2026-11-12
 
 - Viewer: smooth playback. ▶ used to ask for one PNG, wait for it, then ask for the next; on a lab PC reading a
   network drive every frame paid the whole round trip and the picture jerked (≈ 8 frames/s at 80 ms per request).
@@ -10,6 +10,8 @@
   averaging window of 10, 119 against 62 even on a fast line. The block's pixels are the PNG's, byte for byte
   (tested on the server, and in Chrome on the picture on screen). `MescIO.player.createStreamPlayer` is the
   engine part, for the report's playground too. `tests/view_playback_real_chrome.js` is the check.
+- README: what to type on Windows when `pip` or `mesc-io` is "not recognized" (Python from conda or python.org
+  without its Scripts folder on PATH): `py -m pip install mesc-io`, `py -m mesc_io view …`.
 
 ## 0.6.5 — 2026-11-12
 

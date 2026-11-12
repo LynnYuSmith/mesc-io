@@ -246,7 +246,8 @@
   .dd-body h5 { margin:2px 0 0; font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em }
   .onscreen { margin-top:8px; padding-top:6px; border-top:1px solid var(--line) }
   .onscreen .sub { font-size:10px; color:var(--faint); margin-bottom:4px }
-  .onscreen .krow { display:grid; grid-template-columns:70px 1fr 44px; gap:8px; align-items:center; font-size:11px; color:var(--muted) }
+  .onscreen .dnum { width:62px; font-size:11px; padding:1px 4px }
+  .onscreen .krow { display:grid; grid-template-columns:70px 1fr 66px; gap:8px; align-items:center; font-size:11px; color:var(--muted) }
   .onscreen .krow input[type=range] { width:100% }
   .onscreen .ddrow { display:flex; gap:6px; margin-top:4px }
   .dd-body .krow { display:grid; grid-template-columns:70px 1fr 44px; gap:8px; align-items:center; color:var(--muted) }
@@ -433,7 +434,7 @@
       <div class="row"><span>low</span><input type="range" id="lo" min="0" max="20" step="0.5" value="1"><span id="loVal">1 %</span></div>
       <div class="row"><span>high</span><input type="range" id="hi" min="90" max="100" step="0.1" value="99.5"><span id="hiVal">99.5 %</span></div>
       </div>
-          <div class="onscreen"><div class="sub">on screen — the picture only; ROIs, numbers and data exports untouched</div><div class="krow"><span>brightness</span><input type="range" id="dispB" min="20" max="400" step="5" value="100"><span id="dispBV"></span></div><div class="krow"><span>contrast</span><input type="range" id="dispC" min="20" max="400" step="5" value="100"><span id="dispCV"></span></div><div class="krow"><span>gamma</span><input type="range" id="dispG" min="30" max="200" step="5" value="100"><span id="dispGV"></span></div><div class="ddrow"><button id="dispReset" title="brightness, contrast and gamma back to 100 % / 1.00">reset</button></div></div>
+          <div class="onscreen"><div class="sub">on screen — the picture only; ROIs, numbers and data exports untouched</div><div class="krow"><span>brightness</span><input type="range" id="dispB" min="20" max="400" step="5" value="100"><input type="number" id="dispBV" class="dnum" min="20" max="400" step="5" title="brightness in % (Enter)"></div><div class="krow"><span>contrast</span><input type="range" id="dispC" min="20" max="400" step="5" value="100"><input type="number" id="dispCV" class="dnum" min="20" max="400" step="5" title="contrast in % (Enter)"></div><div class="krow"><span>gamma</span><input type="range" id="dispG" min="30" max="200" step="5" value="100"><input type="number" id="dispGV" class="dnum" min="0.3" max="2" step="0.05" title="gamma: below 1 lifts the dim (Enter)"></div><div class="ddrow"><button id="dispReset" title="brightness, contrast and gamma back to 100 % / 1.00">reset</button></div></div>
     </details>
 
     <h2 class="roih">rois <span id="roiCount" class="faint"></span> <span id="roiUnit" class="faint" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
@@ -925,7 +926,10 @@ function dispFilter() {
 function syncDisp() {
   const d = V.disp || (V.disp = { b: 100, c: 100, g: 100 });
   $("dispB").value = d.b; $("dispC").value = d.c; $("dispG").value = d.g;
-  $("dispBV").textContent = d.b + " %"; $("dispCV").textContent = d.c + " %"; $("dispGV").textContent = (d.g / 100).toFixed(2);
+  // the number boxes follow the sliders, except the one being typed in
+  if (document.activeElement !== $("dispBV")) $("dispBV").value = d.b;
+  if (document.activeElement !== $("dispCV")) $("dispCV").value = d.c;
+  if (document.activeElement !== $("dispGV")) $("dispGV").value = (d.g / 100).toFixed(2);
 }
 function paint() {
   if (!unit) return;
@@ -1851,6 +1855,15 @@ numIn("fSgOrd", v => setFilt({ sgOrder: Math.min(((V.tfilt || {}).sgWin || 7) - 
 ["dispB", "dispC", "dispG"].forEach(id => { $(id).oninput = () => {
   V.disp = { b: +$("dispB").value, c: +$("dispC").value, g: +$("dispG").value }; syncDisp(); paint(); };
   $(id).onchange = () => saveView(); });
+// typed numbers (her ask, 12 Nov): brightness / contrast in %, gamma as itself; clamped to the slider's range
+const dispTyped = () => {
+  const cl = (v, a, b, d) => Math.min(b, Math.max(a, isFinite(v) ? v : d));
+  V.disp = { b: Math.round(cl(+$("dispBV").value, 20, 400, 100)), c: Math.round(cl(+$("dispCV").value, 20, 400, 100)),
+             g: Math.round(100 * cl(+$("dispGV").value, 0.3, 2, 1)) };
+  syncDisp(); paint(); saveView();
+};
+["dispBV", "dispCV", "dispGV"].forEach(id => { $(id).onchange = dispTyped;
+  $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { dispTyped(); $(id).blur(); } }; });
 $("dispReset").onclick = () => { V.disp = { b: 100, c: 100, g: 100 }; syncDisp(); paint(); saveView(); };
 $("modeStack").onclick = () => { V.traceMode = "stack"; V.valueZoom = null; applyStatic(); plotTraces(); saveView(); };
 $("modeOverlay").onclick = () => { V.traceMode = "overlay"; applyStatic(); plotTraces(); saveView(); };

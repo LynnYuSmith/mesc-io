@@ -10,7 +10,7 @@
 - Viewer: the instruments in groups — a `roi` row (spot, rect, polygon, ruler, size, + −), an `image` row (mean,
   max, AVG, ↕ MESc, PNG, 3D / mosaic / XYZ), contrast on one compact row with the on-screen brightness, contrast and gamma under it; `ROIs ▾` (clear all, zip, json) by
   the ROI list and `export ▾` (csv, png) by `traces ⏎`. Brightness, contrast and
-  gamma (gamma < 1 lifts the dim): a canvas filter on the frame only — ROIs, numbers and data exports untouched.
+  gamma (gamma < 1 lifts the dim), by slider or typed number: a canvas filter on the frame only — ROIs, numbers and data exports untouched.
 - Viewer: display filters for the traces — Gaussian (σ in frames, with the ms it equals) and Savitzky–Golay (window,
   order; mirrored at the ends, the same numbers as `scipy.signal.savgol_filter(mode="mirror")`). Only what is drawn:
   the axis limits and the hover read the filtered line, the PNG says the filter in its caption, the csv and the zip

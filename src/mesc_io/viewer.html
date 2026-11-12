@@ -92,6 +92,7 @@
   /* ---- image (centre) ---- */
   #imageCol { grid-area:image; display:flex; flex-direction:column; min-width:0; min-height:0 }
   #stage { flex:1; position:relative; overflow:hidden; background:#000; cursor:crosshair }
+  #stage.pan { cursor:grab }  #stage.pan.panning { cursor:grabbing }   /* the hand tool (12 Nov 2026) */
   #traceRubber { position:absolute; border:1px dashed var(--accent); background:rgba(78,163,221,.12);
                  display:none; pointer-events:none }
   #view { position:absolute; left:0; top:0; image-rendering:pixelated; transform-origin:0 0 }
@@ -422,7 +423,7 @@
     <div id="toolsSplit" title="drag to resize"></div>
     <h2>instruments</h2>
     <div class="grp"><span class="glbl">roi</span>
-      <button id="toolSpot" class="on" title="a disc where you click">spot</button><button id="toolRect" title="a rectangle centred where you click">rect</button><button id="toolPoly" title="click the corners, double-click to close">polygon</button><button id="toolRuler" title="a ruler: click two points, read the distance between them in µm (Esc clears it)">ruler</button>
+      <button id="toolSpot" class="on" title="a disc where you click">spot</button><button id="toolRect" title="a rectangle centred where you click">rect</button><button id="toolPoly" title="click the corners, double-click to close">polygon</button><button id="toolRuler" title="a ruler: click two points, read the distance between them in µm (Esc clears it)">ruler</button><button id="toolPan" title="hand: drag the image to move a zoomed view (wheel or a box to zoom first)">hand</button>
       <span class="sizes" id="sizeRow">
       <label id="sizeSpot"><span>r</span><input type="number" id="spotR" min="1" max="200" step="0.5" value="3"> px</label>
       <label id="sizeRect" style="display:none"><span>w</span><input type="number" id="rectW" min="1" max="1000" step="1" value="8"> × <input type="number" id="rectH" min="1" max="1000" step="1" value="8"> px</label>
@@ -494,7 +495,7 @@
       <p>Pick <b>spot</b>, <b>rect</b> or <b>polygon</b> and click the image (polygon: click the corners, double-click to
       close); <b>r</b> / <b>w × h</b> set the size of new ones. <b>Drag</b> an ROI to move it, <b>↑ ↓</b> select,
       <b>Delete</b> removes the selected one, double-click a name in the list to rename it. <b>ruler</b> measures in µm
-      (Esc clears). <b>copy from…</b> takes the ROIs of another unit; <b>ROIs ▾</b>: clear all, the set as an ImageJ zip
+      (Esc clears); <b>hand</b> drags a zoomed view. <b>copy from…</b> takes the ROIs of another unit; <b>ROIs ▾</b>: clear all, the set as an ImageJ zip
       or as json. ROIs are kept beside the viewer, never in the raw file.</p>
       <h3>contrast</h3>
       <p><b>fixed</b>: one window in the recording's units for every frame (starts at the file's own LUT, <b>file</b>
@@ -1179,6 +1180,10 @@ const onControl = ev => !!(ev.target && ev.target.closest && ev.target.closest("
 $("stage").onmousedown = ev => {
   if (ev.button !== 0 || !unit || !view2D() || onControl(ev)) return;
   const [x, y] = imgPoint(ev);
+  if (tool === "pan") {                            // the hand: grab the image point under the cursor
+    down = { x: ev.clientX, y: ev.clientY, moved: false, pan: true, gx: x, gy: y };
+    $("stage").classList.add("panning"); return;
+  }
   const hit = tool === "ruler" ? null : tool !== "polygon" || !draft.length ? hitRoi(x, y) : null;
   down = { x: ev.clientX, y: ev.clientY, moved: false, hit, ix: x, iy: y,
            orig: hit ? ROIS[hit.i].points.map(p => p.slice()) : null,
@@ -1216,6 +1221,13 @@ $("stage").onmousemove = ev => {
   const dx = ev.clientX - down.x, dy = ev.clientY - down.y;
   if (!down.moved && Math.hypot(dx, dy) < 5) return;
   down.moved = true;
+  if (down.pan) {
+    if (!(V.zoom && V.zoom.w > 0)) return;         // the whole frame is in view: nothing to move
+    const [x, y] = imgPoint(ev), z = V.zoom;
+    z.x = Math.max(0, Math.min(unit.width - z.w, z.x + (down.gx - x)));
+    z.y = Math.max(0, Math.min(unit.height - z.h, z.y + (down.gy - y)));
+    paint(); return;
+  }
   if (down.hit) {                                  // move the ROI (or its corner) live
     const [x, y] = imgPoint(ev), ddx = x - down.ix, ddy = y - down.iy, r = ROIS[down.hit.i];
     const clamp = ([px, py]) => [Math.max(0, Math.min(unit.width - 1, px)), Math.max(0, Math.min(unit.height - 1, py))];
@@ -1231,7 +1243,8 @@ $("stage").onmousemove = ev => {
 };
 window.addEventListener("mouseup", ev => {
   if (!down) return;
-  const d = down; down = null; $("rubber").style.display = "none"; $("stage").style.cursor = "";
+  const d = down; down = null; $("rubber").style.display = "none"; $("stage").style.cursor = ""; $("stage").classList.remove("panning");
+  if (d.pan) { d.consumed = true; lastPress = d; setTimeout(() => { if (lastPress === d) lastPress = null; }, 0); if (d.moved) saveView(); return; }
   if (d.hit) {                                     // an ROI was pressed: a drag moved it, a click just selected it
     if (d.moved) { TR = null; renderRois(); paint(); saveRois(); }
     d.consumed = true; lastPress = d; return;
@@ -1253,6 +1266,7 @@ $("stage").onclick = ev => {
   if (lastPress && lastPress.consumed) { lastPress = null; return; }
   const [x, y] = imgPoint(ev).map(Math.round);
   if (x < 0 || y < 0 || x >= unit.width || y >= unit.height) return;
+  if (tool === "pan") return;                      // the hand only moves the view
   if (tool === "ruler") {                          // no wait: a ruler point is not undone by a double-click
     const p = imgPoint(ev);
     ruler = ruler.length === 1 ? [ruler[0], p] : [p]; rulerHover = null; paint(); return;
@@ -1531,12 +1545,13 @@ $("delRoi").onclick = () => { if (V.sel >= 0) delRoi(V.sel); };
 function setTool(t) {
   tool = t; draft = [];
   $("toolSpot").classList.toggle("on", t === "spot"); $("toolRect").classList.toggle("on", t === "rect"); $("toolPoly").classList.toggle("on", t === "polygon");
-  $("toolRuler").classList.toggle("on", t === "ruler");
+  $("toolRuler").classList.toggle("on", t === "ruler"); $("toolPan").classList.toggle("on", t === "pan");
+  $("stage").classList.toggle("pan", t === "pan");
   if (t !== "ruler") { ruler = []; rulerHover = null; }
   syncSizeRow(); paint();
 }
 $("toolSpot").onclick = () => setTool("spot"); $("toolRect").onclick = () => setTool("rect"); $("toolPoly").onclick = () => setTool("polygon");
-$("toolRuler").onclick = () => setTool("ruler");
+$("toolRuler").onclick = () => setTool("ruler"); $("toolPan").onclick = () => setTool("pan");
 /* The size row edits the SELECTED spot or rect when there is one, and otherwise sets the size
    the next click will place. The hint under it says which. */
 function syncSizeRow() {

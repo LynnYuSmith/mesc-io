@@ -101,12 +101,19 @@ Firefox or Edge (or Brave or Chromium), otherwise the default browser, and it sa
 
 - **left** — the units, a thumbnail each, and the unit's own metadata (rate, pixel size, the
   stage position and the position from the zero set on the rig);
-- **middle** — the image: scrub it, average a window of N frames, zoom into a place by dragging a box;
-- **right** — ROIs (spot, rectangle, polygon; drag to move, type a size);
-- **bottom** — every ROI's time course, raw or dF/F (`mesc_io.dff`, numpy only: dark
-  current and a fitted darkest-patch background removed, then a rolling-quantile baseline, q = 0.3 over 60 s),
-  stacked or overlaid, zoomed by
-  dragging a box.
+- **middle** — the image: scrub it, average a window of N frames, zoom with the wheel or by dragging a box, and
+  move a zoomed view with the hand;
+- **right** — the instruments (ROI tools as icons — spot, rectangle, polygon, ruler, hand — mean / max, ↕ MESc,
+  PNG, contrast) and the ROIs (drag to move, type a size); `bg (auto)` under them draws the darkest-patch
+  background the dF/F subtracts as a trace of its own;
+- **bottom** — every ROI's time course, computed by itself half a second after the ROIs change: raw or dF/F
+  (`mesc_io.dff`, numpy only: dark current and a fitted darkest-patch background removed, then a rolling-quantile
+  baseline, q = 0.3 over 60 s), overlaid or stacked, zoomed by dragging a box. **Filter** smooths what is drawn
+  (Gaussian or Savitzky–Golay; the csv stays unfiltered), **Grid** adds minor ticks, fixed steps and a marked zero
+  line, **Export** gives the csv or the traces as a PNG.
+
+The quick actions are in sight; the rest sits in a menu at the end of its row. **?** in the top-right corner opens a
+guide to all of it, with the keys.
 
 ROIs belong to the unit they were drawn on and are saved as you go, in one folder,
 `~/mesc-viewer/`, never beside the raw file; so is the view itself, so reopening the file puts
@@ -125,6 +132,8 @@ scrubbing does not flicker.
 Each channel has a palette: its colour from the file, a single colour, or one of 25 of Fabio
 Crameri's perceptually uniform Scientific colour maps (batlow, oslo, lajolla, vik, roma, …).
 **Overlay** puts all channels in one picture, each through its own limits and colour.
+**Brightness, contrast and gamma** (slider or a typed number) change only the picture on screen — gamma below 1
+lifts dim boutons — never the numbers or the data exports.
 
 #### Z-stacks: 3D and XYZ
 
@@ -174,7 +183,7 @@ The same is in Python: `mesc_io.mosaic.tiles / register / compose / to_tiff`.
 
 **ruler** (beside the ROI tools) measures in µm between two clicks on the image. **PNG** saves
 what is on screen for a figure: the image at whole pixels with the ROIs, the ruler, a scale bar
-and a caption, or the 3D view. **png** beside csv saves the traces.
+and a caption, or the 3D view. **Export** in the traces bar saves the traces as csv or as drawn, as a PNG.
 
 Layout and decisions: [docs/viewer_design.md](docs/viewer_design.md).
 
@@ -228,6 +237,8 @@ not part of pytest.
 ## Acknowledgements
 
 F. Kamari, for the idea. Claude Code, for the debugging.
+
+The viewer's colours follow [NERV Theme](https://github.com/wongmjane/nerv-theme) by Jane Manchun Wong (MIT).
 
 ## Licence
 

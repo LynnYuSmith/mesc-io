@@ -106,18 +106,18 @@
   #frameLbl { min-width:150px; text-align:right; font-variant-numeric:tabular-nums }
   #chans button { padding:2px 8px; font-size:11px }
   .readout { position:absolute; left:8px; top:8px; font-size:11px; color:var(--ink); font-variant-numeric:tabular-nums;
-             background:rgba(18,20,23,.8); padding:3px 7px; border-radius:3px; pointer-events:none; display:none;
+             background:rgba(10,22,18,.8); padding:3px 7px; border-radius:3px; pointer-events:none; display:none;
              border:1px solid var(--line); white-space:nowrap }
   .readout b { color:var(--accent); font-weight:600 }
   #stageHint { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted);
-               background:rgba(18,20,23,.7); padding:2px 6px; border-radius:3px; pointer-events:none }
+               background:rgba(10,22,18,.7); padding:2px 6px; border-radius:3px; pointer-events:none }
 
   /* ---- the 3D view of a z-stack: over the stage, same size ---- */
   #vol { position:absolute; left:0; top:0; width:100%; height:100%; cursor:grab; background:#000 }
   #vol.drag { cursor:grabbing }
   #volBar[hidden], #volInfo[hidden], #vol[hidden] { display:none }
   #volBar { position:absolute; left:8px; top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;
-            max-width:calc(100% - 16px); background:rgba(18,20,23,.82); border:1px solid var(--line);
+            max-width:calc(100% - 16px); background:rgba(10,22,18,.82); border:1px solid var(--line);
             border-radius:4px; padding:4px 8px; font-size:11px }
   #volBar button { padding:2px 8px; font-size:11px }
   #volBar label { display:flex; align-items:center; gap:4px; color:var(--muted) }
@@ -139,25 +139,25 @@
   #volMarks { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none }
   #volMarks[hidden], #volPts[hidden] { display:none }
   #volPts { position:absolute; left:8px; bottom:8px; font-size:11px; color:var(--ink); max-width:calc(50% - 12px);
-            background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px;
+            background:rgba(10,22,18,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px;
             font-variant-numeric:tabular-nums; white-space:pre-wrap; max-height:40%; overflow-y:auto;
             pointer-events:none }   /* a readout over the stack: clicks go through to the stack under it */
   #volPts .h { color:var(--muted) }
   #vol.tool { cursor:crosshair }
   #volInfo { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted); pointer-events:none;
-             background:rgba(18,20,23,.7); padding:2px 6px; border-radius:3px; white-space:pre; text-align:right }
+             background:rgba(10,22,18,.7); padding:2px 6px; border-radius:3px; white-space:pre; text-align:right }
   #volInfo b { color:var(--ink); font-weight:600 }
   /* ---- orthogonal views: XY, YZ to its right, XZ below, one crosshair through all three ---- */
   #ortho { position:absolute; inset:0; background:#000 }
   #ortho[hidden] { display:none }
   #ortho canvas { position:absolute; cursor:crosshair; image-rendering:auto }
   #ortho .olbl { position:absolute; font-size:11px; color:var(--muted); pointer-events:none;
-                 background:rgba(18,20,23,.7); padding:1px 5px; border-radius:3px; white-space:nowrap }
+                 background:rgba(10,22,18,.7); padding:1px 5px; border-radius:3px; white-space:nowrap }
   #orthoBar { position:absolute; right:8px; top:8px; display:flex; gap:6px; align-items:center; font-size:11px;
-              background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
+              background:rgba(10,22,18,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
   #orthoBar button { padding:2px 8px; font-size:11px }
   #oSurfInfo { position:absolute; right:8px; bottom:8px; max-width:calc(100% - 16px); font-size:11px; color:var(--ink);
-               background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px; white-space:pre-wrap;
+               background:rgba(10,22,18,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px; white-space:pre-wrap;
                pointer-events:none; opacity:.9 }   /* a readout: a mark under it can still be clicked or removed */
   #oSurfInfo[hidden] { display:none }
   #ortho.surf canvas { cursor:cell }
@@ -173,12 +173,12 @@
   #mosaic.edit #mosCv { cursor:move }
   #mosaic.crop #mosCv { cursor:crosshair }
   #mosBar { position:absolute; left:8px; right:8px; top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:11px;
-            background:rgba(18,20,23,.85); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
+            background:rgba(10,22,18,.85); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
   #mosBar button { padding:2px 8px; font-size:11px }
   #mosBar input[type=number] { width:48px; font-size:11px }
   #mosBar input[type=range] { width:180px }
   #mosList { position:absolute; left:8px; bottom:34px; max-height:45%; overflow-y:auto; font-size:11px; max-width:min(560px, calc(100% - 16px));
-             background:rgba(18,20,23,.85); border:1px solid var(--line); border-radius:4px; padding:4px 6px }
+             background:rgba(10,22,18,.85); border:1px solid var(--line); border-radius:4px; padding:4px 6px }
   #mosList[hidden] { display:none }
   #mosList .h { color:var(--muted); margin-bottom:3px }
   #mosList .t { display:flex; gap:6px; align-items:center; padding:1px 2px; cursor:pointer; white-space:nowrap }
@@ -187,12 +187,12 @@
   #mosList .t .n { margin-left:auto; color:var(--muted) }
   #mosList button { padding:0 5px; font-size:10px }
   #mosInfo { position:absolute; right:8px; bottom:8px; max-width:calc(100% - 16px); font-size:11px; color:var(--ink);
-             background:rgba(18,20,23,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px; white-space:pre-wrap }
+             background:rgba(10,22,18,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px; white-space:pre-wrap }
   #mosInfo:empty { display:none }
   /* what an action said (auto, TIFF, go, flatten): stays until closed or replaced — the hover line
      below is overwritten by the next mouse move, and the reports used to live there */
   #mosReport { position:absolute; right:8px; max-width:min(620px, calc(100% - 16px)); font-size:11px; color:var(--ink); z-index:6;
-               background:rgba(18,20,23,.92); border:1px solid var(--line); border-radius:4px; padding:4px 22px 4px 8px; white-space:pre-wrap }
+               background:rgba(10,22,18,.92); border:1px solid var(--line); border-radius:4px; padding:4px 22px 4px 8px; white-space:pre-wrap }
   #mosReport[hidden] { display:none }
   #mosReport button { position:absolute; right:3px; top:2px; padding:0 5px; font-size:11px; line-height:14px }
   #mosMini { position:absolute; right:8px; bottom:40px; border:1px solid var(--line); border-radius:3px; background:#000;
@@ -312,7 +312,7 @@
   /* the frame cursor lives UNDER the canvas (whose background is clear), so it moves without a
      redraw of the traces and is still drawn beneath them, as it was when it was painted first */
   #trace { display:block; width:100%; position:relative; z-index:1 }
-  #traceCursor { position:absolute; top:0; left:0; width:1px; background:#4ea3dd; display:none; pointer-events:none; z-index:0 }
+  #traceCursor { position:absolute; top:0; left:0; width:1px; background:#a8d3c5; display:none; pointer-events:none; z-index:0 }
   #traceRubber, #traceRead { z-index:2 }
   #traceLbl { color:var(--muted) }
   .ylim { display:inline-flex; align-items:center; gap:4px; color:var(--faint) }
@@ -324,6 +324,44 @@
   .ylim button { font-size:11px; padding:2px 6px }
   #splitter { height:4px; cursor:row-resize; background:transparent; margin-top:-4px }
   #splitter:hover { background:var(--accent) }
+
+  /* ======== the NERV look (12 Nov 2026, her pick 'E'). Palette after NERV Theme by Jane Manchun Wong (MIT),
+     https://github.com/wongmjane/nerv-theme — her PyCharm theme — green-black, near-white text, what is
+     ON is a lighter field with a thin orange line under it (like the terminal tab); orange nowhere else. One block,
+     last, so the look lives in one place. ======== */
+  :root { --bg:#0a1612; --panel:#0f1f1a; --panel-2:#1a2e28; --line:#22382f; --edge:#2a4a3d;
+          --ink:#d6dbd8; --hi:#ffffff; --muted:#7f8f88; --faint:#5a7a6d; --sel:#1a2e28; --on:#22382f;
+          --accent:#e85d04; --mint:#a8d3c5; --warn:#d4a017; --bad:#e05252 }
+  button { border:0; background:transparent; color:#c9cfcc; border-radius:6px; padding:4px 9px }
+  button:hover { background:var(--panel-2); color:#f0f2f1; border-color:transparent }
+  button.on { background:var(--on); color:var(--hi); border-color:transparent; box-shadow:inset 0 -2px 0 var(--accent) }
+  input, select { background:var(--bg); border:1px solid var(--edge); border-radius:6px; color:var(--ink) }
+  input:focus, select:focus { outline:none; border-color:var(--accent) }
+  input[type=range] { accent-color:#8fb3a5 }
+  h2 { text-transform:none; letter-spacing:0; font-size:12.5px; color:var(--ink) }
+  h1 { text-transform:none; letter-spacing:0; color:var(--ink) }
+  .u.on { background:var(--on); box-shadow:none }
+  .r.sel { background:var(--sel); box-shadow:none }
+  #metaSplit:hover, #toolsSplit:hover, #unitsSplit:hover, #splitter:hover { background:var(--edge) }
+  #rubber, #traceRubber { border-color:var(--mint); background:rgba(168,211,197,.08) }
+  .readout b { color:var(--hi) }
+  .grp { border:0; padding:2px 0; margin:6px 12px 0 }
+  .grp .glbl { display:none }
+  .grp button, .frow button { padding:4px 9px }
+  details.grpd { border:0; padding:2px 0; margin:8px 12px 0 }
+  details.grpd > summary { color:var(--muted); text-transform:none; letter-spacing:0; font-size:11.5px }
+  details.dd > summary { border:0; background:transparent; color:#c9cfcc; border-radius:6px }
+  details.dd > summary:hover { background:var(--panel-2); color:#f0f2f1 }
+  details.dd[open] > summary, details.dd.modes:has(button.on) > summary { background:var(--on); color:var(--hi); border-color:transparent;
+                                                                          box-shadow:inset 0 -2px 0 var(--accent) }
+  details.dd > summary::after { color:var(--muted) }
+  .dd-body { background:var(--panel); border-color:var(--edge) }
+  .dd-body a, #exports a { color:var(--ink) }   .dd-body a:hover, #exports a:hover { color:var(--hi) }
+  .ylim input.fixed { border-color:var(--accent); color:var(--hi) }
+  #guideBtn { background:var(--panel-2); color:var(--ink) }
+  #guideBody h3 { color:var(--mint); text-transform:none; letter-spacing:0; font-size:12px }
+  #volBar, #orthoBar, #mosBar { border-color:var(--line) }
+  #guideBody a { color:var(--mint) }
 </style>
 </head>
 <body>
@@ -332,10 +370,10 @@
 
   <aside id="unitsCol">
     <div id="unitsSplit" title="drag to resize"></div>
-    <h1>units <small id="fname">loading…</small></h1>
+    <h1>Units <small id="fname">loading…</small></h1>
     <div id="units"></div>
     <div id="metaSplit" title="drag to resize"></div>
-    <div id="meta"><h2>metadata <button id="allMeta" title="every attribute the file carries, not the ten shown here">all…</button></h2><table id="metaTable"></table><div id="findings"></div></div>
+    <div id="meta"><h2>Metadata <button id="allMeta" title="every attribute the file carries, not the ten shown here">all…</button></h2><table id="metaTable"></table><div id="findings"></div></div>
   </aside>
 
   <section id="imageCol">
@@ -348,19 +386,19 @@
       <div id="volNote" hidden></div>
       <div id="volBar" hidden>
         <button id="volMip" title="the brightest voxel along each line of sight">MIP</button>
-        <button id="volGlass" title="semi-transparent: every voxel adds light and hides a little of what is behind it">glass</button>
-        <button id="volDepth" title="MIP coloured by the depth the brightest voxel sits at — an axon's colour says how deep it runs">depth</button>
-        <details class="dd"><summary title="what is shown and how bright: floor, ceiling, density, gain, gamma">window</summary><div class="dd-body"><div class="ddrow"><label id="volThrL" title="below this, a voxel is not shown (fraction of the window). It only says what is shown — how bright the rest is comes from the window (contrast), gain and gamma, and does not change with it. Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"><input type="number" id="volThrN" class="vnum" step="any" title="the floor in the recording's own units (type a value, Enter)"></label></div>
+        <button id="volGlass" title="semi-transparent: every voxel adds light and hides a little of what is behind it">Glass</button>
+        <button id="volDepth" title="MIP coloured by the depth the brightest voxel sits at — an axon's colour says how deep it runs">Depth</button>
+        <details class="dd"><summary title="what is shown and how bright: floor, ceiling, density, gain, gamma">Window</summary><div class="dd-body"><div class="ddrow"><label id="volThrL" title="below this, a voxel is not shown (fraction of the window). It only says what is shown — how bright the rest is comes from the window (contrast), gain and gamma, and does not change with it. Set from the stack itself when it opens; moving it keeps yours for this unit">floor <input type="range" id="volThr" min="0" max="0.95" step="0.01"><input type="number" id="volThrN" class="vnum" step="any" title="the floor in the recording's own units (type a value, Enter)"></label></div>
 <span id="volChs" hidden title="overlay: each channel in its own colour, through its own window (instruments), with its own floor; click a channel's name to hide or show it"></span>
 <div class="ddrow"><label id="volCeilL" title="above this, a voxel is not shown (with cut on): the brightest blobs stop hiding what is around and behind them. It does not rescale the brightness of the rest — that is the window (contrast), gain and gamma">ceiling <input type="range" id="volCeil" min="0.05" max="1" step="0.01"><input type="number" id="volCeilN" class="vnum" step="any" title="the ceiling in the recording's own units (type a value, Enter)"></label><button id="volCut" title="the ceiling on or off: on, a voxel above it is not shown, so a bright blob disappears and what is behind it shows; off, every voxel is shown at its own brightness">cut</button></div>
 <div class="ddrow"><label title="how much a voxel hides what is behind it (glass only)">density <input type="range" id="volDen" min="0.02" max="1" step="0.01"></label></div>
 <div class="ddrow"><label title="brightness">gain <input type="range" id="volGain" min="0.5" max="4" step="0.05"></label></div>
 <span id="volGam" class="vgams"></span></div></details>
-        <button id="volAuto" title="the floor back at the stack's own percentile — 99.7 for MIP and depth, 97 for glass: the background empty, what stands out of it kept">auto</button>
-        <details class="dd"><summary title="turn the stack, which end is up, stretch depth">view</summary><div class="dd-body"><div class="ddrow"><button id="volAxY" title="look along y: the stack from its side, depth running down">side y</button><button id="volAxX" title="look along x: the stack from its other side, depth running down">side x</button><button id="volDeep" title="which end of the stack is up: slice 0 (off) or the last slice, as MESc draws it (on). Which end is the surface depends on how the stack was taken — in a stack recorded upward, slice 0 is the deepest; the surface tool in XYZ finds the tissue side by brightness">surface ↑</button></div>
+        <button id="volAuto" title="the floor back at the stack's own percentile — 99.7 for MIP and depth, 97 for glass: the background empty, what stands out of it kept">Auto</button>
+        <details class="dd"><summary title="turn the stack, which end is up, stretch depth">View</summary><div class="dd-body"><div class="ddrow"><button id="volAxY" title="look along y: the stack from its side, depth running down">side y</button><button id="volAxX" title="look along x: the stack from its other side, depth running down">side x</button><button id="volDeep" title="which end of the stack is up: slice 0 (off) or the last slice, as MESc draws it (on). Which end is the surface depends on how the stack was taken — in a stack recorded upward, slice 0 is the deepest; the surface tool in XYZ finds the tissue side by brightness">surface ↑</button></div>
 <div class="ddrow"><label title="stretch depth. ×1 is the true proportion; anything else exaggerates it and says so">z ×<input type="range" id="volZ" min="1" max="8" step="0.5"><span id="volZv"></span></label></div></div></details>
-        <button id="volReset" title="look straight down the stack again, from the surface (double-click does the same)">reset</button>
-        <details class="dd modes"><summary title="clip the stack to a box, or a thick slab">box</summary><div class="dd-body"><div class="ddrow"><button id="volBox" title="clip the stack to a box: six limits, x y z from and to (fractions of the stack, in the file's own axes — a flip or deepest-up does not change which part is kept). The box is drawn in yellow; full brings the whole stack back">box</button><button id="volSlab" title="a thick-slab MIP: only the slices within the thickness around the slider's slice are drawn, as MIP; the slider moves the slab through the stack">slab</button><label id="volSlabL" hidden title="the slab's thickness in µm, centred on the slider's slice (Enter)"><input type="number" id="volSlabN" class="vnum" min="0.1" step="any" style="width:52px">µm</label></div>
+        <button id="volReset" title="look straight down the stack again, from the surface (double-click does the same)">Reset</button>
+        <details class="dd modes"><summary title="clip the stack to a box, or a thick slab">Box</summary><div class="dd-body"><div class="ddrow"><button id="volBox" title="clip the stack to a box: six limits, x y z from and to (fractions of the stack, in the file's own axes — a flip or deepest-up does not change which part is kept). The box is drawn in yellow; full brings the whole stack back">box</button><button id="volSlab" title="a thick-slab MIP: only the slices within the thickness around the slider's slice are drawn, as MIP; the slider moves the slab through the stack">slab</button><label id="volSlabL" hidden title="the slab's thickness in µm, centred on the slider's slice (Enter)"><input type="number" id="volSlabN" class="vnum" min="0.1" step="any" style="width:52px">µm</label></div>
 <span id="volBoxRow" hidden>
 <label title="x from / to: fractions of the stack's width">x <input type="range" id="volBx0" min="0" max="1" step="0.01"><input type="range" id="volBx1" min="0" max="1" step="0.01"></label>
 <label title="y (rows) from / to: fractions of the stack's height, in the file's rows">y <input type="range" id="volBy0" min="0" max="1" step="0.01"><input type="range" id="volBy1" min="0" max="1" step="0.01"></label>
@@ -368,7 +406,7 @@
 <span id="volBoxTxt" class="hint"></span>
 <button id="volBoxFull" title="the whole stack again">full</button>
 </span></div></details>
-        <details class="dd modes"><summary title="points, a 3D ruler, objects">measure</summary><div class="dd-body"><div class="ddrow"><button id="volPoint" title="mark points: a click (not a drag — a drag still turns) puts a numbered point on the brightest voxel under the cursor, snapped to the brightest of its 3×3×3 neighbours; the XYZ crosshair goes there. Esc removes the last, shift+Esc all">point</button><button id="volMeasure" title="a ruler in 3D: each click puts a point exactly where the cursor meets the CURRENT plane (the slice selected by the slider or the XYZ crosshair, lit blue in the view) — no snapping to anything bright; change the plane between clicks to measure across depth. Read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button><button id="volObject" title="an object: a click picks a seed as point does, then grows the connected region around it — every voxel of that channel at least the given share of the seed's peak, joined face to face, no further than the radius from the seed. Its volume in µm³, centre, extent and each channel's mean are listed; it is outlined in XYZ. Esc removes the last, shift+Esc all">object</button></div>
+        <details class="dd modes"><summary title="points, a 3D ruler, objects">Measure</summary><div class="dd-body"><div class="ddrow"><button id="volPoint" title="mark points: a click (not a drag — a drag still turns) puts a numbered point on the brightest voxel under the cursor, snapped to the brightest of its 3×3×3 neighbours; the XYZ crosshair goes there. Esc removes the last, shift+Esc all">point</button><button id="volMeasure" title="a ruler in 3D: each click puts a point exactly where the cursor meets the CURRENT plane (the slice selected by the slider or the XYZ crosshair, lit blue in the view) — no snapping to anything bright; change the plane between clicks to measure across depth. Read the distance in µm, with Δx Δy Δz; shift+click goes on from the last point, a polyline whose path length is an axon's length. Δz is the least certain: a two-photon PSF is several times longer along z than across. Esc removes the last point, shift+Esc the whole line">measure</button><button id="volObject" title="an object: a click picks a seed as point does, then grows the connected region around it — every voxel of that channel at least the given share of the seed's peak, joined face to face, no further than the radius from the seed. Its volume in µm³, centre, extent and each channel's mean are listed; it is outlined in XYZ. Esc removes the last, shift+Esc all">object</button></div>
 <label id="volObjL" hidden title="what the next object keeps: voxels at least this share of the seed's peak (of the window, as the bytes are), within this radius of the seed. Changing either grows the last object again (Enter)">≥<input type="number" id="volObjF" class="vnum" min="5" max="99" step="1" style="width:44px">% of peak · within<input type="number" id="volObjR" class="vnum" min="0.5" step="any" style="width:48px">µm</label></div></details>
       </div>
       <canvas id="volMarks" hidden></canvas>
@@ -378,9 +416,9 @@
         <canvas id="oXY"></canvas><canvas id="oYZ"></canvas><canvas id="oXZ"></canvas>
         <div class="olbl" id="lXY"></div><div class="olbl" id="lYZ"></div><div class="olbl" id="lXZ"></div>
         <div id="orthoBar">
-          <button id="oMax" title="each view becomes the brightest along its own depth axis — side projections of the stack">max</button>
-          <button id="oCross" class="on" title="show the crosshair">cross</button>
-          <button id="oSurf" title="mark the surface: each click in a pane puts a mark where the tissue begins (just above the first slice where the green appears), instead of moving the crosshair. One mark: a flat surface; three: a tilted plane; six or more, spread over the stack: a curved one. Shift+click removes the nearest mark, Esc the last, shift+Esc all">surface</button>
+          <button id="oMax" title="each view becomes the brightest along its own depth axis — side projections of the stack">Max</button>
+          <button id="oCross" class="on" title="show the crosshair">Cross</button>
+          <button id="oSurf" title="mark the surface: each click in a pane puts a mark where the tissue begins (just above the first slice where the green appears), instead of moving the crosshair. One mark: a flat surface; three: a tilted plane; six or more, spread over the stack: a curved one. Shift+click removes the nearest mark, Esc the last, shift+Esc all">Surface</button>
           <button id="oSurfTis" hidden title="which side of the surface is the tissue: found by brightness (the brighter side), or set by hand. Depth below the surface is counted into the tissue">tissue: auto</button>
           <button id="oSurfCsv" hidden title="the marks, the fitted surface and every 3D point's depth below it, as a CSV">csv</button>
           <span id="oGam" class="vgams"></span>
@@ -392,18 +430,18 @@
       <div id="mosaic" hidden>
         <canvas id="mosCv"></canvas>
         <div id="mosBar">
-          <button id="mosEdit" title="move tiles by hand: drag one, or select it and use the arrows (shift: ten pixels), [ and ] a slice, h hides it; ⌘Z undoes (also: the e key)">edit</button>
-          <button id="mosAuto" title="stitch: every overlapping pair matched across (on its projection) and in depth, one correction per tile by least squares; held still: the tile selected in edit, else the first. Starts from the layout as it is, so a hand-made one is refined, not thrown away; each pair's correlation and what is left of it are shown on its seam">auto</button>
-          <button id="mosFlat" title="put every tile's surface (marked in XYZ ▸ surface) on one plane — the selected tile's, else the median — by moving tiles in depth">flatten</button>
-          <button id="mosUndo" title="undo the last change to the layout (⌘Z)">undo</button>
+          <button id="mosEdit" title="move tiles by hand: drag one, or select it and use the arrows (shift: ten pixels), [ and ] a slice, h hides it; ⌘Z undoes (also: the e key)">Edit</button>
+          <button id="mosAuto" title="stitch: every overlapping pair matched across (on its projection) and in depth, one correction per tile by least squares; held still: the tile selected in edit, else the first. Starts from the layout as it is, so a hand-made one is refined, not thrown away; each pair's correlation and what is left of it are shown on its seam">Auto</button>
+          <button id="mosFlat" title="put every tile's surface (marked in XYZ ▸ surface) on one plane — the selected tile's, else the median — by moving tiles in depth">Flatten</button>
+          <button id="mosUndo" title="undo the last change to the layout (⌘Z)">Undo</button>
           <input type="range" id="mosPlane" title="the depth of the mosaic: right is shallower (shift+wheel, or ↑ shallower / ↓ deeper; PageUp/PageDown ten)"><span class="hint" id="mosPlaneL"></span>
           <span class="hint" title="each tile drawn as the maximum of this many slices around the plane: a sparse axon reads as a line instead of a few dots (1: the slice itself)">slab <input type="number" id="mosSlab" min="1" max="64" step="1"> sl</span>
           <input id="mosGo" placeholder="go: x y [z] µm" title="centre the map on a point: x y in µm (the frame the hover reads, from the rig's zero when every tile has one), and z to go to that depth; Enter">
-          <details class="dd"><summary title="seams, channels, the map, the tile list, labels">show</summary><div class="dd-body"><div class="ddrow"><button id="mosSeams" title="hard seams: each pixel from the tile whose centre is nearest, or from the last in the order (top puts a tile last)">seams: nearest</button><button id="mosChan" title="both channels (green + magenta) or one, through the first tile's window">overlay</button></div>
+          <details class="dd"><summary title="seams, channels, the map, the tile list, labels">Show</summary><div class="dd-body"><div class="ddrow"><button id="mosSeams" title="hard seams: each pixel from the tile whose centre is nearest, or from the last in the order (top puts a tile last)">seams: nearest</button><button id="mosChan" title="both channels (green + magenta) or one, through the first tile's window">overlay</button></div>
 <div class="ddrow"><button id="mosMiniBtn" class="on" title="the overview map of the whole field, with the part on screen framed; click or drag on it to go there">map</button><button id="mosListBtn" title="the list of tiles">tiles</button><button id="mosMarksBtn" class="on" title="the tiles' outlines and names and the seams' report; off: the picture alone (for a PNG)">labels</button></div></div></details>
-          <details class="dd modes"><summary title="cut out a rectangle and a range of planes (for the TIFF)">crop</summary><div class="dd-body"><div class="ddrow"><button id="mosCrop" title="drag a rectangle to cut out (Esc clears it); the TIFF takes the crop and the planes from–to">crop</button><span class="hint">planes <input type="number" id="mosZ0" title="from (empty: all)"> – <input type="number" id="mosZ1" title="to (empty: all)"></span></div></div></details>
-          <details class="dd"><summary title="the crop as a TIFF, the view as a PNG, the layout as JSON">export</summary><div class="dd-body right"><div class="ddrow"><button id="mosTif" title="the crop (or the whole field) over the planes from–to, as a Fiji hyperstack, written beside the view file — float reader units, 0 where no tile reaches, the layout in its Info">TIFF</button><button id="mosPng" title="the mosaic as on screen">PNG</button><button id="mosJson" title="the layout: each tile's stage position, its correction and its corner in the mosaic, as JSON">layout</button></div></div></details>
-          <button id="mosFitBtn" title="the whole field in view">fit</button>
+          <details class="dd modes"><summary title="cut out a rectangle and a range of planes (for the TIFF)">Crop</summary><div class="dd-body"><div class="ddrow"><button id="mosCrop" title="drag a rectangle to cut out (Esc clears it); the TIFF takes the crop and the planes from–to">Crop</button><span class="hint">planes <input type="number" id="mosZ0" title="from (empty: all)"> – <input type="number" id="mosZ1" title="to (empty: all)"></span></div></div></details>
+          <details class="dd"><summary title="the crop as a TIFF, the view as a PNG, the layout as JSON">Export</summary><div class="dd-body right"><div class="ddrow"><button id="mosTif" title="the crop (or the whole field) over the planes from–to, as a Fiji hyperstack, written beside the view file — float reader units, 0 where no tile reaches, the layout in its Info">TIFF</button><button id="mosPng" title="the mosaic as on screen">PNG</button><button id="mosJson" title="the layout: each tile's stage position, its correction and its corner in the mosaic, as JSON">layout</button></div></div></details>
+          <button id="mosFitBtn" title="the whole field in view">Fit</button>
           <span class="hint" id="mosWait"></span>
         </div>
         <div id="mosList"></div>
@@ -417,15 +455,15 @@
       <input type="range" id="frame" min="0" max="0" value="0">
       <span id="frameLbl" class="hint">—</span>
       <span id="mosPlayerHint" class="hint" hidden>the mosaic has its own depth (slider) and channel button in its top bar</span>
-      <span id="chans"></span> <button id="ovBtn" hidden title="all channels at once, each in its own colour and window — in 3D and XYZ too, green and magenta, so where both are bright it reads white">overlay</button>
+      <span id="chans"></span> <button id="ovBtn" hidden title="all channels at once, each in its own colour and window — in 3D and XYZ too, green and magenta, so where both are bright it reads white">Overlay</button>
     </div>
   </section>
 
   <aside id="toolsCol">
     <div id="toolsSplit" title="drag to resize"></div>
-    <h2>instruments</h2>
+    <h2>Instruments</h2>
     <div class="grp"><span class="glbl">roi</span>
-      <button id="toolSpot" class="on" title="a disc where you click">spot</button><button id="toolRect" title="a rectangle centred where you click">rect</button><button id="toolPoly" title="click the corners, double-click to close">polygon</button><button id="toolRuler" title="a ruler: click two points, read the distance between them in µm (Esc clears it)">ruler</button><button id="toolPan" class="icon" title="pan: drag the image to move a zoomed view (wheel or a box to zoom first)" aria-label="pan"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5V4a1.5 1.5 0 0 1 3 0v7.5"/><path d="M14 11.5V5.5a1.5 1.5 0 0 1 3 0V13"/><path d="M17 9.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3.4l-2.6-4.4a1.6 1.6 0 0 1 2.7-1.7L8 15"/></svg></button>
+      <button id="toolSpot" class="icon on" title="spot: a disc where you click" aria-label="spot"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg></button><button id="toolRect" class="icon" title="rect: a rectangle centred where you click" aria-label="rect"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="6" width="14" height="12"/></svg></button><button id="toolPoly" class="icon" title="polygon: click the corners, double-click to close" aria-label="polygon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 6-3 9H7L4 10z"/></svg></button><button id="toolRuler" class="icon" title="ruler: a ruler: click two points, read the distance between them in µm (Esc clears it)" aria-label="ruler"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16L16 4l4 4L8 20zM8 12l2 2M11 9l2 2M14 6l2 2"/></svg></button><button id="toolPan" class="icon" title="pan: drag the image to move a zoomed view (wheel or a box to zoom first)" aria-label="pan"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5V4a1.5 1.5 0 0 1 3 0v7.5"/><path d="M14 11.5V5.5a1.5 1.5 0 0 1 3 0V13"/><path d="M17 9.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3.4l-2.6-4.4a1.6 1.6 0 0 1 2.7-1.7L8 15"/></svg></button>
       <span class="sizes" id="sizeRow">
       <label id="sizeSpot"><span>r</span><input type="number" id="spotR" min="1" max="200" step="0.5" value="3"> px</label>
       <label id="sizeRect" style="display:none"><span>w</span><input type="number" id="rectW" min="1" max="1000" step="1" value="8"> × <input type="number" id="rectH" min="1" max="1000" step="1" value="8"> px</label>
@@ -434,27 +472,27 @@
       <span class="gap"></span><button id="addRoi" title="add an ROI (click on the image)">+</button><button id="delRoi" title="remove the selected ROI" disabled>−</button>
     </div>
     <div class="grp"><span class="glbl">image</span>
-      <button id="meanBtn" title="the whole third axis collapsed by averaging">mean</button><button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">max</button><label class="stepper" title="average this many frames around the slider (1 = the raw frame)"><span>AVG</span><input type="number" id="avgN" min="1" max="999" step="1" value="1"></label><button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button><button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button><button id="mosBtn" hidden title="every z-stack of the file with a stage position, laid out as one field: stitch it from the overlaps, move tiles by hand, flatten it on the surface, cut a piece out as a TIFF">mosaic</button><button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
+      <button id="meanBtn" title="the whole third axis collapsed by averaging">Mean</button><button id="maxBtn" title="the whole third axis collapsed by its brightest — what a z-stack needs, since a bouton lives in a few slices of thirty">Max</button><label class="stepper" title="average this many frames around the slider (1 = the raw frame)"><span>Avg</span><input type="number" id="avgN" min="1" max="999" step="1" value="1"></label><button id="flipBtn" title="show the image upside down, as MESc shows it: row 0 at the bottom. The picture only — ROIs, coordinates and every export stay in the file's own rows">↕ MESc</button><button id="volBtn" hidden title="the stack in 3D: drag to turn it, wheel to come closer; MIP, semi-transparent, or coloured by depth">3D</button><button id="mosBtn" hidden title="every z-stack of the file with a stage position, laid out as one field: stitch it from the overlaps, move tiles by hand, flatten it on the surface, cut a piece out as a TIFF">mosaic</button><button id="orthoBtn" hidden title="the stack cut three ways — XY, YZ and XZ through one crosshair; click to move it, the wheel steps each view's slice">XYZ</button>
       <button id="pngBtn" title="save what is on screen as a PNG: the image at its own pixels (whole pixels, no blur) with the ROIs, the ruler, a µm scale bar and a caption — or the 3D view when it is open">PNG</button>
     </div>
     <details class="grpd">
-      <summary>contrast</summary>
-      <div class="frow"><button id="winFixed" title="the same window for every frame, in reader units — a dimmer frame IS darker. Starts at the window the recording was saved with on the rig (the file's LUT)">fixed</button><button id="winPct" title="the whole recording stretched on its percentiles — one window for every frame, worked out once from frames spread over the unit, so scrubbing does not flicker">auto %</button><span class="gap"></span></div>
-      <div id="fixedKnobs" class="frow"><span>min</span><input type="number" id="vmin" step="10" style="width:64px">
-        <span>max</span><input type="number" id="vmax" step="10" style="width:64px">
-        <button id="winFile" title="back to the window saved in the file">file</button></div>
+      <summary>Contrast</summary>
+      <div class="frow"><button id="winFixed" title="the same window for every frame, in reader units — a dimmer frame IS darker. Starts at the window the recording was saved with on the rig (the file's LUT)">Fixed</button><button id="winPct" title="the whole recording stretched on its percentiles — one window for every frame, worked out once from frames spread over the unit, so scrubbing does not flicker">Auto %</button><span class="gap"></span></div>
+      <div id="fixedKnobs" class="frow"><span>Min</span><input type="number" id="vmin" step="10" style="width:64px">
+        <span>Max</span><input type="number" id="vmax" step="10" style="width:64px">
+        <button id="winFile" title="back to the window saved in the file">File</button></div>
       <div id="fixedNote" class="hint faint"></div>
-      <div id="cmapRow" class="frow"><span>colour</span><select id="cmap"></select></div>
+      <div id="cmapRow" class="frow"><span>Colour</span><select id="cmap"></select></div>
       <div id="chanRows"></div>
       <div id="pctKnobs">
       <div class="row"><span>low</span><input type="range" id="lo" min="0" max="20" step="0.5" value="1"><span id="loVal">1 %</span></div>
       <div class="row"><span>high</span><input type="range" id="hi" min="90" max="100" step="0.1" value="99.5"><span id="hiVal">99.5 %</span></div>
       </div>
-          <div class="onscreen"><div class="sub">on screen — the picture only; ROIs, numbers and data exports untouched</div><div class="krow"><span>brightness</span><input type="range" id="dispB" min="20" max="400" step="5" value="100"><input type="number" id="dispBV" class="dnum" min="20" max="400" step="5" title="brightness in % (Enter)"></div><div class="krow"><span>contrast</span><input type="range" id="dispC" min="20" max="400" step="5" value="100"><input type="number" id="dispCV" class="dnum" min="20" max="400" step="5" title="contrast in % (Enter)"></div><div class="krow"><span>gamma</span><input type="range" id="dispG" min="30" max="200" step="5" value="100"><input type="number" id="dispGV" class="dnum" min="0.3" max="2" step="0.05" title="gamma: below 1 lifts the dim (Enter)"></div><div class="ddrow"><button id="dispReset" title="brightness, contrast and gamma back to 100 % / 1.00">reset</button></div></div>
+          <div class="onscreen"><div class="sub">on screen — the picture only; ROIs, numbers and data exports untouched</div><div class="krow"><span>Brightness</span><input type="range" id="dispB" min="20" max="400" step="5" value="100"><input type="number" id="dispBV" class="dnum" min="20" max="400" step="5" title="brightness in % (Enter)"></div><div class="krow"><span>Contrast</span><input type="range" id="dispC" min="20" max="400" step="5" value="100"><input type="number" id="dispCV" class="dnum" min="20" max="400" step="5" title="contrast in % (Enter)"></div><div class="krow"><span>Gamma</span><input type="range" id="dispG" min="30" max="200" step="5" value="100"><input type="number" id="dispGV" class="dnum" min="0.3" max="2" step="0.05" title="gamma: below 1 lifts the dim (Enter)"></div><div class="ddrow"><button id="dispReset" title="brightness, contrast and gamma back to 100 % / 1.00">Reset</button></div></div>
     </details>
 
-    <h2 class="roih">rois <span id="roiCount" class="faint"></span> <span id="roiUnit" class="faint" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
-      <span class="h2r"><span id="saveState" class="faint" title="the view and the ROIs save themselves">saved</span><select id="copyFrom" style="font-size:11px;padding:1px 4px;display:none"></select><details class="dd"><summary title="clear them all, or take the set away">ROIs</summary><div class="dd-body right"><div class="ddrow"><button id="clearAll" title="remove every ROI (asks first)">clear all</button><button id="dlZip" title="the ROI set as an ImageJ zip — Fiji opens it, the pipeline reads it">export ROIs</button><a id="dlJson" href="#" title="the ROI set as stored">json</a></div></div></details></span></h2>
+    <h2 class="roih">ROIs <span id="roiCount" class="faint"></span> <span id="roiUnit" class="faint" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+      <span class="h2r"><span id="saveState" class="faint" title="the view and the ROIs save themselves">saved</span><select id="copyFrom" style="font-size:11px;padding:1px 4px;display:none"></select><details class="dd"><summary title="clear them all, or take the set away">ROIs</summary><div class="dd-body right"><div class="ddrow"><button id="clearAll" title="remove every ROI (asks first)">Clear all</button><button id="dlZip" title="the ROI set as an ImageJ zip — Fiji opens it, the pipeline reads it">Export ROIs</button><a id="dlJson" href="#" title="the ROI set as stored">json</a></div></div></details></span></h2>
     <input id="roiFilter" placeholder="filter by name" type="text">
     <div id="roiList"></div>
   </aside>
@@ -464,16 +502,16 @@
     <div id="traceBar">
       <span id="traceLbl">traces</span>
       <span class="grow"></span>
-      <button id="sigRaw" class="on" title="the ROI's mean intensity, reader units">raw</button>
+      <button id="sigRaw" class="on" title="the ROI's mean intensity, reader units">Raw</button>
       <button id="sigDff" title="dF/F by the pipeline's method: dark current, Savitzky–Golay, darkest-patch background, rolling quantile baseline">dF/F</button>
-      <details class="dd"><summary title="the dF/F baseline: rolling quantile and window; what the dF/F was computed with">baseline</summary><div class="dd-body right"><div class="ddrow"><label class="ylim" id="dffKnobs" title="the baseline: rolling quantile q over a window of seconds — the pipeline's 0.3 and 60 s by default"><span>q</span><input type="number" id="dffQ" step="0.05" min="0.05" max="0.95" value="0.3"><span>win</span><input type="number" id="dffWin" step="5" min="1" value="60"><span>s</span></label></div>
+      <details class="dd"><summary title="the dF/F baseline: rolling quantile and window; what the dF/F was computed with">Baseline</summary><div class="dd-body right"><div class="ddrow"><label class="ylim" id="dffKnobs" title="the baseline: rolling quantile q over a window of seconds — the pipeline's 0.3 and 60 s by default"><span>q</span><input type="number" id="dffQ" step="0.05" min="0.05" max="0.95" value="0.3"><span>win</span><input type="number" id="dffWin" step="5" min="1" value="60"><span>s</span></label></div>
 <span class="hint" id="dffNote"></span></div></details>
-      <details class="dd modes"><summary title="smooth the traces on screen: Gaussian or Savitzky–Golay. Only what is drawn — the numbers, the csv and the exports stay as computed">filter</summary><div class="dd-body right"><div class="ddrow"><button id="fGauss" title="Gaussian smoothing, σ in frames (click again: off)">Gauss</button><label title="σ of the Gaussian, in frames">σ<input type="number" id="fSigma" min="0.3" max="50" step="0.5"></label><span class="hint" id="fSigmaMs"></span></div><div class="ddrow"><button id="fSg" title="Savitzky–Golay: a polynomial fitted in a sliding window — keeps the height and width of a peak better than a Gaussian (click again: off)">SavGol</button><label title="window in frames (odd)">win<input type="number" id="fSgWin" min="3" max="201" step="2"></label><label title="polynomial order (below the window)">order<input type="number" id="fSgOrd" min="0" max="6" step="1"></label></div><span class="hint">display only — csv and exports are unfiltered</span></div></details>
+      <details class="dd modes"><summary title="smooth the traces on screen: Gaussian or Savitzky–Golay. Only what is drawn — the numbers, the csv and the exports stay as computed">Filter</summary><div class="dd-body right"><div class="ddrow"><button id="fGauss" title="Gaussian smoothing, σ in frames (click again: off)">Gauss</button><label title="σ of the Gaussian, in frames">σ<input type="number" id="fSigma" min="0.3" max="50" step="0.5"></label><span class="hint" id="fSigmaMs"></span></div><div class="ddrow"><button id="fSg" title="Savitzky–Golay: a polynomial fitted in a sliding window — keeps the height and width of a peak better than a Gaussian (click again: off)">SavGol</button><label title="window in frames (odd)">win<input type="number" id="fSgWin" min="3" max="201" step="2"></label><label title="polynomial order (below the window)">order<input type="number" id="fSgOrd" min="0" max="6" step="1"></label></div><span class="hint">display only — csv and exports are unfiltered</span></div></details>
       <span style="width:8px"></span>
-      <button id="modeStack" title="one line per ROI, with an offset">stack</button>
-      <button id="modeOverlay" class="on" title="all on one axis">overlay</button>
-      <details class="dd modes"><summary title="the grid: on or off, minor ticks, steps, the zero line">grid</summary><div class="dd-body right"><div class="ddrow"><button id="gridBtn" class="on" title="time and value grid on or off">grid</button><button id="gMinor" title="minor ticks between the labelled lines (a fifth of a step)">minor</button><button id="gZero" title="the zero line, marked">zero line</button></div><div class="ddrow"><label title="time step in seconds (empty: auto)">time step<input type="number" id="gTStep" min="0.01" step="any" placeholder="auto"><span>s</span></label></div><div class="ddrow"><label title="value step in the signal's units — reader units for raw, dF/F for dF/F (empty: auto)">value step<input type="number" id="gVStep" min="0" step="any" placeholder="auto"></label></div></div></details><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label>
-      <details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
+      <button id="modeStack" title="one line per ROI, with an offset">Stack</button>
+      <button id="modeOverlay" class="on" title="all on one axis">Overlay</button>
+      <details class="dd modes"><summary title="the grid: on or off, minor ticks, steps, the zero line">Grid</summary><div class="dd-body right"><div class="ddrow"><button id="gridBtn" class="on" title="time and value grid on or off">Grid</button><button id="gMinor" title="minor ticks between the labelled lines (a fifth of a step)">Minor</button><button id="gZero" title="the zero line, marked">Zero line</button></div><div class="ddrow"><label title="time step in seconds (empty: auto)">time step<input type="number" id="gTStep" min="0.01" step="any" placeholder="auto"><span>s</span></label></div><div class="ddrow"><label title="value step in the signal's units — reader units for raw, dF/F for dF/F (empty: auto)">value step<input type="number" id="gVStep" min="0" step="any" placeholder="auto"></label></div></div></details><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">Auto</button></label>
+      <details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">Export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
     </div>
     <div id="traceScroll"><div id="traceCursor"></div><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
   </section>
@@ -518,7 +556,8 @@
       <p><b>Space</b> play · <b>← →</b> frame / slide (shift: ×10) · <b>↑ ↓</b> select ROI · <b>Delete</b> remove ROI ·
       <b>Enter</b> recompute traces · <b>Esc</b> close a menu, else cancel the draft / ruler / last 3D point.</p>
       <p class="faint">Menus (<b>name ▾</b>) open one at a time and close on Esc or a click outside; a menu with
-      something switched on inside it shows its name in blue. The view and the ROIs save themselves.</p>
+      something switched on inside it is marked like a button that is on. The view and the ROIs save themselves.</p>
+      <p class="faint">Colours after <a href="https://github.com/wongmjane/nerv-theme" target="_blank" rel="noopener">NERV Theme</a> by Jane Manchun Wong (MIT).</p>
     </div>
   </div>
 </div>
@@ -1733,7 +1772,7 @@ function plotTraces() {
 function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
-  if (!TR) { lastAuto = null; syncYBoxes(); $("traceLbl").textContent = ROIS.length ? "traces — computing…" : "traces"; scheduleTraces(); g.fillStyle = "#5d656e"; g.font = "12px sans-serif";
+  if (!TR) { lastAuto = null; syncYBoxes(); $("traceLbl").textContent = ROIS.length ? "Traces — computing…" : "Traces"; scheduleTraces(); g.fillStyle = "#5d656e"; g.font = "12px sans-serif";
              g.fillText(ROIS.length ? "reading every ROI's time course in one pass…" : "draw an ROI on the image — its trace appears here", 12, 24); return; }
   const L = TL, R = TR_, T = TT, B = TB;
   const X = f => L + (f - t0) / Math.max(1, t1 - t0) * (W - L - R);
@@ -1747,14 +1786,14 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
   }
   // grid: seconds when the rate is known, else frames
   if (V.grid) {
-    g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif"; g.lineWidth = 1;
+    g.strokeStyle = "#1c3029"; g.fillStyle = "#7f8f88"; g.font = "10px sans-serif"; g.lineWidth = 1;
     const span = t1 - t0, rate = fs() || 1, secs = span / rate;
     const go = V.gridOpt || {};
     const step = (go.tStep > 0 && fs() && secs / go.tStep <= 400 ? go.tStep : niceStep(secs / 8)) * rate;   // in frames; a step too fine for the window falls back to auto
     const tdp = Math.max(secs < 20 ? 1 : 0, Math.max(0, -Math.floor(Math.log10(step / rate) + 1e-9)));        // decimals the step needs
-    if (go.minor) { g.strokeStyle = "#1f2328";                 // minor ticks first, under the labelled lines
+    if (go.minor) { g.strokeStyle = "#13241e";                 // minor ticks first, under the labelled lines
       const ms = step / 5; for (let f = Math.ceil(t0 / ms) * ms; f <= t1; f += ms) { const x = Math.round(X(f)) + .5; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); }
-      g.strokeStyle = "#262b31"; }
+      g.strokeStyle = "#1c3029"; }
     for (let f = Math.ceil(t0 / step) * step; f <= t1; f += step) {
       const x = Math.round(X(f)) + .5; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke();
       g.fillText(fs() ? (f / rate).toFixed(tdp) + " s" : f + "", x + 3, H - 5);
@@ -1766,9 +1805,9 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
     ts.forEach((t, row) => {
       const y0 = T + row * ROW_H, band = ROW_H - 8;
       const [lo, hi] = V.yFixed || bandLimits(t, t0, t1);
-      if (V.grid) { g.strokeStyle = "#20252b"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
+      if (V.grid) { g.strokeStyle = "#182a24"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
       if ((V.gridOpt || {}).zero && lo < 0 && hi > 0) { const yz = Math.round(y0 + band - (0 - lo) / ((hi - lo) || 1) * band) + .5;
-        g.strokeStyle = "#8b939c"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(L, yz); g.lineTo(W - R, yz); g.stroke(); g.lineWidth = 1; }
+        g.strokeStyle = "#9fb5ab"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(L, yz); g.lineTo(W - R, yz); g.stroke(); g.lineWidth = 1; }
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.3; g.beginPath();
       g.save(); g.beginPath(); g.rect(L, y0 - 2, W - L - R, band + 4); g.clip(); g.beginPath();
       traceLine(g, t.v, t0, t1, X, v => y0 + band - (v - lo) / ((hi - lo) || 1) * band);
@@ -1776,21 +1815,21 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
       g.fillStyle = colour(t.i); g.font = (t.i === V.sel ? "bold " : "") + "11px sans-serif";
       g.fillText(t.name, 6, y0 + 12);
       const dp = V.signal === "dff" ? 2 : 0;
-      g.fillStyle = "#6b737c"; g.font = "10px sans-serif"; g.fillText(`${lo.toFixed(dp)} … ${hi.toFixed(dp)}`, 6, y0 + 24);
+      g.fillStyle = "#7f8f88"; g.font = "10px sans-serif"; g.fillText(`${lo.toFixed(dp)} … ${hi.toFixed(dp)}`, 6, y0 + 24);
     });
   } else {
     lastAuto = overlayLimits(ts, t0, t1);
     const [lo, hi] = V.yFixed || V.valueZoom || lastAuto;
     const Y = v => T + (H - T - B) - (v - lo) / ((hi - lo) || 1) * (H - T - B);
-    if (V.grid) { g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif";
+    if (V.grid) { g.strokeStyle = "#1c3029"; g.fillStyle = "#7f8f88"; g.font = "10px sans-serif";
       const go = V.gridOpt || {}, vs = go.vStep > 0 && (hi - lo) / go.vStep <= 200 ? go.vStep : niceStep((hi - lo) / 5);
       const dp = V.signal === "dff" ? Math.max(2, -Math.floor(Math.log10(vs))) : Math.max(0, -Math.floor(Math.log10(vs)));
-      if (go.minor) { g.strokeStyle = "#1f2328"; const mv = vs / 5;
+      if (go.minor) { g.strokeStyle = "#13241e"; const mv = vs / 5;
         for (let v = Math.ceil(lo / mv) * mv; v <= hi; v += mv) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); }
-        g.strokeStyle = "#262b31"; }
+        g.strokeStyle = "#1c3029"; }
       for (let v = Math.ceil(lo / vs) * vs; v <= hi; v += vs) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(v.toFixed(dp), 4, y + 3); } }
     if ((V.gridOpt || {}).zero && lo < 0 && hi > 0) {          // the zero line, marked (on whether or not the grid is)
-      const y = Math.round(Y(0)) + .5; g.strokeStyle = "#8b939c"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.lineWidth = 1; }
+      const y = Math.round(Y(0)) + .5; g.strokeStyle = "#9fb5ab"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.lineWidth = 1; }
     g.save(); g.beginPath(); g.rect(L, T, W - L - R, H - T - B); g.clip();
     ts.forEach(t => {
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.2; g.globalAlpha = (V.sel < 0 || t.i === V.sel) ? 1 : .55; g.beginPath();
@@ -1843,7 +1882,8 @@ function syncYBoxes() {
   lo.classList.toggle("fixed", fixed); hi.classList.toggle("fixed", fixed);
   if (fixed) { if (document.activeElement !== lo) lo.value = V.yFixed[0]; if (document.activeElement !== hi) hi.value = V.yFixed[1]; }
   else { if (document.activeElement !== lo) lo.value = ""; if (document.activeElement !== hi) hi.value = "";
-         lo.placeholder = lastAuto ? lastAuto[0].toFixed(0) : "auto"; hi.placeholder = lastAuto ? lastAuto[1].toFixed(0) : "auto"; }
+         const ydp = V.signal === "dff" ? 2 : 0;   // dF/F limits are fractions: whole numbers read as "-0 – 0" (12 Nov 2026)
+         lo.placeholder = lastAuto ? lastAuto[0].toFixed(ydp) : "auto"; hi.placeholder = lastAuto ? lastAuto[1].toFixed(ydp) : "auto"; }
   $("yAuto").disabled = !fixed;
 }
 function applyY() {
@@ -3825,7 +3865,7 @@ function mosMarks(g, G, v) {
     g.strokeStyle = sel ? "#ff9f1c" : has ? "rgba(255,255,255,.28)" : "rgba(255,255,255,.12)";
     g.lineWidth = sel ? 2 : 1; g.setLineDash(has ? [] : [4, 4]); g.strokeRect(x + .5, y + .5, w - 1, h - 1); g.setLineDash([]);
     if (w > 70) { const t = p.u.name + (p.u.comment ? " · " + p.u.comment : ""), e = mosEntry(path);
-      g.fillStyle = "rgba(18,20,23,.7)"; const tw = Math.min(w - 8, g.measureText(t).width + 8); g.fillRect(x + 3, y + 3, tw, 15);
+      g.fillStyle = "rgba(10,22,18,.7)"; const tw = Math.min(w - 8, g.measureText(t).width + 8); g.fillRect(x + 3, y + 3, tw, 15);
       g.fillStyle = sel ? "#ff9f1c" : "#cfd6dd"; g.fillText(t, x + 7, y + 5, w - 16);
       if (sel || e.dx || e.dy || e.dz) { g.fillStyle = "rgba(207,214,221,.75)";
         g.fillText(`${e.dx.toFixed(1)}, ${e.dy.toFixed(1)} µm · ${e.dz >= 0 ? "+" : ""}${e.dz} sl`, x + 7, y + 20, w - 16); } }
@@ -4093,7 +4133,7 @@ $("mosList").addEventListener("click", e => {
 // stitch from the overlaps, on the server, starting from the layout as it is
 $("mosAuto").onclick = async () => {
   const b = $("mosAuto"); if (b.disabled) return;
-  b.disabled = true; b.textContent = "stitching…"; mosMsg("matching every overlapping pair in 3D…");
+  b.disabled = true; b.textContent = "Stitching…"; mosMsg("matching every overlapping pair in 3D…");
   try {
     const G = mosGeom(), ch = V.mos.chan === "ov" ? 0 : V.mos.chan;
     const r = await (await fetch(API.base + "/api/mosaic/register", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -4117,7 +4157,7 @@ $("mosAuto").onclick = async () => {
     mosMsg(lines.join("\n"));
     mosDraw(); saveView();
   } catch (err) { mosMsg("stitching failed: " + err.message); badge("stitching failed", true); }
-  finally { b.disabled = false; b.textContent = "auto"; }
+  finally { b.disabled = false; b.textContent = "Auto"; }
 };
 // every marked surface onto one plane: the selected tile's, else the median of them
 $("mosFlat").onclick = () => {

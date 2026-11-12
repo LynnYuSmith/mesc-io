@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Viewer: a `▾` beside `grid` — minor ticks (a fifth of a step), fixed time and value steps (empty: auto; a step too
+  fine for the window falls back to auto), and a marked zero line (on by default, in overlay and in every stack band).
 - Viewer: `bg (auto)` under the ROI list — the darkest patch the dF/F subtracts (the dashed box on the image) drawn as
   a trace like the ROIs, in its colour; raw only (it has no dF/F of its own: it is what the dF/F takes away). The
   label counts it apart (`1 of 1 ROIs + bg`).

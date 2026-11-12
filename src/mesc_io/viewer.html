@@ -230,6 +230,7 @@
   details.dd > summary { list-style:none; cursor:pointer; user-select:none; white-space:nowrap; padding:4px 10px;
                          border:1px solid var(--line); background:var(--panel-2); color:var(--ink); border-radius:5px }
   details.dd > summary::-webkit-details-marker { display:none }
+  details.dd > summary.ddmini { padding:4px 6px }   /* a bare ▾ beside the button it belongs to */
   #volBar details.dd > summary, #mosBar details.dd > summary { padding:2px 8px }   /* as small as the buttons beside it */
   details.dd > summary::after { content:" \25BE"; color:var(--muted) }
   details.dd > summary:hover, details.dd[open] > summary { border-color:var(--accent) }
@@ -469,7 +470,7 @@
       <span style="width:8px"></span>
       <button id="modeStack" title="one line per ROI, with an offset">stack</button>
       <button id="modeOverlay" class="on" title="all on one axis">overlay</button>
-      <button id="gridBtn" class="on" title="time and value grid">grid</button><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label>
+      <button id="gridBtn" class="on" title="time and value grid">grid</button><details class="dd"><summary class="ddmini" title="grid options: minor ticks, steps, the zero line"></summary><div class="dd-body right"><div class="ddrow"><button id="gMinor" title="minor ticks between the labelled lines (a fifth of a step)">minor</button><button id="gZero" title="the zero line, marked">zero line</button></div><div class="ddrow"><label title="time step in seconds (empty: auto)">time step<input type="number" id="gTStep" min="0.01" step="any" placeholder="auto"><span>s</span></label></div><div class="ddrow"><label title="value step in the signal's units — reader units for raw, dF/F for dF/F (empty: auto)">value step<input type="number" id="gVStep" min="0" step="any" placeholder="auto"></label></div></div></details><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label>
       <details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
     </div>
     <div id="traceScroll"><div id="traceCursor"></div><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
@@ -504,7 +505,7 @@
       <p>They compute themselves half a second after the ROIs change (<b>Enter</b> recomputes). <b>raw</b> | <b>dF/F</b>
       — dF/F by the pipeline's method; <b>baseline ▾</b> sets its rolling quantile and window. <b>filter ▾</b>:
       Gaussian or Savitzky–Golay smoothing of what is drawn — the csv and the exports stay unfiltered.
-      <b>stack</b> | <b>overlay</b>; <b>grid</b>; <b>y</b> limits typed, or <b>auto</b>. <b>Drag a box</b> zooms time
+      <b>stack</b> | <b>overlay</b>; <b>grid</b> (its <b>▾</b>: minor ticks, fixed steps, the zero line); <b>y</b> limits typed, or <b>auto</b>. <b>Drag a box</b> zooms time
       (in overlay the values too), <b>double-click</b> shows the whole recording, <b>← →</b> slide a zoomed window;
       a click puts the movie on that frame. <b>export ▾</b>: csv, or the traces as drawn as a PNG.</p>
       <h3>z-stacks</h3>
@@ -554,7 +555,8 @@ const V = {
   dffQ: 0.3, dffWin: 60,                    // the baseline's quantile and window (s)
   tfilt: { kind: "off", sigma: 2, sgWin: 7, sgOrder: 2 },
   disp: { b: 100, c: 100, g: 100 },
-  showBg: false,                            // draw the auto background trace with the ROIs (raw only), 12 Nov 2026         // the picture on screen: brightness %, contrast %, gamma ×100 (12 Nov 2026, as the report's display)   // a DISPLAY filter of the traces (12 Nov 2026): off | gauss | sg; the data, csv and exports stay unfiltered
+  showBg: false,
+  gridOpt: { minor: false, zero: true, tStep: null, vStep: null },   // grid ▾ (12 Nov 2026): minor ticks, a marked zero line, fixed steps (null = auto)                            // draw the auto background trace with the ROIs (raw only), 12 Nov 2026         // the picture on screen: brightness %, contrast %, gamma ×100 (12 Nov 2026, as the report's display)   // a DISPLAY filter of the traces (12 Nov 2026): off | gauss | sg; the data, csv and exports stay unfiltered
   sel: -1, shown: {},                      // unit path -> { roi name -> drawn in the trace strip }
   tracesH: 275, metaH: 300, toolsW: null, unitsW: 167,          // her start layout, 12 Nov 2026; toolsW null = fit the image to the file's shape (see fitTools)
 };
@@ -618,7 +620,7 @@ async function boot() {
     im.onerror = () => { if (++tries > 3) return; setTimeout(() => { im.src = src0 + "&retry=" + tries; }, 800 * tries); };
   });
   const saved = (await (await fetch(API.base + "/api/view")).json()).view || {};
-  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","tfilt","disp","showBg","sel","shown","tracesH","metaH","toolsW","unitsW","vol","flipY","mos"]));
+  Object.assign(V, pickKeys(saved, ["ch","frame","avg","proj","lo","hi","win","fixBy","cmapBy","overlay","zoom","traceMode","grid","traceZoom","valueZoom","yFixed","yFixedBy","signal","dffQ","dffWin","tfilt","disp","showBg","gridOpt","sel","shown","tracesH","metaH","toolsW","unitsW","vol","flipY","mos"]));
   V.vol = volState(V.vol); V.mos = mosState(V.mos);
   if (V.win !== "pct") V.win = "fixed";
   if (!V.fixBy || typeof V.fixBy !== "object" || Array.isArray(V.fixBy)) V.fixBy = {};
@@ -657,7 +659,7 @@ function applyStatic() {                 // controls that reflect V without a un
   $("modeOverlay").classList.toggle("on", V.traceMode === "overlay");
   $("gridBtn").classList.toggle("on", V.grid);
   $("sigRaw").classList.toggle("on", V.signal === "raw"); $("sigDff").classList.toggle("on", V.signal === "dff");
-  $("dffQ").value = V.dffQ; $("dffWin").value = V.dffWin; if (typeof syncFilt === "function" && $("fGauss")) syncFilt(); if (typeof syncDisp === "function" && $("dispB")) syncDisp();
+  $("dffQ").value = V.dffQ; $("dffWin").value = V.dffWin; if (typeof syncFilt === "function" && $("fGauss")) syncFilt(); if (typeof syncDisp === "function" && $("dispB")) syncDisp(); if (typeof syncGridOpt === "function" && $("gMinor")) syncGridOpt();
   $("dffKnobs").style.visibility = V.signal === "dff" ? "" : "hidden";   // keeps its room: the bar must not jump
   document.documentElement.style.setProperty("--traces-h", V.tracesH + "px");
   document.documentElement.style.setProperty("--meta-h", V.metaH + "px");
@@ -1698,7 +1700,7 @@ function plotTraces() {
   const H = stack ? Math.max(box.clientHeight, ts.length * ROW_H + 22) : box.clientHeight;
   const n = TR ? TR.traces[0].length : 0, [t0, t1] = V.traceZoom || [0, n - 1];
   traceCursor(W, H, t0, t1);
-  const key = JSON.stringify([trId(TR), ROIS.length > 0, n, t0, t1, V.signal, filtDesc(), V.traceMode, V.grid, V.sel, V.yFixed,
+  const key = JSON.stringify([trId(TR), ROIS.length > 0, n, t0, t1, V.signal, filtDesc(), V.gridOpt, V.traceMode, V.grid, V.sel, V.yFixed,
     stack ? null : V.valueZoom, W, H, dpr, fs(), ts.map(t => t.i)]);
   if (key === traceKey) { syncYBoxes(); return; }
   traceKey = key;
@@ -1731,10 +1733,15 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
   if (V.grid) {
     g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif"; g.lineWidth = 1;
     const span = t1 - t0, rate = fs() || 1, secs = span / rate;
-    const step = niceStep(secs / 8) * rate;              // in frames
+    const go = V.gridOpt || {};
+    const step = (go.tStep > 0 && fs() && secs / go.tStep <= 400 ? go.tStep : niceStep(secs / 8)) * rate;   // in frames; a step too fine for the window falls back to auto
+    const tdp = Math.max(secs < 20 ? 1 : 0, Math.max(0, -Math.floor(Math.log10(step / rate) + 1e-9)));        // decimals the step needs
+    if (go.minor) { g.strokeStyle = "#1f2328";                 // minor ticks first, under the labelled lines
+      const ms = step / 5; for (let f = Math.ceil(t0 / ms) * ms; f <= t1; f += ms) { const x = Math.round(X(f)) + .5; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); }
+      g.strokeStyle = "#262b31"; }
     for (let f = Math.ceil(t0 / step) * step; f <= t1; f += step) {
       const x = Math.round(X(f)) + .5; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke();
-      g.fillText(fs() ? (f / rate).toFixed(secs < 20 ? 1 : 0) + " s" : f + "", x + 3, H - 5);
+      g.fillText(fs() ? (f / rate).toFixed(tdp) + " s" : f + "", x + 3, H - 5);
     }
   }
   // (the frame cursor is #traceCursor, under the canvas: see traceCursor)
@@ -1744,6 +1751,8 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
       const y0 = T + row * ROW_H, band = ROW_H - 8;
       const [lo, hi] = V.yFixed || bandLimits(t, t0, t1);
       if (V.grid) { g.strokeStyle = "#20252b"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
+      if ((V.gridOpt || {}).zero && lo < 0 && hi > 0) { const yz = Math.round(y0 + band - (0 - lo) / ((hi - lo) || 1) * band) + .5;
+        g.strokeStyle = "#8b939c"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(L, yz); g.lineTo(W - R, yz); g.stroke(); g.lineWidth = 1; }
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.3; g.beginPath();
       g.save(); g.beginPath(); g.rect(L, y0 - 2, W - L - R, band + 4); g.clip(); g.beginPath();
       traceLine(g, t.v, t0, t1, X, v => y0 + band - (v - lo) / ((hi - lo) || 1) * band);
@@ -1758,9 +1767,14 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
     const [lo, hi] = V.yFixed || V.valueZoom || lastAuto;
     const Y = v => T + (H - T - B) - (v - lo) / ((hi - lo) || 1) * (H - T - B);
     if (V.grid) { g.strokeStyle = "#262b31"; g.fillStyle = "#6b737c"; g.font = "10px sans-serif";
-      const vs = niceStep((hi - lo) / 5);
-      const dp = V.signal === "dff" ? 2 : 0;
+      const go = V.gridOpt || {}, vs = go.vStep > 0 && (hi - lo) / go.vStep <= 200 ? go.vStep : niceStep((hi - lo) / 5);
+      const dp = V.signal === "dff" ? Math.max(2, -Math.floor(Math.log10(vs))) : Math.max(0, -Math.floor(Math.log10(vs)));
+      if (go.minor) { g.strokeStyle = "#1f2328"; const mv = vs / 5;
+        for (let v = Math.ceil(lo / mv) * mv; v <= hi; v += mv) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); }
+        g.strokeStyle = "#262b31"; }
       for (let v = Math.ceil(lo / vs) * vs; v <= hi; v += vs) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(v.toFixed(dp), 4, y + 3); } }
+    if ((V.gridOpt || {}).zero && lo < 0 && hi > 0) {          // the zero line, marked (on whether or not the grid is)
+      const y = Math.round(Y(0)) + .5; g.strokeStyle = "#8b939c"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.lineWidth = 1; }
     g.save(); g.beginPath(); g.rect(L, T, W - L - R, H - T - B); g.clip();
     ts.forEach(t => {
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.2; g.globalAlpha = (V.sel < 0 || t.i === V.sel) ? 1 : .55; g.beginPath();
@@ -1948,6 +1962,19 @@ const dispTyped = () => {
 ["dispBV", "dispCV", "dispGV"].forEach(id => { $(id).onchange = dispTyped;
   $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { dispTyped(); $(id).blur(); } }; });
 $("dispReset").onclick = () => { V.disp = { b: 100, c: 100, g: 100 }; syncDisp(); paint(); saveView(); };
+function syncGridOpt() {
+  const go = V.gridOpt || (V.gridOpt = { minor: false, zero: true, tStep: null, vStep: null });
+  $("gMinor").classList.toggle("on", !!go.minor); $("gZero").classList.toggle("on", !!go.zero);
+  if (document.activeElement !== $("gTStep")) $("gTStep").value = go.tStep || "";
+  if (document.activeElement !== $("gVStep")) $("gVStep").value = go.vStep || "";
+}
+function setGridOpt(patch) { V.gridOpt = { ...(V.gridOpt || {}), ...patch }; syncGridOpt(); plotTraces(); saveView(); }
+$("gMinor").onclick = () => setGridOpt({ minor: !(V.gridOpt || {}).minor });
+$("gZero").onclick = () => setGridOpt({ zero: !(V.gridOpt || {}).zero });
+[["gTStep", "tStep"], ["gVStep", "vStep"]].forEach(([id, k]) => {
+  const apply = () => { const v = parseFloat($(id).value); setGridOpt({ [k]: isFinite(v) && v > 0 ? v : null }); };
+  $(id).onchange = apply; $(id).onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") { apply(); $(id).blur(); } };
+});
 $("modeStack").onclick = () => { V.traceMode = "stack"; V.valueZoom = null; applyStatic(); plotTraces(); saveView(); };
 $("modeOverlay").onclick = () => { V.traceMode = "overlay"; applyStatic(); plotTraces(); saveView(); };
 $("gridBtn").onclick = () => { V.grid = !V.grid; applyStatic(); plotTraces(); saveView(); };

@@ -469,9 +469,7 @@
       <span style="width:8px"></span>
       <button id="modeStack" class="on" title="one line per ROI, with an offset">stack</button>
       <button id="modeOverlay" title="all on one axis">overlay</button>
-      <details class="dd"><summary title="y limits, the grid, how to zoom">axis</summary><div class="dd-body right"><div class="ddrow"><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label></div>
-<div class="ddrow"><button id="gridBtn" class="on" title="time and value grid">grid</button></div>
-<span class="hint">drag a box to zoom · double-click resets · ← → slide</span></div></details>
+      <button id="gridBtn" class="on" title="time and value grid">grid</button><label class="ylim" title="vertical limits in reader units — type them, or leave on auto"><span>y</span><input type="number" id="yLo" step="any" placeholder="auto"><span>–</span><input type="number" id="yHi" step="any" placeholder="auto"><button id="yAuto" title="back to limits that follow the data">auto</button></label>
       <details class="dd"><summary title="the traces as a csv (one column per ROI) or as drawn, as a PNG">export</summary><div class="dd-body right"><div class="ddrow"><a id="dlCsv" href="#" title="the traces, one column per ROI">csv</a><a id="dlTracePng" href="#" title="the traces as drawn, as a PNG with a caption">png</a></div></div></details>
     </div>
     <div id="traceScroll"><div id="traceCursor"></div><canvas id="trace"></canvas><div id="traceRubber"></div><div id="traceRead" class="readout"></div></div>
@@ -506,7 +504,7 @@
       <p>They compute themselves half a second after the ROIs change (<b>Enter</b> recomputes). <b>raw</b> | <b>dF/F</b>
       — dF/F by the pipeline's method; <b>baseline ▾</b> sets its rolling quantile and window. <b>filter ▾</b>:
       Gaussian or Savitzky–Golay smoothing of what is drawn — the csv and the exports stay unfiltered.
-      <b>stack</b> | <b>overlay</b>; <b>axis ▾</b>: type y limits, <b>auto</b>, the grid. <b>Drag a box</b> zooms time
+      <b>stack</b> | <b>overlay</b>; <b>grid</b>; <b>y</b> limits typed, or <b>auto</b>. <b>Drag a box</b> zooms time
       (in overlay the values too), <b>double-click</b> shows the whole recording, <b>← →</b> slide a zoomed window;
       a click puts the movie on that frame. <b>export ▾</b>: csv, or the traces as drawn as a PNG.</p>
       <h3>z-stacks</h3>

@@ -16,7 +16,7 @@
   traces 275 px; the instruments take the rest until their edge is dragged (then that width is kept).
 - Viewer: secondary controls moved into dropdown panels (`name ▾`), like the report's playground — one open at a
   time, a click outside or Esc closes it, and a panel with a mode switched on inside (box, measure, crop, a trace
-  filter) lights its name. Traces: `baseline ▾`, `filter ▾`, `axis ▾`; 3D: `window ▾`, `view ▾`, `box ▾`,
+  filter) lights its name. Traces: `baseline ▾`, `filter ▾` (the y limits and the grid stay on the bar); 3D: `window ▾`, `view ▾`, `box ▾`,
   `measure ▾`; mosaic: `show ▾`, `crop ▾`, `export ▾`; instruments: `view ▾` (AVG, ↕ MESc, PNG). Every control keeps
   its id and behaviour.
 - Viewer: the instruments in groups — a `roi` row (spot, rect, polygon, ruler, size, + −), an `image` row (mean,

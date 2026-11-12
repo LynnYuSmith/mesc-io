@@ -3,8 +3,8 @@
 ## Unreleased
 
 - Viewer: a new look — the palette of [NERV Theme](https://github.com/wongmjane/nerv-theme) by Jane Manchun Wong (MIT):
-  green-black, near-white text, buttons without borders; what is on is a lighter field with a thin orange line under
-  it, and orange appears nowhere else. Headings and buttons in plain case, the drawing tools as icons, groups without
+  green-black, near-white text, buttons without borders; what is on is a lighter field with a hairline orange outline,
+  and orange appears nowhere else. Headings and buttons in plain case, the drawing tools as icons, groups without
   boxes. One CSS block, last in the page, holds the whole look. Credited in the guide and the README.
 - Viewer: under dF/F the y-limit boxes show two decimals (they read "-0 – 0"); labels set by the page itself (the
   stitch button, the traces label) follow the plain case of the rest.

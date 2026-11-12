@@ -106,18 +106,18 @@
   #frameLbl { min-width:150px; text-align:right; font-variant-numeric:tabular-nums }
   #chans button { padding:2px 8px; font-size:11px }
   .readout { position:absolute; left:8px; top:8px; font-size:11px; color:var(--ink); font-variant-numeric:tabular-nums;
-             background:rgba(10,22,18,.8); padding:3px 7px; border-radius:3px; pointer-events:none; display:none;
+             background:rgba(3,12,3,.8); padding:3px 7px; border-radius:3px; pointer-events:none; display:none;
              border:1px solid var(--line); white-space:nowrap }
   .readout b { color:var(--accent); font-weight:600 }
   #stageHint { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted);
-               background:rgba(10,22,18,.7); padding:2px 6px; border-radius:3px; pointer-events:none }
+               background:rgba(3,12,3,.7); padding:2px 6px; border-radius:3px; pointer-events:none }
 
   /* ---- the 3D view of a z-stack: over the stage, same size ---- */
   #vol { position:absolute; left:0; top:0; width:100%; height:100%; cursor:grab; background:#000 }
   #vol.drag { cursor:grabbing }
   #volBar[hidden], #volInfo[hidden], #vol[hidden] { display:none }
   #volBar { position:absolute; left:8px; top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;
-            max-width:calc(100% - 16px); background:rgba(10,22,18,.82); border:1px solid var(--line);
+            max-width:calc(100% - 16px); background:rgba(3,12,3,.82); border:1px solid var(--line);
             border-radius:4px; padding:4px 8px; font-size:11px }
   #volBar button { padding:2px 8px; font-size:11px }
   #volBar label { display:flex; align-items:center; gap:4px; color:var(--muted) }
@@ -139,25 +139,25 @@
   #volMarks { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none }
   #volMarks[hidden], #volPts[hidden] { display:none }
   #volPts { position:absolute; left:8px; bottom:8px; font-size:11px; color:var(--ink); max-width:calc(50% - 12px);
-            background:rgba(10,22,18,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px;
+            background:rgba(3,12,3,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px;
             font-variant-numeric:tabular-nums; white-space:pre-wrap; max-height:40%; overflow-y:auto;
             pointer-events:none }   /* a readout over the stack: clicks go through to the stack under it */
   #volPts .h { color:var(--muted) }
   #vol.tool { cursor:crosshair }
   #volInfo { position:absolute; right:8px; bottom:8px; font-size:11px; color:var(--muted); pointer-events:none;
-             background:rgba(10,22,18,.7); padding:2px 6px; border-radius:3px; white-space:pre; text-align:right }
+             background:rgba(3,12,3,.7); padding:2px 6px; border-radius:3px; white-space:pre; text-align:right }
   #volInfo b { color:var(--ink); font-weight:600 }
   /* ---- orthogonal views: XY, YZ to its right, XZ below, one crosshair through all three ---- */
   #ortho { position:absolute; inset:0; background:#000 }
   #ortho[hidden] { display:none }
   #ortho canvas { position:absolute; cursor:crosshair; image-rendering:auto }
   #ortho .olbl { position:absolute; font-size:11px; color:var(--muted); pointer-events:none;
-                 background:rgba(10,22,18,.7); padding:1px 5px; border-radius:3px; white-space:nowrap }
+                 background:rgba(3,12,3,.7); padding:1px 5px; border-radius:3px; white-space:nowrap }
   #orthoBar { position:absolute; right:8px; top:8px; display:flex; gap:6px; align-items:center; font-size:11px;
-              background:rgba(10,22,18,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
+              background:rgba(3,12,3,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
   #orthoBar button { padding:2px 8px; font-size:11px }
   #oSurfInfo { position:absolute; right:8px; bottom:8px; max-width:calc(100% - 16px); font-size:11px; color:var(--ink);
-               background:rgba(10,22,18,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px; white-space:pre-wrap;
+               background:rgba(3,12,3,.82); border:1px solid var(--line); border-radius:4px; padding:4px 8px; white-space:pre-wrap;
                pointer-events:none; opacity:.9 }   /* a readout: a mark under it can still be clicked or removed */
   #oSurfInfo[hidden] { display:none }
   #ortho.surf canvas { cursor:cell }
@@ -173,12 +173,12 @@
   #mosaic.edit #mosCv { cursor:move }
   #mosaic.crop #mosCv { cursor:crosshair }
   #mosBar { position:absolute; left:8px; right:8px; top:8px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:11px;
-            background:rgba(10,22,18,.85); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
+            background:rgba(3,12,3,.85); border:1px solid var(--line); border-radius:4px; padding:4px 8px }
   #mosBar button { padding:2px 8px; font-size:11px }
   #mosBar input[type=number] { width:48px; font-size:11px }
   #mosBar input[type=range] { width:180px }
   #mosList { position:absolute; left:8px; bottom:34px; max-height:45%; overflow-y:auto; font-size:11px; max-width:min(560px, calc(100% - 16px));
-             background:rgba(10,22,18,.85); border:1px solid var(--line); border-radius:4px; padding:4px 6px }
+             background:rgba(3,12,3,.85); border:1px solid var(--line); border-radius:4px; padding:4px 6px }
   #mosList[hidden] { display:none }
   #mosList .h { color:var(--muted); margin-bottom:3px }
   #mosList .t { display:flex; gap:6px; align-items:center; padding:1px 2px; cursor:pointer; white-space:nowrap }
@@ -187,12 +187,12 @@
   #mosList .t .n { margin-left:auto; color:var(--muted) }
   #mosList button { padding:0 5px; font-size:10px }
   #mosInfo { position:absolute; right:8px; bottom:8px; max-width:calc(100% - 16px); font-size:11px; color:var(--ink);
-             background:rgba(10,22,18,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px; white-space:pre-wrap }
+             background:rgba(3,12,3,.82); border:1px solid var(--line); border-radius:4px; padding:3px 8px; white-space:pre-wrap }
   #mosInfo:empty { display:none }
   /* what an action said (auto, TIFF, go, flatten): stays until closed or replaced — the hover line
      below is overwritten by the next mouse move, and the reports used to live there */
   #mosReport { position:absolute; right:8px; max-width:min(620px, calc(100% - 16px)); font-size:11px; color:var(--ink); z-index:6;
-               background:rgba(10,22,18,.92); border:1px solid var(--line); border-radius:4px; padding:4px 22px 4px 8px; white-space:pre-wrap }
+               background:rgba(3,12,3,.92); border:1px solid var(--line); border-radius:4px; padding:4px 22px 4px 8px; white-space:pre-wrap }
   #mosReport[hidden] { display:none }
   #mosReport button { position:absolute; right:3px; top:2px; padding:0 5px; font-size:11px; line-height:14px }
   #mosMini { position:absolute; right:8px; bottom:40px; border:1px solid var(--line); border-radius:3px; background:#000;
@@ -327,14 +327,14 @@
 
   /* ======== the NERV look (12 Nov 2026, her pick 'E'). Palette after NERV Theme by Jane Manchun Wong (MIT),
      https://github.com/wongmjane/nerv-theme — her PyCharm theme — green-black, near-white text, what is
-     ON is a lighter field with a thin orange line under it (like the terminal tab); orange nowhere else. One block,
+     ON is a lighter field with a hairline orange outline (her ask: no underline); orange nowhere else. One block,
      last, so the look lives in one place. ======== */
-  :root { --bg:#0a1612; --panel:#0f1f1a; --panel-2:#1a2e28; --line:#22382f; --edge:#2a4a3d;
-          --ink:#d6dbd8; --hi:#ffffff; --muted:#7f8f88; --faint:#5a7a6d; --sel:#1a2e28; --on:#22382f;
+  :root { --bg:#030803; --panel:#030c03; --panel-2:#0d1d11; --line:#122717; --edge:#1d3d25;   /* her swatch #000900, +3 per channel (12 Nov) */
+          --ink:#d6dbd8; --hi:#ffffff; --muted:#7f8f88; --faint:#5a7a6d; --sel:#0d1d11; --on:#132d1b;
           --accent:#e85d04; --mint:#a8d3c5; --warn:#d4a017; --bad:#e05252 }
   button { border:0; background:transparent; color:#c9cfcc; border-radius:6px; padding:4px 9px }
   button:hover { background:var(--panel-2); color:#f0f2f1; border-color:transparent }
-  button.on { background:var(--on); color:var(--hi); border-color:transparent; box-shadow:inset 0 -2px 0 var(--accent) }
+  button.on { background:var(--on); color:var(--hi); border-color:transparent; box-shadow:inset 0 0 0 1px var(--accent) }
   input, select { background:var(--bg); border:1px solid var(--edge); border-radius:6px; color:var(--ink) }
   input:focus, select:focus { outline:none; border-color:var(--accent) }
   input[type=range] { accent-color:#8fb3a5 }
@@ -353,7 +353,7 @@
   details.dd > summary { border:0; background:transparent; color:#c9cfcc; border-radius:6px }
   details.dd > summary:hover { background:var(--panel-2); color:#f0f2f1 }
   details.dd[open] > summary, details.dd.modes:has(button.on) > summary { background:var(--on); color:var(--hi); border-color:transparent;
-                                                                          box-shadow:inset 0 -2px 0 var(--accent) }
+                                                                          box-shadow:inset 0 0 0 1px var(--accent) }
   details.dd > summary::after { color:var(--muted) }
   .dd-body { background:var(--panel); border-color:var(--edge) }
   .dd-body a, #exports a { color:var(--ink) }   .dd-body a:hover, #exports a:hover { color:var(--hi) }
@@ -1786,14 +1786,14 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
   }
   // grid: seconds when the rate is known, else frames
   if (V.grid) {
-    g.strokeStyle = "#1c3029"; g.fillStyle = "#7f8f88"; g.font = "10px sans-serif"; g.lineWidth = 1;
+    g.strokeStyle = "#0f2113"; g.fillStyle = "#7f8f88"; g.font = "10px sans-serif"; g.lineWidth = 1;
     const span = t1 - t0, rate = fs() || 1, secs = span / rate;
     const go = V.gridOpt || {};
     const step = (go.tStep > 0 && fs() && secs / go.tStep <= 400 ? go.tStep : niceStep(secs / 8)) * rate;   // in frames; a step too fine for the window falls back to auto
     const tdp = Math.max(secs < 20 ? 1 : 0, Math.max(0, -Math.floor(Math.log10(step / rate) + 1e-9)));        // decimals the step needs
-    if (go.minor) { g.strokeStyle = "#13241e";                 // minor ticks first, under the labelled lines
+    if (go.minor) { g.strokeStyle = "#09170d";                 // minor ticks first, under the labelled lines
       const ms = step / 5; for (let f = Math.ceil(t0 / ms) * ms; f <= t1; f += ms) { const x = Math.round(X(f)) + .5; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke(); }
-      g.strokeStyle = "#1c3029"; }
+      g.strokeStyle = "#0f2113"; }
     for (let f = Math.ceil(t0 / step) * step; f <= t1; f += step) {
       const x = Math.round(X(f)) + .5; g.beginPath(); g.moveTo(x, T); g.lineTo(x, H - B); g.stroke();
       g.fillText(fs() ? (f / rate).toFixed(tdp) + " s" : f + "", x + 3, H - 5);
@@ -1805,7 +1805,7 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
     ts.forEach((t, row) => {
       const y0 = T + row * ROW_H, band = ROW_H - 8;
       const [lo, hi] = V.yFixed || bandLimits(t, t0, t1);
-      if (V.grid) { g.strokeStyle = "#182a24"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
+      if (V.grid) { g.strokeStyle = "#0d1d11"; g.beginPath(); g.moveTo(L, y0 + band + .5); g.lineTo(W - R, y0 + band + .5); g.stroke(); }
       if ((V.gridOpt || {}).zero && lo < 0 && hi > 0) { const yz = Math.round(y0 + band - (0 - lo) / ((hi - lo) || 1) * band) + .5;
         g.strokeStyle = "#9fb5ab"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(L, yz); g.lineTo(W - R, yz); g.stroke(); g.lineWidth = 1; }
       g.strokeStyle = colour(t.i); g.lineWidth = t.i === V.sel ? 2.2 : 1.3; g.beginPath();
@@ -1821,12 +1821,12 @@ function drawTraces(g, ts, stack, W, H, dpr, n, t0, t1) {
     lastAuto = overlayLimits(ts, t0, t1);
     const [lo, hi] = V.yFixed || V.valueZoom || lastAuto;
     const Y = v => T + (H - T - B) - (v - lo) / ((hi - lo) || 1) * (H - T - B);
-    if (V.grid) { g.strokeStyle = "#1c3029"; g.fillStyle = "#7f8f88"; g.font = "10px sans-serif";
+    if (V.grid) { g.strokeStyle = "#0f2113"; g.fillStyle = "#7f8f88"; g.font = "10px sans-serif";
       const go = V.gridOpt || {}, vs = go.vStep > 0 && (hi - lo) / go.vStep <= 200 ? go.vStep : niceStep((hi - lo) / 5);
       const dp = V.signal === "dff" ? Math.max(2, -Math.floor(Math.log10(vs))) : Math.max(0, -Math.floor(Math.log10(vs)));
-      if (go.minor) { g.strokeStyle = "#13241e"; const mv = vs / 5;
+      if (go.minor) { g.strokeStyle = "#09170d"; const mv = vs / 5;
         for (let v = Math.ceil(lo / mv) * mv; v <= hi; v += mv) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); }
-        g.strokeStyle = "#1c3029"; }
+        g.strokeStyle = "#0f2113"; }
       for (let v = Math.ceil(lo / vs) * vs; v <= hi; v += vs) { const y = Math.round(Y(v)) + .5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.fillText(v.toFixed(dp), 4, y + 3); } }
     if ((V.gridOpt || {}).zero && lo < 0 && hi > 0) {          // the zero line, marked (on whether or not the grid is)
       const y = Math.round(Y(0)) + .5; g.strokeStyle = "#9fb5ab"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke(); g.lineWidth = 1; }
@@ -3865,7 +3865,7 @@ function mosMarks(g, G, v) {
     g.strokeStyle = sel ? "#ff9f1c" : has ? "rgba(255,255,255,.28)" : "rgba(255,255,255,.12)";
     g.lineWidth = sel ? 2 : 1; g.setLineDash(has ? [] : [4, 4]); g.strokeRect(x + .5, y + .5, w - 1, h - 1); g.setLineDash([]);
     if (w > 70) { const t = p.u.name + (p.u.comment ? " · " + p.u.comment : ""), e = mosEntry(path);
-      g.fillStyle = "rgba(10,22,18,.7)"; const tw = Math.min(w - 8, g.measureText(t).width + 8); g.fillRect(x + 3, y + 3, tw, 15);
+      g.fillStyle = "rgba(3,12,3,.7)"; const tw = Math.min(w - 8, g.measureText(t).width + 8); g.fillRect(x + 3, y + 3, tw, 15);
       g.fillStyle = sel ? "#ff9f1c" : "#cfd6dd"; g.fillText(t, x + 7, y + 5, w - 16);
       if (sel || e.dx || e.dy || e.dz) { g.fillStyle = "rgba(207,214,221,.75)";
         g.fillText(`${e.dx.toFixed(1)}, ${e.dy.toFixed(1)} µm · ${e.dz >= 0 ? "+" : ""}${e.dz} sl`, x + 7, y + 20, w - 16); } }

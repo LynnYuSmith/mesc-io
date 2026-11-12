@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Viewer: `hand` beside spot / rect / polygon / ruler — drag the image to move a zoomed view (the grabbed point stays
+- Viewer: a hand icon (pan) beside spot / rect / polygon / ruler — drag the image to move a zoomed view (the grabbed point stays
   under the cursor, so it is right in the MESc flip too; the view stays inside the frame). A click with it adds nothing.
 - Viewer: `grid ▾` (one menu, like `filter ▾`) — the grid on or off, minor ticks (a fifth of a step), fixed time and value steps (empty: auto; a step too
   fine for the window falls back to auto), and a marked zero line (on by default, in overlay and in every stack band).

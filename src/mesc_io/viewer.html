@@ -92,6 +92,8 @@
   /* ---- image (centre) ---- */
   #imageCol { grid-area:image; display:flex; flex-direction:column; min-width:0; min-height:0 }
   #stage { flex:1; position:relative; overflow:hidden; background:#000; cursor:crosshair }
+  button.icon { display:inline-flex; align-items:center; justify-content:center }
+  button.icon .ico { width:15px; height:15px; display:block }   /* a white outline: the button's own text colour, accent when on */
   #stage.pan { cursor:grab }  #stage.pan.panning { cursor:grabbing }   /* the hand tool (12 Nov 2026) */
   #traceRubber { position:absolute; border:1px dashed var(--accent); background:rgba(78,163,221,.12);
                  display:none; pointer-events:none }
@@ -423,7 +425,7 @@
     <div id="toolsSplit" title="drag to resize"></div>
     <h2>instruments</h2>
     <div class="grp"><span class="glbl">roi</span>
-      <button id="toolSpot" class="on" title="a disc where you click">spot</button><button id="toolRect" title="a rectangle centred where you click">rect</button><button id="toolPoly" title="click the corners, double-click to close">polygon</button><button id="toolRuler" title="a ruler: click two points, read the distance between them in µm (Esc clears it)">ruler</button><button id="toolPan" title="hand: drag the image to move a zoomed view (wheel or a box to zoom first)">hand</button>
+      <button id="toolSpot" class="on" title="a disc where you click">spot</button><button id="toolRect" title="a rectangle centred where you click">rect</button><button id="toolPoly" title="click the corners, double-click to close">polygon</button><button id="toolRuler" title="a ruler: click two points, read the distance between them in µm (Esc clears it)">ruler</button><button id="toolPan" class="icon" title="pan: drag the image to move a zoomed view (wheel or a box to zoom first)" aria-label="pan"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5V4a1.5 1.5 0 0 1 3 0v7.5"/><path d="M14 11.5V5.5a1.5 1.5 0 0 1 3 0V13"/><path d="M17 9.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3.4l-2.6-4.4a1.6 1.6 0 0 1 2.7-1.7L8 15"/></svg></button>
       <span class="sizes" id="sizeRow">
       <label id="sizeSpot"><span>r</span><input type="number" id="spotR" min="1" max="200" step="0.5" value="3"> px</label>
       <label id="sizeRect" style="display:none"><span>w</span><input type="number" id="rectW" min="1" max="1000" step="1" value="8"> × <input type="number" id="rectH" min="1" max="1000" step="1" value="8"> px</label>
@@ -495,7 +497,7 @@
       <p>Pick <b>spot</b>, <b>rect</b> or <b>polygon</b> and click the image (polygon: click the corners, double-click to
       close); <b>r</b> / <b>w × h</b> set the size of new ones. <b>Drag</b> an ROI to move it, <b>↑ ↓</b> select,
       <b>Delete</b> removes the selected one, double-click a name in the list to rename it. <b>ruler</b> measures in µm
-      (Esc clears); <b>hand</b> drags a zoomed view. <b>copy from…</b> takes the ROIs of another unit; <b>ROIs ▾</b>: clear all, the set as an ImageJ zip
+      (Esc clears); the <b>hand</b> icon drags a zoomed view. <b>copy from…</b> takes the ROIs of another unit; <b>ROIs ▾</b>: clear all, the set as an ImageJ zip
       or as json. ROIs are kept beside the viewer, never in the raw file.</p>
       <h3>contrast</h3>
       <p><b>fixed</b>: one window in the recording's units for every frame (starts at the file's own LUT, <b>file</b>

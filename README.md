@@ -2,8 +2,8 @@
 
 [![tests](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml/badge.svg)](https://github.com/LynnYuSmith/mesc-io/actions/workflows/tests.yml) [![PyPI](https://img.shields.io/pypi/v/mesc-io)](https://pypi.org/project/mesc-io/) [![Python](https://img.shields.io/pypi/pyversions/mesc-io)](https://pypi.org/project/mesc-io/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Open Femtonics `.mesc` two-photon recordings **without Windows and without MESc**: on macOS,
-Linux or Windows, from Python, the command line or a browser. The frames come out in the units
+Open Femtonics `.mesc` two-photon recordings **without MESc**: mesc-io reads the HDF5 file
+directly, on macOS, Linux or Windows, from Python, the command line or a browser. The frames come out in the units
 the native reader shows, with every unit's metadata. Export to Fiji (which has no `.mesc`
 reader), write processed frames back, motion-correct, and look at it all in a viewer that draws
 ROIs and computes their dF/F.

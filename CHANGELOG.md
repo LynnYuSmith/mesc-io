@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `mesc-io register` saves its report: `<out stem>_shifts.npz` beside the output (`--shifts PATH` elsewhere,
+  `--no-shifts` not at all) — rigid and non-rigid shifts, references, block positions, settings, preset, skipped
+  units, int16 scales, flat heads, the mesc-io version. No pickle; `registration.save_report` / `load_report` give
+  the same from Python. The CLI used to print the report and keep none of it.
 - Registration report keeps the NON-RIGID shifts: `nr_y_shift` / `nr_x_shift` per unit (frames × blocks, zero on
   the flat head, None for a rigid run) and `nr_blocks` per group (where each block sits). Only the rigid part was
   kept, so a run with the default non-rigid correction could not be reapplied from its report; the test now

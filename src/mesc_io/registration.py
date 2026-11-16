@@ -41,7 +41,7 @@ from .errors import MescIOError
 from .reader import MescFile
 
 __all__ = ["register_file", "compute_reference_image", "leading_flat_frames",
-           "RegistrationError", "INT16_MAX"]
+           "save_report", "load_report", "shifts_path_for", "RegistrationError", "INT16_MAX"]
 
 INT16_MAX = 32767
 # A frame with this little spatial contrast, relative to the recording's own, holds nothing to
@@ -586,3 +586,87 @@ def _register_group(f, reg, group, report, dest, dark, scales, channel, nonrigid
         del out_by_channel
         if progress:
             progress(path, report["units"][path])
+
+
+# --- the report on disk -------------------------------------------------------------------------
+
+def shifts_path_for(out) -> Path:
+    """Where the CLI keeps a run's shifts: beside the output, ``<out stem>_shifts.npz``."""
+    out = Path(out)
+    return out.with_name(out.stem + "_shifts.npz")
+
+
+def save_report(report: Dict, path) -> Path:
+    """Write `register_file`'s report to an ``.npz`` that loads without pickle.
+
+    Arrays keep their dtype: per unit ``u{i}_y_shift`` / ``u{i}_x_shift`` (rigid, per frame) and,
+    for a non-rigid run, ``u{i}_nr_y_shift`` / ``u{i}_nr_x_shift`` (frames × blocks); per group
+    ``g{i}_reference`` and ``g{i}_nr_y_blocks`` / ``g{i}_nr_x_blocks``. Everything else — unit
+    paths, anchors, settings, preset, ops, skipped units, int16 scales, flat heads, the
+    mesc-io version — is one JSON string under ``meta``, which says which ``u{i}`` is which unit.
+    `load_report` reads it back into the report's own shape.
+
+    Written to a temporary name and renamed, so an interrupted save leaves no half file.
+    """
+    import json
+    from . import __version__
+    path = Path(path)
+    arrays, units_meta, groups_meta = {}, [], []
+    for i, (unit, info) in enumerate(report["units"].items()):
+        units_meta.append({"unit": unit, "n_frames": int(info["n_frames"]),
+                           "n_channels": int(info["n_channels"]),
+                           "leading_flat_frames": int(info["leading_flat_frames"]),
+                           "reference_from": info["reference_from"]})
+        for k in ("y_shift", "x_shift", "nr_y_shift", "nr_x_shift"):
+            if info.get(k) is not None:
+                arrays[f"u{i}_{k}"] = np.asarray(info[k])
+    for i, g in enumerate(report["groups"]):
+        gm = {"anchor": g["anchor"], "units": list(g["units"])}
+        arrays[f"g{i}_reference"] = np.asarray(g["reference"])
+        if "nr_blocks" in g:
+            arrays[f"g{i}_nr_y_blocks"] = np.asarray(g["nr_blocks"]["y"])
+            arrays[f"g{i}_nr_x_blocks"] = np.asarray(g["nr_blocks"]["x"])
+            gm["nr_grid"] = list(g["nr_blocks"]["grid"])
+        groups_meta.append(gm)
+    meta = {"format": "mesc-io registration report", "format_version": 1,
+            "mesc_io_version": __version__, "out": report.get("out"),
+            "nonrigid": bool(report["nonrigid"]), "settings": report["settings"],
+            "ops": report["ops"], "preset": report["preset"],
+            "int16_scale": report["int16_scale"],
+            "int16_scale_by_channel": {str(k): v for k, v in
+                                       report.get("int16_scale_by_channel", {}).items()},
+            "leading_flat_frames": report["leading_flat_frames"],
+            "skipped": report["skipped"], "units": units_meta, "groups": groups_meta}
+    arrays["meta"] = np.array(json.dumps(meta, default=str))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".partial")
+    with open(tmp, "wb") as fh:            # a file object: savez would append .npz to a name
+        np.savez_compressed(fh, **arrays)
+    os.replace(tmp, path)
+    return path
+
+
+def load_report(path) -> Dict:
+    """Read a report written by `save_report` back into the shape `register_file` returns."""
+    import json
+    with np.load(Path(path), allow_pickle=False) as z:
+        meta = json.loads(str(z["meta"]))
+        arr = {k: z[k] for k in z.files if k != "meta"}
+    rep = {k: meta[k] for k in ("out", "nonrigid", "settings", "ops", "preset", "int16_scale",
+                                "leading_flat_frames", "skipped")}
+    rep["int16_scale_by_channel"] = {int(k): v for k, v in meta["int16_scale_by_channel"].items()}
+    rep["mesc_io_version"] = meta["mesc_io_version"]
+    rep["units"], rep["groups"] = {}, []
+    for i, um in enumerate(meta["units"]):
+        info = {k: um[k] for k in ("n_frames", "n_channels", "leading_flat_frames",
+                                   "reference_from")}
+        for k in ("y_shift", "x_shift", "nr_y_shift", "nr_x_shift"):
+            info[k] = arr.get(f"u{i}_{k}")
+        rep["units"][um["unit"]] = info
+    for i, gm in enumerate(meta["groups"]):
+        g = {"anchor": gm["anchor"], "units": gm["units"], "reference": arr[f"g{i}_reference"]}
+        if "nr_grid" in gm:
+            g["nr_blocks"] = {"y": arr[f"g{i}_nr_y_blocks"], "x": arr[f"g{i}_nr_x_blocks"],
+                              "grid": gm["nr_grid"]}
+        rep["groups"].append(g)
+    return rep

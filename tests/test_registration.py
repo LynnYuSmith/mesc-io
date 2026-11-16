@@ -570,3 +570,69 @@ def test_a_bright_second_channel_keeps_its_own_scale(tmp_path, recwarn):
         assert np.array_equal(a.read("MUnit_0", channel=0, reader_units=False),
                               b.read("MUnit_0", channel=0, reader_units=False))
         assert a.read("MUnit_0", channel=1, reader_units=False).max() > 32767
+
+
+# --- 0.6.7: the report on disk ----------------------------------------------------------------
+
+def _same_report(a, b):
+    assert a["units"].keys() == b["units"].keys()
+    for u in a["units"]:
+        for k, v in a["units"][u].items():
+            w = b["units"][u][k]
+            if v is None or isinstance(v, (str, int)):
+                assert w == v, (u, k)
+            else:
+                assert w.dtype == np.asarray(v).dtype and np.array_equal(w, v), (u, k)
+    assert len(a["groups"]) == len(b["groups"])
+    for g, h in zip(a["groups"], b["groups"]):
+        assert (g["anchor"], list(g["units"])) == (h["anchor"], list(h["units"]))
+        assert np.array_equal(g["reference"], h["reference"])
+        assert ("nr_blocks" in g) == ("nr_blocks" in h)
+        if "nr_blocks" in g:
+            assert np.array_equal(g["nr_blocks"]["y"], h["nr_blocks"]["y"])
+            assert list(g["nr_blocks"]["grid"]) == list(h["nr_blocks"]["grid"])
+    for k in ("nonrigid", "settings", "int16_scale", "int16_scale_by_channel",
+              "leading_flat_frames", "skipped", "out"):
+        assert a[k] == b[k], k
+
+
+@pytest.mark.parametrize("nonrigid", [True, False])
+def test_the_report_survives_the_disk(moving_mesc, tmp_path, nonrigid):
+    from mesc_io.registration import load_report, save_report
+    path, _, _ = moving_mesc
+    rep = register_file(path, tmp_path / "out.mesc", nonrigid=nonrigid)
+    where = save_report(rep, tmp_path / "shifts.npz")
+    assert where.exists() and not (tmp_path / "shifts.npz.partial").exists()
+    _same_report(rep, load_report(where))
+    # no pickle anywhere: a plain np.load with pickling off opens every array
+    with np.load(where, allow_pickle=False) as z:
+        [z[k] for k in z.files]
+
+
+def test_skipped_units_are_kept_in_the_saved_report(dirty_mesc, tmp_path):
+    from mesc_io.registration import load_report, save_report
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        rep = register_file(dirty_mesc, tmp_path / "out.mesc")
+    assert rep["skipped"]                                        # the control: there are some
+    back = load_report(save_report(rep, tmp_path / "s.npz"))
+    assert back["skipped"] == rep["skipped"]
+
+
+def test_the_cli_saves_the_shifts_beside_the_output(moving_mesc, tmp_path):
+    from mesc_io.__main__ import main
+    from mesc_io.registration import load_report
+    path, n_flat, _ = moving_mesc
+    assert main(["register", str(path), str(tmp_path / "rec_MC.mesc")]) == 0
+    rep = load_report(tmp_path / "rec_MC_shifts.npz")
+    info = rep["units"]["MSession_0/MUnit_0"]
+    assert info["leading_flat_frames"] == n_flat and info["nr_y_shift"] is not None
+
+    assert main(["register", str(path), str(tmp_path / "b.mesc"),
+                 "--shifts", str(tmp_path / "elsewhere" / "s.npz")]) == 0
+    assert (tmp_path / "elsewhere" / "s.npz").exists()
+    assert not (tmp_path / "b_shifts.npz").exists()
+
+    assert main(["register", str(path), str(tmp_path / "c.mesc"), "--no-shifts"]) == 0
+    assert not list(tmp_path.glob("c_shifts*"))

@@ -103,7 +103,9 @@ mesc-io register recording.mesc out.mesc --preset soma     # use it; a flag stil
 
 Needs `pip install "mesc-io[register]"`. The defaults are Suite2p non-rigid registration with
 64-px blocks, `maxregshift` 0.1 and a non-rigid cap of 3 px; z-stacks and units too short to
-register are skipped and said so. Groups, presets, where they are kept and how to share them: [docs/registration.md](docs/registration.md).
+register are skipped and said so. The shifts (rigid and per-block non-rigid), the references and the
+settings are saved beside the output as `recording_MC_shifts.npz` (`--shifts PATH`, `--no-shifts`; read it with
+`mesc_io.registration.load_report`). Groups, presets, where they are kept and how to share them: [docs/registration.md](docs/registration.md).
 
 ### The viewer
 

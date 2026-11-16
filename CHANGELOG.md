@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Viewer: time bands on the traces — stimulus epochs, or anything else a host knows about the recording that the file
+  does not. A host sets `_Handler._epochs`, a callable taking a unit path and returning
+  `[{"start": frame, "end": frame, "label": …, "kind": …, "title": …}]` in the unit's own frame index (the traces'
+  index, end exclusive); the page fetches them from `/api/epochs/{unit}` and draws them under the grid, coloured by
+  kind, labelled, with a **Stimuli** toggle on the trace bar (remembered with the view). Without a host nothing
+  changes: no route data, the button stays hidden. A host hook that raises gives no bands and the reason, never a
+  broken page. `tests/test_viewer_epochs.py`.
+
 ## 0.6.6 — 2026-11-12
 
 - Viewer: smooth playback. ▶ used to ask for one PNG, wait for it, then ask for the next; on a lab PC reading a

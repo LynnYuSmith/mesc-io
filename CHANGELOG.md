@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+## 0.7.1 — 2026-11-16
+
+The Metadata panel shows how the unit was recorded: laser (Pockels) and PMT next to the stage position.
+
 - Viewer: the Metadata panel shows the laser and detector settings the unit was recorded with — Pockels on-intensity
   and each PMT's reference voltage, from the file (not the comment), and the bit depth when it is not 16. The
   reader had them since 0.6.x; the panel did not. A host's recording (a master) shows them too when its opener fills
   them.
+- CI: Python 3.9 on Linux runs on `ubuntu-24.04` — `ubuntu-latest` became 26.04, which `setup-python` has
+  no 3.9 for. The package still supports 3.9 and is tested on it on all three platforms.
 
 ## 0.7.0 — 2026-11-16
 

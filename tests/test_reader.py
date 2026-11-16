@@ -116,3 +116,38 @@ def test_square_pixels_leave_the_y_field_empty(mesc):
     """No second number to carry when the two agree — a caller reads pixel_size_um and stops."""
     with MescFile(mesc) as f:
         assert f.units()[0].pixel_size_y_um is None
+
+
+# --- 0.6.7: the time axis's unit name is read, not assumed to be ms -----------------------------
+
+@pytest.mark.parametrize("unit,scale", [("ms", 16.152666649956174), ("s", 0.016152666649956174),
+                                        ("us", 16152.666649956174), ("µs", 16152.666649956174),
+                                        ("", 16.152666649956174)])
+def test_the_frame_rate_follows_the_time_unit(tmp_path, unit, scale):
+    import warnings
+    from conftest import _text
+    path = tmp_path / f"t_{len(unit)}.mesc"
+    with h5py.File(path, "w") as f:
+        u = f.create_group("MSession_0").create_group("MUnit_0")
+        u.create_dataset("Channel_0", data=np.zeros((4, 2, 2), np.uint16))
+        u.attrs["ZAxisConversionConversionLinearScale"] = scale
+        if unit:
+            u.attrs["ZAxisConversionUnitName"] = _text(unit)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with MescFile(path) as m:
+            assert m.unit("MUnit_0").frame_rate_hz == pytest.approx(61.909, abs=1e-3)
+
+
+def test_an_unknown_time_unit_gives_no_rate_and_says_so(tmp_path):
+    from conftest import _text
+    path = tmp_path / "frames.mesc"
+    with h5py.File(path, "w") as f:
+        u = f.create_group("MSession_0").create_group("MUnit_0")
+        u.create_dataset("Channel_0", data=np.zeros((4, 2, 2), np.uint16))
+        u.attrs["ZAxisConversionConversionLinearScale"] = 1.0
+        u.attrs["ZAxisGeomRole"] = 0.0                       # time, by the role
+        u.attrs["ZAxisConversionUnitName"] = _text("frame")
+    with pytest.warns(UserWarning, match="unknown unit"):
+        with MescFile(path) as m:
+            assert m.unit("MUnit_0").frame_rate_hz is None

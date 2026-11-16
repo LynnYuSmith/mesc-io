@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Reader: the frame rate follows the time axis's unit name (`ms`, `s`, `us`/`µs`); an unknown unit gives no rate and a
+  warning. Every file seen says `ms`, so nothing changes on them (cm027 2026-11-12: 61.9088 Hz as before); an `s`
+  axis would have been read as a rate 1000× too high.
+- `to_hdf5` keeps a z-stack's `z_step_um`, `pixel_size_y_um` and the axes (`ZYX` / `TYX`), as the TIFF export did.
+- `check`: "no conversion" is the reader's own flag (a stated 0 + 1×x is a conversion); pixel sizes are compared to six
+  significant figures, so float noise is no longer "mixed pixel sizes".
 - `write_frames`, `register_file` and the CLI `writeback` / `register` refuse an output that already exists, before
   any work, and leave it as it was; `overwrite=True` / `--overwrite` replaces it. A multi-GB copy used to replace a
   previous result without a word. The source itself is refused always.

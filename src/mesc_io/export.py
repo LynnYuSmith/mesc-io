@@ -70,10 +70,15 @@ def to_hdf5(mesc, unit: str, out_path, channel: int = 0, dataset: str = "data",
         ds.attrs["units"] = "reader" if reader_units else "stored"
         ds.attrs["conversion_offset"] = ch.offset
         ds.attrs["conversion_scale"] = ch.scale
+        ds.attrs["axes"] = "ZYX" if u.z_step_um else "TYX"
         if u.frame_rate_hz:
             ds.attrs["frame_rate_hz"] = u.frame_rate_hz
+        if u.z_step_um:                     # a z-stack's third axis is depth: keep its spacing
+            ds.attrs["z_step_um"] = u.z_step_um
         if u.pixel_size_um:
             ds.attrs["pixel_size_um"] = u.pixel_size_um
+        if u.pixel_size_y_um:
+            ds.attrs["pixel_size_y_um"] = u.pixel_size_y_um
         if u.comment:
             ds.attrs["source_comment"] = u.comment
     return out_path

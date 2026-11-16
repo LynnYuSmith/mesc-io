@@ -383,6 +383,29 @@ class _Handler(BaseHTTPRequestHandler):
     #: MescFile's reading interface — usually a MescFile subclass (see MescFile._dataset).
     _opener = None
 
+    #: Time bands to draw on the traces (stimulus epochs, behaviour, anything the host knows about the
+    #: recording that the file does not). None = none. A host passes a callable taking a unit path
+    #: (`MSession_0/MUnit_3`) and returning a list of {"start": frame, "end": frame, "label": str} —
+    #: frames in the unit's own frame index, the same index the traces use, end exclusive. Optional
+    #: keys: "kind" (a short word the page colours by, e.g. "moving", "still") and "title" (hover text).
+    _epochs = None
+
+    def _epochs_for(self, unit_path: str) -> dict:
+        op = type(self)._epochs
+        if op is None:
+            return {"epochs": []}
+        try:
+            eps = op(unit_path) or []
+        except Exception as exc:                          # a broken host hook must not break the viewer
+            return {"epochs": [], "error": f"epochs: {exc}"}
+        out = []
+        for e in eps:
+            s, t = int(e["start"]), int(e["end"])
+            if t > s:
+                out.append({"start": s, "end": t, "label": str(e.get("label", "")),
+                            "kind": str(e.get("kind", "")), "title": str(e.get("title", e.get("label", "")))})
+        return {"epochs": out}
+
     def _file(self) -> MescFile:
         op = type(self)._opener
         return op() if op is not None else MescFile(self.mesc_path)
@@ -413,6 +436,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(b"", "image/x-icon", 204)
             if parts[:2] == ["api", "file"]:
                 return self._json(self._describe())
+            if parts[:2] == ["api", "epochs"] and len(parts) >= 3:
+                return self._json(self._epochs_for("/".join(parts[2:])))
             # A unit is addressed by its path, `MSession_0/MUnit_0`, which contains a slash —
             # so the unit is everything between the verb and the trailing numbers, not one
             # segment. Splitting naively made every request for a real unit a 404, and the

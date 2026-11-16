@@ -381,6 +381,7 @@ class _Handler(BaseHTTPRequestHandler):
     #: How to open the recording. None = the `.mesc` at mesc_path. A host serving another kind of
     #: recording (a master file) passes a zero-argument callable returning an object with
     #: MescFile's reading interface — usually a MescFile subclass (see MescFile._dataset).
+    #: Set through `make_server(opener=…)`; the class attribute is internal.
     _opener = None
 
     #: Time bands to draw on the traces (stimulus epochs, behaviour, anything the host knows about the
@@ -388,6 +389,7 @@ class _Handler(BaseHTTPRequestHandler):
     #: (`MSession_0/MUnit_3`) and returning a list of {"start": frame, "end": frame, "label": str} —
     #: frames in the unit's own frame index, the same index the traces use, end exclusive. Optional
     #: keys: "kind" (a short word the page colours by, e.g. "moving", "still") and "title" (hover text).
+    #: Set through `make_server(epochs=…)`; the class attribute is internal.
     _epochs = None
 
     def _epochs_for(self, unit_path: str) -> dict:
@@ -1289,21 +1291,54 @@ class _Server(ThreadingHTTPServer):
     request_queue_size = 128
 
 
-def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
-          rois_path: Path = None) -> None:
-    _Handler.mesc_path = Path(mesc_path)
-    _Handler.rois_path = Path(rois_path) if rois_path else default_rois_path(mesc_path)
-    with MescFile(mesc_path) as f:                       # fail here, not in the browser
-        n = len(f.units())
+def make_server(mesc_path: Path, port: int = 8020, rois_path: Path = None, *, opener=None,
+                epochs=None) -> "_Server":
+    """A viewer server for one recording, bound to 127.0.0.1:`port`, not yet serving.
+
+    The public way for a HOST — a program that knows more about the recording than the file
+    does — to run the viewer:
+
+    * `opener`: a zero-argument callable returning an object with `MescFile`'s reading interface
+      (usually a `MescFile` subclass) — for a recording that is not a `.mesc`, e.g. a pipeline's
+      master file. None opens `mesc_path` as a `.mesc`.
+    * `epochs`: a callable taking a unit path (``MSession_0/MUnit_3``) and returning time bands
+      ``[{"start": frame, "end": frame, "label": str, "kind": str, "title": str}]`` in the unit's
+      own frame index, end exclusive; drawn on the traces under a **Stimuli** toggle. None = none.
+
+    Each server gets its own handler class, so two viewers in one process never share a
+    recording, an opener or a cache. The recording is opened once here, so a file that cannot
+    be read fails before the browser does. Call ``serve_forever()`` on the result.
+    """
+    mesc_path = Path(mesc_path)
+    handler = type("ViewerHandler", (_Handler,), {
+        "mesc_path": mesc_path,
+        "rois_path": Path(rois_path) if rois_path else default_rois_path(mesc_path),
+        "_opener": staticmethod(opener) if opener is not None else None,
+        "_epochs": staticmethod(epochs) if epochs is not None else None,
+        "_cache": _BoundedCache(),
+    })
+    with (opener() if opener is not None else MescFile(mesc_path)) as f:   # fail here, not in the browser
+        handler.n_units = len(f.units())
     # Threaded, and it matters: on a 30-unit recording the page asks for 30 thumbnails at once
     # and Chrome opens six connections for them. A single-threaded server with its five-deep
     # backlog answered the first, queued four, and REFUSED the rest -- the page sat blank and
     # curl got "connection refused" while the process was busy at 65 % CPU. Each request opens
     # its own MescFile, so there is no shared handle to protect.
-    httpd = _Server(("127.0.0.1", port), _Handler)
+    httpd = _Server(("127.0.0.1", port), handler)
     httpd.daemon_threads = True
+    return httpd
+
+
+def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
+          rois_path: Path = None, *, opener=None, epochs=None, label: str = None) -> None:
+    """Serve the viewer until ctrl-c. `opener` and `epochs` as in `make_server`; `label` is what
+    the start line calls the recording (default: the file name)."""
+    httpd = make_server(mesc_path, port, rois_path, opener=opener, epochs=epochs)
+    h = httpd.RequestHandlerClass
     url = f"http://127.0.0.1:{port}/"
-    print(f"  {Path(mesc_path).name}: {n} units  →  {url}   (ctrl-c to stop)")
+    print(f"  {label or Path(mesc_path).name}: {h.n_units} units  →  {url}   (ctrl-c to stop)")
+    if rois_path or opener is not None:
+        print(f"  ROIs: {h.rois_path}")
     if open_browser:
         def _launch():
             print(f"  opening: {open_private(url)}", flush=True)
@@ -1312,6 +1347,8 @@ def serve(mesc_path: Path, port: int = 8020, open_browser: bool = True,
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n  stopped")
+    finally:
+        httpd.server_close()
 
 
 def main() -> int:

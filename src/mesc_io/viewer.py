@@ -262,6 +262,14 @@ def _mask_means(f, unit: str, ch: int, masks, block: int = 200) -> np.ndarray:
     return means * float(c.scale) + float(c.offset)
 
 
+
+#: Public names for the two helpers a host uses to compute ROI traces exactly the viewer's way (the
+#: calcium pipeline's playground and bouton pages do). Stable from 0.6.7; the underscored names
+#: stay as aliases. `mask_of(roi, h, w)` → boolean mask of one ROI dict (``{"points": [[x, y], …]}``);
+#: `mask_means(f, unit, channel, masks)` → ``(n_masks, n_frames)`` means in reader units.
+mask_of = _mask_of
+mask_means = _mask_means
+
 def _png(img: np.ndarray, window) -> bytes:
     """8-bit PNG of one frame through a display window.
 

@@ -69,3 +69,15 @@ def test_an_unreadable_recording_fails_before_the_browser(tmp_path):
         raise OSError("master is on a disk that is not mounted")
     with pytest.raises(OSError, match="not mounted"):
         V.make_server(tmp_path / "experiment_master.h5", port=0, opener=broken)
+
+
+def test_the_mask_helpers_are_public_and_are_the_viewers_own(mesc):
+    assert V.mask_of is V._mask_of and V.mask_means is V._mask_means
+    roi = {"name": "r", "points": [[0.5, 0.5], [2.5, 0.5], [2.5, 2.5], [0.5, 2.5]]}
+    with MescFile(mesc) as f:
+        u = f.units()[0]
+        m = V.mask_of(roi, u.height, u.width)
+        got = V.mask_means(f, u.path, 0, [m])[0]
+        want = f.read(u.path, channel=0)[:, m].mean(axis=1)
+    assert m.sum() >= 1 and got.shape == (u.n_frames,)
+    assert abs(got - want).max() < 1e-9

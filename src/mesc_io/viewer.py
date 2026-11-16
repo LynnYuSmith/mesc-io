@@ -925,6 +925,9 @@ class _Handler(BaseHTTPRequestHandler):
                 "colours": [c.colour for c in u.channels],
                 "stage_um": u.stage_um,
                 "stage_rel_um": u.stage_rel_um,
+                "laser_pockels": u.laser_pockels,
+                "pmt_reference_voltage": u.pmt_reference_voltage,
+                "acquired_bits": u.acquired_bits,
                 "z0_um": u.z0_um, "z_origin_um": u.z_origin_um,
                 "info": [list(r) for r in u.info],
             } for u in f.units()]

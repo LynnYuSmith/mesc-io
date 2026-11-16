@@ -6,6 +6,7 @@
   and each PMT's reference voltage, from the file (not the comment), and the bit depth when it is not 16. The
   reader had them since 0.6.x; the panel did not. A host's recording (a master) shows them too when its opener fills
   them.
+
 ## 0.7.0 — 2026-11-16
 
 Registration you can re-apply and keep, a viewer other programs can host, and small fixes from a fresh-eyes review.

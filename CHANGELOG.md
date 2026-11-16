@@ -2,20 +2,42 @@
 
 ## Unreleased
 
-- Tests: the dF/F port is held to the calcium pipeline's own answers on every machine, CI included —
-  `tests/data/dff_golden.npz` (written by `tools/make_dff_golden.py` from the pipeline's signal stage: savgol,
-  gaussians, polynomial background, rolling quantile and baseline, darkest patch, the whole chain) and
-  `tests/test_dff_golden.py`. The live comparison (`test_dff.py`) only ran where the pipeline is installed; where it
-  is, a new test checks the frozen file is still what the pipeline gives.
-- Reader: the frame rate follows the time axis's unit name (`ms`, `s`, `us`/`µs`); an unknown unit gives no rate and a
-  warning. Every file seen says `ms`, so nothing changes on them (cm027 2026-11-12: 61.9088 Hz as before); an `s`
-  axis would have been read as a rate 1000× too high.
-- `to_hdf5` keeps a z-stack's `z_step_um`, `pixel_size_y_um` and the axes (`ZYX` / `TYX`), as the TIFF export did.
-- `check`: "no conversion" is the reader's own flag (a stated 0 + 1×x is a conversion); pixel sizes are compared to six
-  significant figures, so float noise is no longer "mixed pixel sizes".
+## 0.7.0 — 2026-11-16
+
+Registration you can re-apply and keep, a viewer other programs can host, and small fixes from a fresh-eyes review.
+The registration report now holds the non-rigid shifts and is saved beside the output (`<out>_shifts.npz`); a bright
+second channel keeps its own int16 range; a long flat head is still found. The viewer has a public API for hosts —
+another program can serve its own recording format and draw time bands (e.g. stimulus epochs) on the traces. The
+frame rate follows the time axis's unit, `to_hdf5` keeps a z-stack's slice step, `check` stops two false alarms, and
+the dF/F port is held to the calcium pipeline's own answers in CI.
+
+**Upgrading:** `write_frames`, `register_file` and the CLI `writeback` / `register` now refuse an output file that
+already exists. Pass `overwrite=True` / `--overwrite` to replace it.
+
+### Changed
+
 - `write_frames`, `register_file` and the CLI `writeback` / `register` refuse an output that already exists, before
   any work, and leave it as it was; `overwrite=True` / `--overwrite` replaces it. A multi-GB copy used to replace a
   previous result without a word. The source itself is refused always.
+
+### Added — viewer
+
+- Viewer: a public API for hosts — `viewer.make_server(path, port, rois_path, *, opener=, epochs=)` returns a
+  server not yet serving; `viewer.serve(..., opener=, epochs=, label=)` runs it. Each server gets its own handler
+  class and cache, so two viewers in one process never share a recording, and the module's `_Handler` is never
+  changed. Hosts no longer set private class attributes (a rename would have dropped their bands silently).
+  `viewer.mask_of` / `viewer.mask_means` are public too (the helpers hosts compute ROI traces with; the
+  underscored names stay). `tests/test_viewer_host.py`.
+- Viewer: time bands on the traces — stimulus epochs, or anything else a host knows about the recording that the file
+  does not. A host passes `epochs=` to `viewer.make_server` / `viewer.serve`, a callable taking a unit path and returning
+  `[{"start": frame, "end": frame, "label": …, "kind": …, "title": …}]` in the unit's own frame index (the traces'
+  index, end exclusive); the page fetches them from `/api/epochs/{unit}` and draws them under the grid, coloured by
+  kind, labelled, with a **Stimuli** toggle on the trace bar (remembered with the view). Without a host nothing
+  changes: no route data, the button stays hidden. A host hook that raises gives no bands and the reason, never a
+  broken page. `tests/test_viewer_epochs.py`.
+
+### Added and fixed — registration
+
 - `mesc-io register` saves its report: `<out stem>_shifts.npz` beside the output (`--shifts PATH` elsewhere,
   `--no-shifts` not at all) — rigid and non-rigid shifts, references, block positions, settings, preset, skipped
   units, int16 scales, flat heads, the mesc-io version. No pickle; `registration.save_report` / `load_report` give
@@ -30,19 +52,23 @@
 - Registration: the flat head is measured against frames spread over the whole unit, not against the head's own
   median. A head more than half flat (≥ 30 of the first 60 frames) set the bar at the flat level and came back 0,
   so its noise frames were registered. Unchanged on 37 real units (cm027 2026-11-12, abf001 2026-09-14).
-- Viewer: a public API for hosts — `viewer.make_server(path, port, rois_path, *, opener=, epochs=)` returns a
-  server not yet serving; `viewer.serve(..., opener=, epochs=, label=)` runs it. Each server gets its own handler
-  class and cache, so two viewers in one process never share a recording, and the module's `_Handler` is never
-  changed. Hosts no longer set private class attributes (a rename would have dropped their bands silently).
-  `viewer.mask_of` / `viewer.mask_means` are public too (the helpers hosts compute ROI traces with; the
-  underscored names stay). `tests/test_viewer_host.py`.
-- Viewer: time bands on the traces — stimulus epochs, or anything else a host knows about the recording that the file
-  does not. A host passes `epochs=` to `viewer.make_server` / `viewer.serve`, a callable taking a unit path and returning
-  `[{"start": frame, "end": frame, "label": …, "kind": …, "title": …}]` in the unit's own frame index (the traces'
-  index, end exclusive); the page fetches them from `/api/epochs/{unit}` and draws them under the grid, coloured by
-  kind, labelled, with a **Stimuli** toggle on the trace bar (remembered with the view). Without a host nothing
-  changes: no route data, the button stays hidden. A host hook that raises gives no bands and the reason, never a
-  broken page. `tests/test_viewer_epochs.py`.
+
+### Fixed
+
+- Reader: the frame rate follows the time axis's unit name (`ms`, `s`, `us`/`µs`); an unknown unit gives no rate and a
+  warning. Every file seen says `ms`, so nothing changes on them (cm027 2026-11-12: 61.9088 Hz as before); an `s`
+  axis would have been read as a rate 1000× too high.
+- `to_hdf5` keeps a z-stack's `z_step_um`, `pixel_size_y_um` and the axes (`ZYX` / `TYX`), as the TIFF export did.
+- `check`: "no conversion" is the reader's own flag (a stated 0 + 1×x is a conversion); pixel sizes are compared to six
+  significant figures, so float noise is no longer "mixed pixel sizes".
+
+### Tests
+
+- Tests: the dF/F port is held to the calcium pipeline's own answers on every machine, CI included —
+  `tests/data/dff_golden.npz` (written by `tools/make_dff_golden.py` from the pipeline's signal stage: savgol,
+  gaussians, polynomial background, rolling quantile and baseline, darkest patch, the whole chain) and
+  `tests/test_dff_golden.py`. The live comparison (`test_dff.py`) only ran where the pipeline is installed; where it
+  is, a new test checks the frozen file is still what the pipeline gives.
 
 ## 0.6.6 — 2026-11-12
 

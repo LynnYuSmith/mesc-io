@@ -212,19 +212,34 @@ def _as_int16(block: np.ndarray, scale: int) -> np.ndarray:
 
 
 def _scale_for(f: MescFile, unit_paths: Sequence[str], channel: int) -> int:
-    """1, or 2 when any sampled frame would not fit in int16.
+    """1, or 2 when any sampled frame of `channel` would not fit in int16.
 
     Halving is lossy by one count and is only done when the alternative is wrapping a bright
     pixel round to negative. Sampling rather than scanning keeps this cheap; the margin makes
-    a near-miss safe.
+    a near-miss safe. Units that have no such channel are passed over.
     """
     peak = 0
     for path in unit_paths:
         u = f.unit(path)
+        if not any(c.index == channel for c in u.channels):
+            continue
         idx = np.unique(np.linspace(0, u.n_frames - 1, min(12, u.n_frames)).astype(int))
         block = f.read(path, channel=channel, frames=idx, reader_units=False, max_gb=None)
         peak = max(peak, int(np.max(block)))
     return 2 if peak > INT16_MAX * 0.9 else 1
+
+
+def _scales_for(f: MescFile, unit_paths: Sequence[str]) -> Dict[int, int]:
+    """`_scale_for` per channel index, over every channel any of the units has.
+
+    One scale per CHANNEL, not one for the file: the shifts are geometry and do not care about
+    intensity, so each channel goes through int16 at its own scale. A single scale taken from the
+    registered channel left a brighter second channel (red, often ten times the green) saturated
+    at 32767; a single scale taken from the brightest channel would halve the green that the
+    analysis reads, for the red's sake.
+    """
+    chans = sorted({c.index for p in unit_paths for c in f.unit(p).channels})
+    return {c: _scale_for(f, unit_paths, c) for c in chans}
 
 
 def leading_flat_frames(f: MescFile, unit: str, channel: int = 0,
@@ -239,15 +254,23 @@ def leading_flat_frames(f: MescFile, unit: str, channel: int = 0,
     they still hold.
 
     Measured, not assumed: the run at the front whose spatial standard deviation is below
-    `fraction` of the recording's own typical frame contrast. On a real recording this finds
-    exactly the nine frames the rate of the movie says are pre-scan.
+    `fraction` of the recording's own typical frame contrast (the median over frames spread across
+    the whole unit). On a real recording this finds exactly the nine frames the rate of the movie
+    says are pre-scan.
     """
     u = f.unit(unit)
     look = int(min(look, u.n_frames))
+    if look <= 0:
+        return 0
     head = f.read(u.path, channel=channel, frames=slice(0, look), reader_units=False,
                   max_gb=None)
     contrast = head.reshape(look, -1).std(axis=1)
-    typical = float(np.median(contrast))
+    # The yardstick comes from frames spread over the WHOLE unit, not from the head: measured
+    # against the head's own median, a head that was more than half flat set the bar at the flat
+    # level, nothing fell below half of it, and the noise frames went on to be registered.
+    spread = np.unique(np.linspace(0, u.n_frames - 1, min(look, u.n_frames)).astype(int))
+    sample = f.read(u.path, channel=channel, frames=spread, reader_units=False, max_gb=None)
+    typical = float(np.median(sample.reshape(len(spread), -1).std(axis=1)))
     if typical <= 0:
         return 0
     flat = contrast < fraction * typical
@@ -365,9 +388,12 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
     `<out>.partial` and renamed when everything is in, so a run that fails leaves no
     half-written file under the name asked for.
 
-    Returns a report: `groups` (each with its anchor, members and reference image), and per
-    unit the per-frame y/x shifts and the anchor it was registered to, so the registration
-    can be inspected or reapplied. The frames are written through `mesc_io.writeback`, which
+    Returns a report: `groups` (each with its anchor, members and reference image, and with
+    non-rigid on, `nr_blocks` — where each block sits), and per unit the per-frame rigid y/x
+    shifts, the per-frame per-block non-rigid shifts (`nr_y_shift`/`nr_x_shift`, frames × blocks,
+    None when rigid) and the anchor it was registered to, so the registration can be inspected
+    or reapplied. Before 0.6.7 only the rigid part was kept, which cannot reapply a non-rigid run.
+    `int16_scale_by_channel` gives the scale each channel went through int16 at. The frames are written through `mesc_io.writeback`, which
     copies the source and never modifies it.
 
     **Sign convention of the reported shifts.** They are Suite2p's, and they carry the same
@@ -419,10 +445,12 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
                 raise RegistrationError(
                     f"units of different frame sizes cannot share a reference: {sorted(shapes)}")
 
-        scale = _scale_for(f, all_paths, channel)        # one scale for the whole file
+        scales = _scales_for(f, all_paths)               # one int16 scale per channel
+        scale = scales.get(channel, 1)
         dark = {p: leading_flat_frames(f, p, channel) for p in all_paths}
 
-        report = {"int16_scale": scale, "nonrigid": bool(nonrigid),
+        report = {"int16_scale": scale, "int16_scale_by_channel": dict(scales),
+                  "nonrigid": bool(nonrigid),
                   "preset": None if used is None else {
                       "name": used["name"], "source": used["source"],
                       "description": used["description"], "settings": used["settings"]},
@@ -440,7 +468,7 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
         try:
             with _Output(partial_out, tag=tag) as dest:
                 for group in unit_groups:
-                    _register_group(f, reg, group, report, dest, dark, scale, channel,
+                    _register_group(f, reg, group, report, dest, dark, scales, channel,
                                     nonrigid, block_size, max_shift, max_shift_nr, ops, batch,
                                     progress, on_skip)
         except BaseException:
@@ -451,9 +479,10 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
     return report
 
 
-def _register_group(f, reg, group, report, dest, dark, scale, channel, nonrigid, block_size,
+def _register_group(f, reg, group, report, dest, dark, scales, channel, nonrigid, block_size,
                     max_shift, max_shift_nr, ops, batch, progress, on_skip) -> None:
     """Build one group's reference, then register, write and let go of each of its units."""
+    scale = scales.get(channel, 1)
     anchor = group[0]
     if f.unit(anchor).z_step_um:
         # Its frames are slices at different depths, not one field over time. Aligning
@@ -489,14 +518,21 @@ def _register_group(f, reg, group, report, dest, dark, scale, channel, nonrigid,
         _skip(report, group, f"suite2p could not build a reference from {anchor}: "
                              f"{type(exc).__name__}: {exc}", on_skip)
         return
-    report["groups"].append({"anchor": anchor, "units": list(group), "reference": ref})
+    entry = {"anchor": anchor, "units": list(group), "reference": ref}
+    if nonrigid:
+        # where each non-rigid block sits, so the per-block shifts below can be put back on the
+        # frame: rows/cols are [start, end) pixel ranges, `grid` is (blocks down, blocks across)
+        yb, xb, grid = masks[-1][0], masks[-1][1], masks[-1][2]
+        entry["nr_blocks"] = {"y": np.asarray(yb, dtype=int), "x": np.asarray(xb, dtype=int),
+                              "grid": [int(v) for v in grid]}
+    report["groups"].append(entry)
 
     for path in group:
         u = f.unit(path)
         n_ch = len(u.channels)
         # The one copy of the output: registered batches are written straight into it.
         out_by_channel = {c.name: np.empty(u.shape, dtype=np.uint16) for c in u.channels}
-        ys, xs = [], []
+        ys, xs, ys_nr, xs_nr = [], [], [], []
         for start in range(0, u.n_frames, n_batch):
             sl = slice(start, min(start + n_batch, u.n_frames))
             block = f.read(path, channel=channel, frames=sl, reader_units=False,
@@ -506,16 +542,21 @@ def _register_group(f, reg, group, report, dest, dark, scale, channel, nonrigid,
             moved_reg, y, x, _c, y1, x1, _c1, _ = reg.register_frames(
                 masks, _as_int16(block, scale), ops=group_ops)
             ys.append(np.asarray(y)); xs.append(np.asarray(x))
+            if nonrigid and y1 is not None:
+                ys_nr.append(np.asarray(y1, dtype=np.float32))
+                xs_nr.append(np.asarray(x1, dtype=np.float32))
             for c in u.channels:                  # every channel takes the same shifts
                 if c.index == channel:
                     moved = moved_reg             # already shifted by register_frames
                 else:
                     raw = f.read(path, channel=c.index, frames=sl, reader_units=False,
                                  max_gb=None)
-                    moved = reg.shift_frames(_as_int16(raw, scale), y, x, y1, x1,
+                    c_scale = scales.get(c.index, 1)
+                    moved = reg.shift_frames(_as_int16(raw, c_scale), y, x, y1, x1,
                                              blocks=masks[-1] if nonrigid else None,
                                              ops=group_ops)
-                _to_stored(moved, scale, out_by_channel[c.name][sl])
+                _to_stored(moved, scales.get(c.index, 1),
+                           out_by_channel[c.name][sl])
             del moved_reg, moved, block
         # The flat head has no structure to align: registration matched it to noise, so
         # put those frames back exactly as they were and zero their recorded shifts.
@@ -526,10 +567,16 @@ def _register_group(f, reg, group, report, dest, dark, scale, channel, nonrigid,
                     path, channel=c.index, frames=slice(0, d), reader_units=False,
                     max_gb=None)
         y_all, x_all = np.concatenate(ys), np.concatenate(xs)
+        nr_y = np.concatenate(ys_nr) if ys_nr else None
+        nr_x = np.concatenate(xs_nr) if xs_nr else None
         if d:
             y_all[:d] = 0
             x_all[:d] = 0
+            if nr_y is not None:
+                nr_y[:d] = 0
+                nr_x[:d] = 0
         report["units"][path] = {"y_shift": y_all, "x_shift": x_all,
+                                 "nr_y_shift": nr_y, "nr_x_shift": nr_x,
                                  "n_frames": u.n_frames, "n_channels": n_ch,
                                  "leading_flat_frames": d,
                                  "reference_from": anchor}

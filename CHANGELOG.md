@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Registration report keeps the NON-RIGID shifts: `nr_y_shift` / `nr_x_shift` per unit (frames × blocks, zero on
+  the flat head, None for a rigid run) and `nr_blocks` per group (where each block sits). Only the rigid part was
+  kept, so a run with the default non-rigid correction could not be reapplied from its report; the test now
+  reapplies them through Suite2p and gets the written frames back.
+- Registration: one int16 scale PER CHANNEL (`int16_scale_by_channel`). The scale was taken from the registered
+  channel alone, so a red channel past int16 was saturated at 32767; it now goes through at its own scale while
+  the green stays at 1 — its output is byte-identical to a run with a dim red.
+- Registration: the flat head is measured against frames spread over the whole unit, not against the head's own
+  median. A head more than half flat (≥ 30 of the first 60 frames) set the bar at the flat level and came back 0,
+  so its noise frames were registered. Unchanged on 37 real units (cm027 2026-11-12, abf001 2026-09-14).
 - Viewer: time bands on the traces — stimulus epochs, or anything else a host knows about the recording that the file
   does not. A host sets `_Handler._epochs`, a callable taking a unit path and returning
   `[{"start": frame, "end": frame, "label": …, "kind": …, "title": …}]` in the unit's own frame index (the traces'

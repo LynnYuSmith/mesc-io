@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Tests: the dF/F port is held to the calcium pipeline's own answers on every machine, CI included —
+  `tests/data/dff_golden.npz` (written by `tools/make_dff_golden.py` from the pipeline's signal stage: savgol,
+  gaussians, polynomial background, rolling quantile and baseline, darkest patch, the whole chain) and
+  `tests/test_dff_golden.py`. The live comparison (`test_dff.py`) only ran where the pipeline is installed; where it
+  is, a new test checks the frozen file is still what the pipeline gives.
 - Reader: the frame rate follows the time axis's unit name (`ms`, `s`, `us`/`µs`); an unknown unit gives no rate and a
   warning. Every file seen says `ms`, so nothing changes on them (cm027 2026-11-12: 61.9088 Hz as before); an `s`
   axis would have been read as a rate 1000× too high.

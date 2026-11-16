@@ -30,8 +30,14 @@
 - Registration: the flat head is measured against frames spread over the whole unit, not against the head's own
   median. A head more than half flat (≥ 30 of the first 60 frames) set the bar at the flat level and came back 0,
   so its noise frames were registered. Unchanged on 37 real units (cm027 2026-11-12, abf001 2026-09-14).
+- Viewer: a public API for hosts — `viewer.make_server(path, port, rois_path, *, opener=, epochs=)` returns a
+  server not yet serving; `viewer.serve(..., opener=, epochs=, label=)` runs it. Each server gets its own handler
+  class and cache, so two viewers in one process never share a recording, and the module's `_Handler` is never
+  changed. Hosts no longer set private class attributes (a rename would have dropped their bands silently).
+  `viewer.mask_of` / `viewer.mask_means` are public too (the helpers hosts compute ROI traces with; the
+  underscored names stay). `tests/test_viewer_host.py`.
 - Viewer: time bands on the traces — stimulus epochs, or anything else a host knows about the recording that the file
-  does not. A host sets `_Handler._epochs`, a callable taking a unit path and returning
+  does not. A host passes `epochs=` to `viewer.make_server` / `viewer.serve`, a callable taking a unit path and returning
   `[{"start": frame, "end": frame, "label": …, "kind": …, "title": …}]` in the unit's own frame index (the traces'
   index, end exclusive); the page fetches them from `/api/epochs/{unit}` and draws them under the grid, coloured by
   kind, labelled, with a **Stimuli** toggle on the trace bar (remembered with the view). Without a host nothing

@@ -15,6 +15,14 @@ jobs:
         # A claim about supported versions that nothing checks is a guess.
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        # ubuntu-latest became 26.04 (2026-11), and setup-python has no 3.9 for it: 3.9 on Linux
+        # runs on 24.04 instead, so the claim stays checked rather than silently dropped.
+        exclude:
+          - os: ubuntu-latest
+            python-version: "3.9"
+        include:
+          - os: ubuntu-24.04
+            python-version: "3.9"
 
     steps:
       - uses: actions/checkout@v4

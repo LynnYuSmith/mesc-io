@@ -586,7 +586,8 @@ class MescFile:
         rate = z_step = None
         if z_scale:
             if _z_axis_is_time(a):
-                rate = 1000.0 / z_scale          # the scale is a frame PERIOD in ms
+                period = _frame_period_ms(a, z_scale)   # the scale is a frame PERIOD
+                rate = 1000.0 / period if period else None
             else:
                 z_step = z_scale                 # µm per slice
         px = _float_or_none(_attr(a, "XAxisConversionConversionLinearScale"))
@@ -621,6 +622,26 @@ class MescFile:
 
 #: ``ZAxisGeomRole``: 0 is the time axis of a recording, 3 the depth axis of a z-stack.
 Z_ROLE_TIME, Z_ROLE_DEPTH = 0, 3
+
+
+#: How many milliseconds one unit of the time axis is, by its unit name. Every file seen so far
+#: says "ms"; the rest are accepted by `_z_axis_is_time`, so they are converted rather than
+#: read as milliseconds — "s" read as ms is a rate 1000× too high, and nothing downstream
+#: (a baseline window, an event window) would notice.
+_MS_PER_TIME_UNIT = {"": 1.0, "ms": 1.0, "s": 1000.0, "us": 1e-3, "µs": 1e-3, "μs": 1e-3}
+
+
+def _frame_period_ms(attrs, z_scale: float, warn: bool = True) -> Optional[float]:
+    """The frame period in milliseconds, from the time axis's scale and its unit name; None for
+    a unit name that is not a time unit we know (with a warning), never a guess."""
+    name = _text(_attr(attrs, "ZAxisConversionUnitName")).strip().lower()
+    per = _MS_PER_TIME_UNIT.get(name)
+    if per is None:
+        if warn:
+            warnings.warn(f"time axis in unknown unit {name!r} — no frame rate is given rather "
+                          "than one that may be off by a power of ten", stacklevel=3)
+        return None
+    return float(z_scale) * per
 
 
 def _z_axis_is_time(attrs) -> bool:
@@ -762,6 +783,7 @@ def _mesc_info(grp, chan_names, z_step) -> Tuple[Tuple[str, str], ...]:
     if q is not None:
         add("Rotation (ZX'Y\" Euler angles)", ", ".join(f"{_num_text(round(t, 4))}°" for t in _euler_zxy_deg(q)))
     zs = _float_or_none(_attr(a, "ZAxisConversionConversionLinearScale"))
+    zs = _frame_period_ms(a, zs, warn=False) if zs and not z_step else zs
     if zs and not z_step:
         add("Frame rate", f"{_num_text(1000.0 / zs)} Hz")
         if zd:

@@ -472,3 +472,180 @@ def test_the_int16_to_uint16_shortcut_is_the_int32_route():
     out = np.empty(moved.shape, np.uint16)
     _to_stored(as_float, 1, out)
     assert np.array_equal(out, np.clip(as_float.astype(np.int32), 0, 65535).astype(np.uint16))
+
+
+# --- 0.6.7: the flat head against the whole unit, non-rigid shifts kept, one int16 scale per channel
+
+def _write_units(path, units, conv=None):
+    """`units` = {name: {channel_index: frames}} into a minimal .mesc."""
+    import h5py
+    from conftest import FRAME_PERIOD_MS, OFFSET_CH0, PIXEL_UM
+    with h5py.File(path, "w") as f:
+        sess = f.create_group("MSession_0")
+        for name, chans in units.items():
+            u = sess.create_group(name)
+            for k, frames in chans.items():
+                u.create_dataset(f"Channel_{k}", data=frames)
+                u.attrs[f"Channel_{k}_Conversion_ConversionLinearOffset"] = (conv or {}).get(k, OFFSET_CH0)
+                u.attrs[f"Channel_{k}_Conversion_ConversionLinearScale"] = 1.0
+            u.attrs["ZAxisConversionConversionLinearScale"] = FRAME_PERIOD_MS
+            u.attrs["XAxisConversionConversionLinearScale"] = PIXEL_UM
+    return path
+
+
+_BLOBS = [(30, 40, 900), (70, 90, 1200), (100, 35, 700), (50, 64, 1000)]
+_SHIFTS = [(0, 0)] * 6 + [(2, -3)] * 8 + [(-4, 1)] * 8 + [(3, 3)] * 8 + [(-1, -2)] * 10
+
+
+def test_a_head_more_than_half_flat_is_still_found(tmp_path):
+    """35 flat frames in the first 60: measured against the head's own median the bar sat at the
+    flat level and the count came back 0. Against the whole unit it is 35."""
+    from conftest import _moving_unit
+    frames = _moving_unit(0, _BLOBS, _SHIFTS * 2, n_flat=35)
+    path = _write_units(tmp_path / "long_head.mesc", {"MUnit_0": {0: frames}})
+    with MescFile(path) as f:
+        assert leading_flat_frames(f, "MUnit_0") == 35
+    # the control: the nine-frame head of the ordinary fixture is still nine
+    frames9 = _moving_unit(0, _BLOBS, _SHIFTS, n_flat=9)
+    path9 = _write_units(tmp_path / "short_head.mesc", {"MUnit_0": {0: frames9}})
+    with MescFile(path9) as f:
+        assert leading_flat_frames(f, "MUnit_0") == 9
+
+
+def test_the_nonrigid_shifts_are_kept_and_reapply_to_the_written_frames(moving_mesc, tmp_path):
+    """The report must be enough to redo the correction: the rigid shifts plus the per-block
+    non-rigid ones, put through Suite2p's own shift, give back the frames that were written."""
+    from suite2p.registration import register as reg
+    from mesc_io.registration import _ops
+    path, n_flat, _ = moving_mesc
+    rep = register_file(path, tmp_path / "out.mesc")
+    info = rep["units"]["MSession_0/MUnit_0"]
+    blocks = rep["groups"][0]["nr_blocks"]
+    nb = blocks["grid"][0] * blocks["grid"][1]
+    assert info["nr_y_shift"].shape == (info["n_frames"], nb) == info["nr_x_shift"].shape
+    assert not info["nr_y_shift"][:n_flat].any() and not info["nr_x_shift"][:n_flat].any()
+
+    with MescFile(path) as f:
+        raw = f.read("MUnit_0", reader_units=False)
+    with MescFile(tmp_path / "out.mesc") as f:
+        written = f.read("MUnit_0", reader_units=False)
+    ops = _ops(1000.0 / 16.0, True, 64, 0.1, 3.0)
+    full_blocks = reg.compute_reference_masks(rep["groups"][0]["reference"], ops=ops)[-1]
+    assert np.array_equal(np.asarray(full_blocks[0]), blocks["y"])
+    again = reg.shift_frames(raw[n_flat:].astype(np.int16), info["y_shift"][n_flat:],
+                             info["x_shift"][n_flat:], info["nr_y_shift"][n_flat:],
+                             info["nr_x_shift"][n_flat:], blocks=full_blocks, ops=ops)
+    again = np.clip(np.asarray(again, dtype=np.int32), 0, 65535).astype(np.uint16)
+    assert np.abs(again.astype(int) - written[n_flat:].astype(int)).max() <= 1
+
+
+def test_a_rigid_run_reports_no_nonrigid_shifts(moving_mesc, tmp_path):
+    path, _, _ = moving_mesc
+    rep = register_file(path, tmp_path / "out.mesc", nonrigid=False)
+    info = rep["units"]["MSession_0/MUnit_0"]
+    assert info["nr_y_shift"] is None and info["nr_x_shift"] is None
+    assert "nr_blocks" not in rep["groups"][0]
+
+
+def test_a_bright_second_channel_keeps_its_own_scale(tmp_path, recwarn):
+    """A red channel ten times the green, past int16: it goes through at scale 2 and keeps its
+    peaks; the green that is registered and analysed stays at scale 1, exactly as when the red
+    is dim. One scale for the file saturated the red at 32767 (or would halve the green)."""
+    from conftest import _moving_unit
+    from mesc_io.registration import RegistrationWarning
+    green = _moving_unit(0, _BLOBS, _SHIFTS)
+    red_bright = np.clip(green.astype(np.int64) * 40, 0, 65535).astype(np.uint16)
+    assert red_bright.max() > 32767
+    red_dim = (green // 2).astype(np.uint16)
+    bright = _write_units(tmp_path / "bright.mesc", {"MUnit_0": {0: green, 1: red_bright}},
+                          conv={1: -1095.0})
+    dim = _write_units(tmp_path / "dim.mesc", {"MUnit_0": {0: green, 1: red_dim}},
+                       conv={1: -1095.0})
+    rb = register_file(bright, tmp_path / "bright_mc.mesc")
+    assert not [w for w in recwarn if issubclass(w.category, RegistrationWarning)]
+    rd = register_file(dim, tmp_path / "dim_mc.mesc")
+    assert rb["int16_scale_by_channel"] == {0: 1, 1: 2}
+    assert rd["int16_scale_by_channel"] == {0: 1, 1: 1}
+    with MescFile(tmp_path / "bright_mc.mesc") as a, MescFile(tmp_path / "dim_mc.mesc") as b:
+        assert np.array_equal(a.read("MUnit_0", channel=0, reader_units=False),
+                              b.read("MUnit_0", channel=0, reader_units=False))
+        assert a.read("MUnit_0", channel=1, reader_units=False).max() > 32767
+
+
+# --- 0.6.7: the report on disk ----------------------------------------------------------------
+
+def _same_report(a, b):
+    assert a["units"].keys() == b["units"].keys()
+    for u in a["units"]:
+        for k, v in a["units"][u].items():
+            w = b["units"][u][k]
+            if v is None or isinstance(v, (str, int)):
+                assert w == v, (u, k)
+            else:
+                assert w.dtype == np.asarray(v).dtype and np.array_equal(w, v), (u, k)
+    assert len(a["groups"]) == len(b["groups"])
+    for g, h in zip(a["groups"], b["groups"]):
+        assert (g["anchor"], list(g["units"])) == (h["anchor"], list(h["units"]))
+        assert np.array_equal(g["reference"], h["reference"])
+        assert ("nr_blocks" in g) == ("nr_blocks" in h)
+        if "nr_blocks" in g:
+            assert np.array_equal(g["nr_blocks"]["y"], h["nr_blocks"]["y"])
+            assert list(g["nr_blocks"]["grid"]) == list(h["nr_blocks"]["grid"])
+    for k in ("nonrigid", "settings", "int16_scale", "int16_scale_by_channel",
+              "leading_flat_frames", "skipped", "out"):
+        assert a[k] == b[k], k
+
+
+@pytest.mark.parametrize("nonrigid", [True, False])
+def test_the_report_survives_the_disk(moving_mesc, tmp_path, nonrigid):
+    from mesc_io.registration import load_report, save_report
+    path, _, _ = moving_mesc
+    rep = register_file(path, tmp_path / "out.mesc", nonrigid=nonrigid)
+    where = save_report(rep, tmp_path / "shifts.npz")
+    assert where.exists() and not (tmp_path / "shifts.npz.partial").exists()
+    _same_report(rep, load_report(where))
+    # no pickle anywhere: a plain np.load with pickling off opens every array
+    with np.load(where, allow_pickle=False) as z:
+        [z[k] for k in z.files]
+
+
+def test_skipped_units_are_kept_in_the_saved_report(dirty_mesc, tmp_path):
+    from mesc_io.registration import load_report, save_report
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        rep = register_file(dirty_mesc, tmp_path / "out.mesc")
+    assert rep["skipped"]                                        # the control: there are some
+    back = load_report(save_report(rep, tmp_path / "s.npz"))
+    assert back["skipped"] == rep["skipped"]
+
+
+def test_the_cli_saves_the_shifts_beside_the_output(moving_mesc, tmp_path):
+    from mesc_io.__main__ import main
+    from mesc_io.registration import load_report
+    path, n_flat, _ = moving_mesc
+    assert main(["register", str(path), str(tmp_path / "rec_MC.mesc")]) == 0
+    rep = load_report(tmp_path / "rec_MC_shifts.npz")
+    info = rep["units"]["MSession_0/MUnit_0"]
+    assert info["leading_flat_frames"] == n_flat and info["nr_y_shift"] is not None
+
+    assert main(["register", str(path), str(tmp_path / "b.mesc"),
+                 "--shifts", str(tmp_path / "elsewhere" / "s.npz")]) == 0
+    assert (tmp_path / "elsewhere" / "s.npz").exists()
+    assert not (tmp_path / "b_shifts.npz").exists()
+
+    assert main(["register", str(path), str(tmp_path / "c.mesc"), "--no-shifts"]) == 0
+    assert not list(tmp_path.glob("c_shifts*"))
+
+
+def test_register_refuses_an_existing_output_unless_asked(moving_mesc, tmp_path):
+    from mesc_io.registration import RegistrationError
+    path, _, _ = moving_mesc
+    out = tmp_path / "out.mesc"
+    out.write_bytes(b"the only registered copy")
+    with pytest.raises(RegistrationError, match="already exists"):
+        register_file(path, out)
+    assert out.read_bytes() == b"the only registered copy"
+    register_file(path, out, overwrite=True)
+    with MescFile(out) as f:
+        assert f.units()

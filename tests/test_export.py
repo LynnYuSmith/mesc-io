@@ -39,3 +39,24 @@ def test_a_frame_selection_is_honoured(mesc, tmp_path):
         out = to_hdf5(f, "MUnit_0", tmp_path / "part.h5", frames=slice(0, 3))
     with h5py.File(out, "r") as h:
         assert h["data"].shape[0] == 3
+
+
+def test_a_z_stack_keeps_its_slice_step_in_hdf5(tmp_path):
+    import h5py
+    import numpy as np
+    from mesc_io import MescFile
+    from mesc_io.export import to_hdf5
+    p = tmp_path / "stack.mesc"
+    with h5py.File(p, "w") as f:
+        u = f.create_group("MSession_0").create_group("MUnit_0")
+        u.create_dataset("Channel_0", data=np.zeros((6, 3, 4), np.uint16))
+        u.attrs["ZAxisConversionConversionLinearScale"] = 2.5
+        u.attrs["ZAxisGeomRole"] = 3.0
+        u.attrs["XAxisConversionConversionLinearScale"] = 0.5
+        u.attrs["YAxisConversionConversionLinearScale"] = 0.6
+    with MescFile(p) as m:
+        out = to_hdf5(m, "MUnit_0", tmp_path / "s.h5")
+    with h5py.File(out, "r") as f:
+        a = f["data"].attrs
+        assert a["axes"] == "ZYX" and a["z_step_um"] == 2.5 and "frame_rate_hz" not in a
+        assert a["pixel_size_um"] == 0.5 and a["pixel_size_y_um"] == 0.6

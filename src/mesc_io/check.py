@@ -87,7 +87,8 @@ def check(path) -> Report:
                 f"({', '.join(f'{r:g} Hz x{len(v)}' for r, v in sorted(by_rate.items()))}) — "
                 f"use each unit's own rate, never one for the file", odd))
 
-        sizes = {u.path: u.pixel_size_um for u in units if u.pixel_size_um}
+        # compared to 6 significant figures (MESc's own display): 0.44911766 and 0.4491177 are one zoom
+        sizes = {u.path: float(f"{u.pixel_size_um:.6g}") for u in units if u.pixel_size_um}
         by_size = _group(sizes)
         if len(by_size) > 1:
             rep.findings.append(Finding(
@@ -119,7 +120,7 @@ def check(path) -> Report:
         for u in units:
             for c in u.channels:
                 per_channel[c.name][u.path] = (c.offset, c.scale)
-                if c.offset == 0.0 and c.scale == 1.0:
+                if not c.converted:          # the reader's own flag: a real 0 + 1×x is a conversion
                     no_conv.append(f"{u.path}/{c.name}")
         if no_conv:
             rep.findings.append(Finding(

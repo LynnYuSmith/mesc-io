@@ -125,3 +125,43 @@ def test_writing_over_the_source_is_refused(mesc):
     with pytest.raises(WritebackError, match="source itself"):
         write_frames(mesc, mesc, {"MUnit_0": {"Channel_0": _shifted(mesc)}})
     assert mesc.read_bytes() == before
+
+
+# --- 0.6.7: an existing output is not replaced without being asked -----------------------------
+
+def test_an_existing_output_is_refused_and_left_as_it_was(mesc, tmp_path):
+    out = tmp_path / "out.mesc"
+    out.write_bytes(b"an earlier result")
+    with pytest.raises(WritebackError, match="already exists"):
+        write_frames(mesc, out, {"MUnit_0": {"Channel_0": _shifted(mesc)}})
+    assert out.read_bytes() == b"an earlier result"
+    assert not (tmp_path / "out.mesc.partial").exists()
+
+
+def test_overwrite_replaces_it(mesc, tmp_path):
+    out = tmp_path / "out.mesc"
+    out.write_bytes(b"an earlier result")
+    new = _shifted(mesc)
+    write_frames(mesc, out, {"MUnit_0": {"Channel_0": new}}, overwrite=True)
+    with MescFile(out) as f:
+        assert np.allclose(f.read("MUnit_0", channel=0), new)
+
+
+def test_the_source_is_refused_even_with_overwrite(mesc):
+    with pytest.raises(WritebackError, match="source itself"):
+        write_frames(mesc, mesc, {"MUnit_0": {"Channel_0": _shifted(mesc)}}, overwrite=True)
+
+
+def test_the_cli_asks_for_overwrite(mesc, tmp_path):
+    import h5py
+    from mesc_io.__main__ import main
+    frames = tmp_path / "f.h5"
+    with h5py.File(frames, "w") as f:
+        f["data"] = _shifted(mesc)
+    out = tmp_path / "out.mesc"
+    out.write_bytes(b"x")
+    assert main(["writeback", str(mesc), str(out), "MUnit_0", str(frames), "--reader-units"]) == 1
+    assert out.read_bytes() == b"x"
+    assert main(["writeback", str(mesc), str(out), "MUnit_0", str(frames), "--reader-units",
+                 "--overwrite"]) == 0
+    assert out.read_bytes() != b"x"

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Tests: the dF/F port is held to the calcium pipeline's own answers on every machine, CI included —
+  `tests/data/dff_golden.npz` (written by `tools/make_dff_golden.py` from the pipeline's signal stage: savgol,
+  gaussians, polynomial background, rolling quantile and baseline, darkest patch, the whole chain) and
+  `tests/test_dff_golden.py`. The live comparison (`test_dff.py`) only ran where the pipeline is installed; where it
+  is, a new test checks the frozen file is still what the pipeline gives.
+- Reader: the frame rate follows the time axis's unit name (`ms`, `s`, `us`/`µs`); an unknown unit gives no rate and a
+  warning. Every file seen says `ms`, so nothing changes on them (cm027 2026-11-12: 61.9088 Hz as before); an `s`
+  axis would have been read as a rate 1000× too high.
+- `to_hdf5` keeps a z-stack's `z_step_um`, `pixel_size_y_um` and the axes (`ZYX` / `TYX`), as the TIFF export did.
+- `check`: "no conversion" is the reader's own flag (a stated 0 + 1×x is a conversion); pixel sizes are compared to six
+  significant figures, so float noise is no longer "mixed pixel sizes".
+- `write_frames`, `register_file` and the CLI `writeback` / `register` refuse an output that already exists, before
+  any work, and leave it as it was; `overwrite=True` / `--overwrite` replaces it. A multi-GB copy used to replace a
+  previous result without a word. The source itself is refused always.
+- `mesc-io register` saves its report: `<out stem>_shifts.npz` beside the output (`--shifts PATH` elsewhere,
+  `--no-shifts` not at all) — rigid and non-rigid shifts, references, block positions, settings, preset, skipped
+  units, int16 scales, flat heads, the mesc-io version. No pickle; `registration.save_report` / `load_report` give
+  the same from Python. The CLI used to print the report and keep none of it.
+- Registration report keeps the NON-RIGID shifts: `nr_y_shift` / `nr_x_shift` per unit (frames × blocks, zero on
+  the flat head, None for a rigid run) and `nr_blocks` per group (where each block sits). Only the rigid part was
+  kept, so a run with the default non-rigid correction could not be reapplied from its report; the test now
+  reapplies them through Suite2p and gets the written frames back.
+- Registration: one int16 scale PER CHANNEL (`int16_scale_by_channel`). The scale was taken from the registered
+  channel alone, so a red channel past int16 was saturated at 32767; it now goes through at its own scale while
+  the green stays at 1 — its output is byte-identical to a run with a dim red.
+- Registration: the flat head is measured against frames spread over the whole unit, not against the head's own
+  median. A head more than half flat (≥ 30 of the first 60 frames) set the bar at the flat level and came back 0,
+  so its noise frames were registered. Unchanged on 37 real units (cm027 2026-11-12, abf001 2026-09-14).
 - Viewer: time bands on the traces — stimulus epochs, or anything else a host knows about the recording that the file
   does not. A host sets `_Handler._epochs`, a callable taking a unit path and returning
   `[{"start": frame, "end": frame, "label": …, "kind": …, "title": …}]` in the unit's own frame index (the traces'

@@ -233,9 +233,24 @@ def _write_channel(ds, a: np.ndarray, convert: Callable, lead: int, block: int,
     return path
 
 
+def refuse_existing_output(source: Path, out: Path, overwrite: bool, error=None) -> None:
+    """Refuse an `out` that is the source (always) or that already exists (unless `overwrite`).
+
+    Checked before any work: a multi-GB copy replaced a previous result without a word, and the
+    file it replaced could have been the only registered copy of a session.
+    """
+    error = error or WritebackError
+    if not out.exists():
+        return
+    if out.resolve() == Path(source).resolve():
+        raise error(f"{out} is the source itself — the output must be a new file")
+    if not overwrite:
+        raise error(f"{out} already exists — pass overwrite=True (CLI: --overwrite) to replace it")
+
+
 def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
                  reader_units: bool = True, tag: Optional[str] = DEFAULT_TAG,
-                 tolerance: float = 60.0, chunk: int = _CHUNK) -> Dict:
+                 tolerance: float = 60.0, chunk: int = _CHUNK, overwrite: bool = False) -> Dict:
     """Copy `source` to `out` and replace the frames of the units named in `frames`.
 
     `frames` is `{unit: {channel: array}}`, e.g. `{"MUnit_0": {"Channel_0": arr}}`, where the
@@ -250,11 +265,13 @@ def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
     each. Raises `WritebackError` before writing anything if any channel disagrees.
 
     The copy is written as `<out>.partial` and renamed to `out` only when it is complete, so a
-    run that fails or is interrupted leaves no file under the final name.
+    run that fails or is interrupted leaves no file under the final name. An existing `out` is
+    refused unless `overwrite=True` (the source itself, always).
     """
     source, out = Path(source), Path(out)
     if not source.exists():
         raise FileNotFoundError(source)
+    refuse_existing_output(source, out, overwrite, WritebackError)
     report = {"out": str(out), "written": [], "agreement": {}, "warnings": []}
 
     # Validate everything first, against the SOURCE, so a refusal leaves no half-written copy.
@@ -276,8 +293,6 @@ def write_frames(source, out, frames: Mapping[str, Mapping[str, np.ndarray]],
                     report["warnings"].append(
                         f"{unit_path}/{channel}: {lead} frame(s) shorter — aligned to the end")
 
-    if out.exists() and out.resolve() == source.resolve():
-        raise WritebackError(f"{out} is the source itself — the output must be a new file")
     # The copy is built under `<out>.partial` and renamed when every frame and tag is in. Written
     # straight to `out`, a run killed half way left a file of that name that opened like any other:
     # a whole copy, some of its frames replaced, and no tag yet to say it had been touched.

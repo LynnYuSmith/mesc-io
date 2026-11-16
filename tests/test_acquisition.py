@@ -59,3 +59,21 @@ def test_no_xml_no_rows(tmp_path):
     assert u.laser_pockels is None and u.pmt_reference_voltage is None and u.objective is None
     assert u.acquisition == {"task": "", "devices": {}, "params": {}, "axes": {}}
     assert not any(k.startswith(("Stage", "Pockels", "PMT")) for k, _ in u.info)
+
+
+def test_the_viewer_hands_the_page_the_laser_and_pmt(tmp_path):
+    """The Metadata panel shows them (0.7.1): the unit description the page reads carries both."""
+    from mesc_io import viewer as V
+    import threading, json, urllib.request
+    path = _file(tmp_path / "acq.mesc")
+    httpd = V.make_server(path, port=0, rois_path=tmp_path / "r.json")
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        host, port = httpd.server_address[:2]
+        with urllib.request.urlopen(f"http://{host}:{port}/api/file", timeout=5) as r:
+            u = json.loads(r.read())["units"][0]
+    finally:
+        httpd.shutdown(); httpd.server_close()
+    assert abs(u["laser_pockels"] - 400.018) < 1e-9
+    assert u["pmt_reference_voltage"] == {"UG": 70.0, "UR": 60.0}
+    assert "acquired_bits" in u

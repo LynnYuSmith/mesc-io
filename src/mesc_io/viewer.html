@@ -747,6 +747,17 @@ function pick(i, restoring) {
   $("frame").max = unit.frames - 1; $("frame").value = V.frame;
   showWin();
   const st = unit.stage_um, rel = unit.stage_rel_um;
+  // the laser and detector settings the unit was recorded with, from the file (not the comment); the bit depth
+  // only when it is not the usual 16, because then a single frame has a few dozen grey levels
+  const acqRows = u => {
+    const pmt = u.pmt_reference_voltage;
+    const rows = [
+      ["laser (Pockels)", u.laser_pockels != null ? fmt(u.laser_pockels) : "not in file"],
+      ["PMT", pmt && Object.keys(pmt).length ? Object.entries(pmt).map(([k, v]) => `${esc(k)} ${fmt(v)}`).join(" · ") : "not in file"],
+    ];
+    if (u.acquired_bits != null && u.acquired_bits !== 16) rows.push(["acquired at", `${u.acquired_bits} bit`]);
+    return rows;
+  };
   // MESc's own information panel, row for row, when the file carries it; the stage rows above it
   // are the XML's (VirtX…, and SlowX… from the zero set on the rig), which MESc does not list
   const info = Array.isArray(unit.info) ? unit.info : [];
@@ -755,6 +766,7 @@ function pick(i, restoring) {
     ["comment", esc(unit.comment) || "—"],
     ["stage", st ? `x ${fmt(st.x)} · y ${fmt(st.y)} · z ${fmt(st.z)} µm` : "not in file"],
     ["from zero", rel ? `x ${fmt(rel.x)} · y ${fmt(rel.y)} · z ${fmt(rel.z)} µm` : "not in file"],
+    ...acqRows(unit),
   ].map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")
     + `<tr class="sec"><td colspan="2">as MESc shows it</td></tr>`
     + info.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("");
@@ -762,6 +774,7 @@ function pick(i, restoring) {
     ["unit", unit.path],
     ["stage", st ? `x ${fmt(st.x)} · y ${fmt(st.y)} · z ${fmt(st.z)} µm` : "not in file"],
     ["from zero", rel ? `x ${fmt(rel.x)} · y ${fmt(rel.y)} · z ${fmt(rel.z)} µm` : "not in file"],
+    ...acqRows(unit),
     ["frames", `${unit.frames}`],
     ["size", `${unit.width} × ${unit.height} px`],
     ["rate", unit.frame_rate_hz ? unit.frame_rate_hz.toFixed(3) + " Hz" : "not stated"],

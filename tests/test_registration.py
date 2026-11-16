@@ -636,3 +636,16 @@ def test_the_cli_saves_the_shifts_beside_the_output(moving_mesc, tmp_path):
 
     assert main(["register", str(path), str(tmp_path / "c.mesc"), "--no-shifts"]) == 0
     assert not list(tmp_path.glob("c_shifts*"))
+
+
+def test_register_refuses_an_existing_output_unless_asked(moving_mesc, tmp_path):
+    from mesc_io.registration import RegistrationError
+    path, _, _ = moving_mesc
+    out = tmp_path / "out.mesc"
+    out.write_bytes(b"the only registered copy")
+    with pytest.raises(RegistrationError, match="already exists"):
+        register_file(path, out)
+    assert out.read_bytes() == b"the only registered copy"
+    register_file(path, out, overwrite=True)
+    with MescFile(out) as f:
+        assert f.units()

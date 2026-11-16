@@ -149,7 +149,7 @@ def _writeback(args) -> int:
 
     report = write_frames(args.source, args.out, {args.unit: {f"Channel_{args.channel}": frames}},
                           reader_units=units, tag=None if args.no_tag else args.tag,
-                          tolerance=args.tolerance)
+                          tolerance=args.tolerance, overwrite=args.overwrite)
     for w in report["warnings"]:
         print(f"  note: {w}")
     for what, delta in report["agreement"].items():
@@ -200,7 +200,7 @@ def _register(args) -> int:
                         max_shift_nr=args.max_shift_nr, preset=args.preset,
                         ops=_parse_ops(args.ops),
                         tag=None if args.no_tag else args.tag, progress=_say,
-                        on_skip=_skipped)
+                        on_skip=_skipped, overwrite=args.overwrite)
     if rep["preset"]:
         pr = rep["preset"]
         print(f"  preset {pr['name'] or '(dict)'} — {pr['source']}")
@@ -309,6 +309,7 @@ def main(argv=None) -> int:
     p.add_argument("--tolerance", type=float, default=60.0,
                    help="how far, in stored counts, the new frames may differ from the ones "
                         "they replace before the write is refused (default: 60)")
+    p.add_argument("--overwrite", action="store_true", help="replace `out` if it already exists")
     p.set_defaults(func=_writeback)
 
     p = sub.add_parser("view",
@@ -366,6 +367,7 @@ def main(argv=None) -> int:
                         "mesc_io.registration.load_report)")
     p.add_argument("--no-shifts", action="store_true",
                    help="do not save them")
+    p.add_argument("--overwrite", action="store_true", help="replace `out` if it already exists")
     p.set_defaults(func=_register)
 
     p = sub.add_parser("preset", help="save, list, show or delete named registration settings")

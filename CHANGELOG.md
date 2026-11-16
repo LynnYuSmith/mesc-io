@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `write_frames`, `register_file` and the CLI `writeback` / `register` refuse an output that already exists, before
+  any work, and leave it as it was; `overwrite=True` / `--overwrite` replaces it. A multi-GB copy used to replace a
+  previous result without a word. The source itself is refused always.
 - `mesc-io register` saves its report: `<out stem>_shifts.npz` beside the output (`--shifts PATH` elsewhere,
   `--no-shifts` not at all) — rigid and non-rigid shifts, references, block positions, settings, preset, skipped
   units, int16 scales, flat heads, the mesc-io version. No pickle; `registration.save_report` / `load_report` give

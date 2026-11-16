@@ -344,7 +344,7 @@ def register_file(source, out, units: Optional[Sequence[str]] = None, channel: i
                   max_shift_nr: Optional[float] = None,
                   preset=None, ops: Optional[Dict] = None,
                   batch: Optional[int] = None, tag: Optional[str] = "_MC",
-                  progress=None, on_skip=None) -> Dict:
+                  progress=None, on_skip=None, overwrite: bool = False) -> Dict:
     """Register the units of `source` and write the result into a copy of it.
 
     **By default every unit is registered to its own reference.** A `.mesc` normally holds
@@ -386,7 +386,8 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
     Each unit is written into the output as soon as it is registered and then let go, so a
     file of several recordings needs the memory of one. The output is first written as
     `<out>.partial` and renamed when everything is in, so a run that fails leaves no
-    half-written file under the name asked for.
+    half-written file under the name asked for. An existing `out` is refused unless
+    `overwrite=True`.
 
     Returns a report: `groups` (each with its anchor, members and reference image, and with
     non-rigid on, `nr_blocks` — where each block sits), and per unit the per-frame rigid y/x
@@ -427,8 +428,8 @@ The settings ARE the pipeline's (see `_ops`), non-rigid included — this reprod
     source, out = Path(source), Path(out)
     if not source.exists():
         raise FileNotFoundError(source)
-    if out.exists() and out.resolve() == source.resolve():
-        raise RegistrationError(f"{out} is the source itself — the output must be a new file")
+    from .writeback import refuse_existing_output
+    refuse_existing_output(source, out, overwrite, RegistrationError)
     partial_out = out.with_name(out.name + ".partial")
     with MescFile(source) as f:
         unit_groups = _resolve_groups(f, units, groups, reference_from)

@@ -6,7 +6,8 @@
   the viewer keeps both the view and the ROIs in `~/mesc-viewer/`, and **auto %** uses one window for the whole unit.
   It now opens with a note that it is the dated record of the design, with the README describing the viewer as it is.
   README: the reader's limits (`ad_invert`, 8-bit acquisition, `.mes`) moved under the Python section; the PNG
-  export is described once. `docs/registration.md` says what `BATCH_PIXELS` is.
+  export is described once. `docs/registration.md` says what `BATCH_PIXELS` is. README and both docs rewritten in
+  shorter sentences, one point per paragraph; the dF/F steps in `viewer_design.md` are a numbered list.
 
 ## 0.7.1 — 2026-11-16
 

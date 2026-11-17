@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Export: a TIFF above 4 GB no longer prints tifffile's "truncating ImageJ file" warning. The file is ImageJ's own
+  layout for large stacks (data contiguous after the first page; ImageJ cannot read BigTIFF), and Fiji opens it whole:
+  checked in headless Fiji on 4.4 GB, one channel (4200 frames) and two channels (2 × 2100), and on a mosaic-shaped
+  stack. `mosaic.to_tiff` now passes `bigtiff=False` as `export.to_tiff` does. `tests/test_export_tiff_large.py`
+  (the 4.4 GB round trip runs with `MESC_IO_SLOW=1`).
+- Browser checks: `tools/run_browser_checks.sh` runs the viewer's real-Chrome checks one after another, each against
+  a fresh `mesc-io view` on a synthetic file with its own empty HOME, and exits with the number of failures. The
+  checks take the browser from `CHROME` (default: Chrome on macOS); the runner adds a mock keychain, so a fresh
+  profile no longer asks for the login keychain on macOS.
+- Viewer: the unit list no longer scrolls sideways. Since the 167 px unit column (12 Nov) a long comment widened the
+  rows, and the sideways scrollbar covered the bottom of the last unit; the rows now cut their text with an ellipsis.
+  Found by `tests/view_layout_real_chrome.js`, which had been red since that commit with nobody running it.
+- Browser checks: two checks measured the wrong thing and turned red with the 12 Nov layout. The projection check in
+  `view_gamma_object` compared against slice 16, where both objects are centred, so it measured pixel rounding
+  (264 vs 264); it now compares against slice 40, where neither is. The wheel-zoom check in `view_zstack3d` bounded the
+  drift in pixels (4 px; 4.9 at a 2 px wider canvas, with unchanged zoom code); it is now bounded in voxels (half a
+  voxel; measured 0.22 of a 22 px voxel). `view_3dtools` still fails: the slab draws nothing in headless Chrome, as it
+  did at the commit that added the check (28 Oct). In a real Chrome the slab works (checked by hand on a 10-stack
+  file, 17 Nov), so the runner leaves it out unless `ALL=1` until the check itself is fixed.
+- CI: a `browser` job runs `tools/run_browser_checks.sh` on Ubuntu with Chrome and Node 22 (10 checks).
+
 - Docs: `docs/viewer_design.md` said the view was saved beside the `.mesc` and that **auto %** stretched each frame;
   the viewer keeps both the view and the ROIs in `~/mesc-viewer/`, and **auto %** uses one window for the whole unit.
   It now opens with a note that it is the dated record of the design, with the README describing the viewer as it is.

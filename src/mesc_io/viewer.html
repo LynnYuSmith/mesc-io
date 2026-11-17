@@ -45,14 +45,17 @@
   /* ---- units (left) ---- */
   #unitsCol { position:relative; grid-area:units; display:flex; flex-direction:column; min-height:0;
               background:var(--panel); border-right:1px solid var(--line) }
-  #units { flex:1 1 auto; overflow-y:auto; min-height:120px }
-  .u { display:grid; grid-template-columns:44px 1fr; gap:8px; align-items:center;
+  #units { flex:1 1 auto; overflow-y:auto; overflow-x:hidden; min-height:120px }
+  /* minmax(0, 1fr): a plain 1fr never shrinks below its longest line, so at the 167 px column a
+     long comment pushed the row wide, the list grew a sideways scrollbar, and that bar covered
+     the bottom of the last unit (12 Nov layout; tests/view_layout_real_chrome.js) */
+  .u { display:grid; grid-template-columns:44px minmax(0, 1fr); gap:8px; align-items:center;
        padding:6px 10px; cursor:pointer; border-bottom:1px solid var(--line) }
   .u:hover { background:var(--panel-2) }
   .u.on { background:var(--sel); box-shadow:inset 3px 0 0 var(--accent) }
   .u img { width:44px; height:44px; object-fit:cover; border-radius:3px; background:#000 }
-  .u b { display:block; font-weight:600; font-size:12px }
-  .u span { display:block; color:var(--muted); font-size:11px }
+  .u b { display:block; font-weight:600; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .u span { display:block; color:var(--muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
   .u i { display:block; color:var(--faint); font-size:11px; font-style:normal;
          white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
   #meta { flex:0 1 var(--meta-h, 300px); overflow-y:auto; border-top:1px solid var(--line); min-height:0 }

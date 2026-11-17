@@ -5,7 +5,7 @@
    node tests/view_zstack3d_real_chrome.js <viewer url> <out prefix> */
 const { spawn } = require("node:child_process"); const http = require("node:http"); const fs = require("node:fs");
 const URL_ = process.argv[2], OUT = process.argv[3];
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; const PORT = 9341;
+const CHROME = (process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"); const PORT = 9341;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on("data",d=>b+=d); r.on("end",()=>res(JSON.parse(b))); }).on("error", rej));
 (async () => {
@@ -66,8 +66,8 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   const spot = JSON.parse(await ev(`(()=>{const [D,H,W]=volMeta.shape; let b=-1,bi=0;
     for(let i=0;i<volData.length;i++) if(volData[i]>b){b=volData[i];bi=i;}
     return JSON.stringify({z:Math.floor(bi/(H*W)), y:Math.floor(bi/W)%H, x:bi%W});})()`));
-  const spotAt = () => ev(`(()=>{const c=document.getElementById('vol'), r=c.getBoundingClientRect(), k=volCam(r.width/r.height);
-    const [D,H,W]=volMeta.shape, s=${JSON.stringify(spot)};
+  const spotAt = (dx = 0) => ev(`(()=>{const c=document.getElementById('vol'), r=c.getBoundingClientRect(), k=volCam(r.width/r.height);
+    const [D,H,W]=volMeta.shape, s=${JSON.stringify(spot)}; s.x+=${dx};
     const P=[((s.x+.5)/W*2-1)*k.ext[0], (1-2*(s.z+.5)/D)*k.ext[1], (2*(s.y+.5)/H-1)*k.ext[2]];   // x, depth up, rows
     const d=v3.sub(P,k.eye), f=v3.dot(d,k.F);
     const nx=v3.dot(d,k.R)/(f*k.tanHalf*k.aspect), ny=v3.dot(d,k.U)/(f*k.tanHalf);
@@ -85,7 +85,12 @@ const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on
   await shot("zoomed_at_cursor");
   const drift = Math.hypot(s1.x - s0.x, s1.y - s0.y);
   if (!(z.dist < .25)) fail("the wheel did not zoom in: " + z.dist);
-  if (drift > 4) fail(`the voxel under the cursor moved ${drift.toFixed(1)} px while zooming`);
+  // The wheel anchors the point the cursor picks on the voxel's surface; this check projects the
+  // voxel's centre. Inside one voxel they differ by geometry alone, so the bound is in voxels on
+  // screen after the zoom, not in pixels: 4 px held at a 597 px canvas and failed at 599 (4.9 px,
+  // one voxel = 22 px there, so 0.22 voxel) with the same zoom code (12 Nov layout).
+  const sn = await spotAt(1), vox = Math.hypot(sn.x - s1.x, sn.y - s1.y);
+  if (drift > 0.5 * vox) fail(`the voxel under the cursor moved ${drift.toFixed(1)} px while zooming (one voxel = ${vox.toFixed(1)} px)`);
   if (l1.at < 200) fail("the bouton is not under the cursor after zooming: " + JSON.stringify(l1));
   if (!(l1.lit > 2 * l0.lit)) fail(`the bouton did not grow on screen: ${l0.lit} -> ${l1.lit}`);
   if (Math.hypot(z.tx, z.ty) < .2) fail("the camera still turns about the centre, not the zoomed spot: " + JSON.stringify(z));

@@ -11,7 +11,7 @@
    z. Pixels are 0.5 µm, slices 1 µm apart. */
 const { spawn } = require("node:child_process"); const http = require("node:http"); const fs = require("node:fs");
 const URL_ = process.argv[2], OUT = process.argv[3] || "/tmp/gamma_object";
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; const PORT = 9347;
+const CHROME = (process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"); const PORT = 9347;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on("data",d=>b+=d); r.on("end",()=>res(JSON.parse(b))); }).on("error", rej));
 const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
@@ -192,10 +192,16 @@ const bouton = bz => [bz, 30 + 60 * bz / 47, 20 + 80 * bz / 47];
   const xyT = await teal("oXY"), yzT = await teal("oYZ");
   await shot("object_xyz");
   if (xyT < 10 || yzT < 10) fail("the bouton's object is not drawn in XY and YZ: " + JSON.stringify([xyT, yzT]));
+  // the projection draws objects the current slice does not cut: from a slice away from both
+  // (they sit on slices 13-18), the slice shows none of them and the projection shows them.
+  // (Comparing against slice 16, where both are centred, measured only pixel rounding: 264 vs 264
+  // at a 291 px canvas, 12 Nov 2026.)
+  await ev("volGoTo([40, V.vol.cy * volMeta.down, V.vol.cx * volMeta.down]); orthoDraw(); 'ok'"); await sleep(600);
+  const offT = await teal("oXY");
   await ev("V.vol.oMax = true; orthoDraw(); 'ok'"); await sleep(200);
   const maxT = await teal("oXY");
   await ev("V.vol.oMax = false; V.vol.ortho = false; V.vol.on = true; volShow(); 'ok'"); await settle();
-  if (maxT <= xyT) fail("in the projection both objects are not drawn: " + JSON.stringify([xyT, maxT]));
+  if (!(offT < 10 && maxT >= 0.8 * xyT)) fail("in the projection both objects are not drawn: " + JSON.stringify({slice16: xyT, slice40: offT, projection: maxT}));
   // grown on the server, the red cell's object keeps its numbers while only green is on the page
   if (!/o1\s+[\d.]+ µm³/.test(await ev("document.getElementById('volPts').textContent"))) fail("the red object's numbers are not listed while green alone is shown");
   // the PNG caption lists what it can grow

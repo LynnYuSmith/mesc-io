@@ -29,6 +29,10 @@ from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
 import h5py
 import numpy as np
+
+
+class UnreadableUnitWarning(UserWarning):
+    """A unit was skipped because its HDF5 metadata cannot be read (a torn copy, usually)."""
 from h5py._objects import phil as _phil
 
 from .errors import MescIOError
@@ -231,6 +235,10 @@ class Unit:
     #: Each PMT's reference voltage by channel name (``{"UG": 70.0, "UR": 70.0}``), from the
     #: ``PMT`` devices of ``MeasurementParamsXML``. None when the file carries no PMT block.
     pmt_reference_voltage: Optional[Dict[str, float]] = None
+    #: The imaging laser's motorised attenuator, MESc's "Im %" (``position`` of the ``APTMotor``
+    #: device named ``Im`` in ``MeasurementParamsXML``), in percent. With the Pockels setting it
+    #: tells how much laser reached the sample. None when the file has no such motor.
+    laser_im_percent: Optional[float] = None
     #: ``Params/objective_name`` (e.g. "obj16x"). None when absent.
     objective: Optional[str] = None
     #: Every acquisition parameter of ``MeasurementParamsXML``, parsed and typed:
@@ -338,7 +346,16 @@ class MescFile:
             found: Dict[str, Unit] = {}
             for s in self.sessions():
                 for name in sorted(self._f[s], key=_unit_sort_key):
-                    u = self._read_unit(s, name)
+                    try:
+                        u = self._read_unit(s, name)
+                    except (RuntimeError, OSError, KeyError) as exc:
+                        # A .mesc copied while MESc was still writing has a last unit whose HDF5
+                        # metadata is torn ("incorrect metadata checksum"). One such unit used to make
+                        # the whole file unreadable; the finished units are fine, so skip it, say so.
+                        warnings.warn(f"{self.path.name}: {s}/{name} skipped, its HDF5 metadata cannot "
+                                      f"be read ({exc}); was the file copied while MESc was still writing?",
+                                      UnreadableUnitWarning, stacklevel=2)
+                        continue
                     if u is not None:
                         found[u.path] = u
             if not found:
@@ -616,6 +633,7 @@ class MescFile:
                     info=_mesc_info(grp, chan_names, z_step) + _acquisition_rows(acq, stage_abs, stage_rel, bits[0]),
                     acquired_bits=bits[0], sample_shift=bits[1],
                     laser_pockels=_pockels_onintensity(acq), pmt_reference_voltage=_pmt_voltages(acq),
+                    laser_im_percent=_im_percent(acq),
                     objective=(str(acq["params"]["objective_name"]) if "objective_name" in acq["params"] else None),
                     acquisition=acq)
 
@@ -927,6 +945,14 @@ def _pockels_onintensity(acq: Dict[str, object]) -> Optional[float]:
     return None
 
 
+def _im_percent(acq: Dict[str, object]) -> Optional[float]:
+    """MESc's "Im %": the position of the APTMotor named ``Im`` (the imaging laser's attenuator)."""
+    d = acq.get("devices", {}).get("Im")
+    if isinstance(d, dict) and "APTMotor" in str(d.get("type", "")) and isinstance(d.get("position"), (int, float)):
+        return float(d["position"])
+    return None
+
+
 def _pmt_voltages(acq: Dict[str, object]) -> Optional[Dict[str, float]]:
     out = {str(d["channel_name"]): float(d["reference_voltage"]) for d in acq.get("devices", {}).values()
            if "PMT" in str(d.get("type", "")) and d.get("channel_name")
@@ -950,6 +976,9 @@ def _acquisition_rows(acq, stage_abs, stage_rel, bits) -> Tuple[Tuple[str, str],
     pk = _pockels_onintensity(acq)
     if pk is not None:
         rows.append(("Pockels cell (on-intensity)", _num_text(round(pk, 2))))
+    im = _im_percent(acq)
+    if im is not None:
+        rows.append(("Imaging attenuator (Im)", f"{_num_text(round(im, 2))} %"))
     pmt = _pmt_voltages(acq)
     if pmt:
         rows.append(("PMT reference voltage", ", ".join(f"{k} {_num_text(v)}" for k, v in pmt.items())))

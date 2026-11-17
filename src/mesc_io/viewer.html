@@ -756,6 +756,7 @@ function pick(i, restoring) {
     const pmt = u.pmt_reference_voltage;
     const rows = [
       ["laser (Pockels)", u.laser_pockels != null ? fmt(u.laser_pockels) : "not in file"],
+      ["laser (Im)", u.laser_im_percent != null ? `${fmt(u.laser_im_percent)} %` : "not in file"],
       ["PMT", pmt && Object.keys(pmt).length ? Object.entries(pmt).map(([k, v]) => `${esc(k)} ${fmt(v)}`).join(" · ") : "not in file"],
     ];
     if (u.acquired_bits != null && u.acquired_bits !== 16) rows.push(["acquired at", `${u.acquired_bits} bit`]);

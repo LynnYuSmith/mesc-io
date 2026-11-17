@@ -50,6 +50,7 @@ with MescFile("recording.mesc") as f:
 
     u = f.unit("MUnit_0")
     u.laser_pockels, u.pmt_reference_voltage           # 400.0, {"UG": 70.0, "UR": 70.0}
+    u.laser_im_percent                                 # 100.0, MESc's "Im %" (the laser attenuator)
     u.stage_um, u.stage_rel_um                         # stage x, y, z: absolute / from the zero
     u.acquisition["devices"], u.acquisition["params"]  # every acquisition parameter, typed
 ```

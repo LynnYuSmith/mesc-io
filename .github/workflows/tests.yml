@@ -54,8 +54,10 @@ jobs:
 
   # The viewer's real-Chrome checks (tools/run_browser_checks.sh): the page is JavaScript that
   # pytest never runs, and these checks sat red for days with nobody running them by hand.
+  # macOS: the checks were written and tuned there (fonts, device pixels, headless window size) and
+  # it is where the viewer is used; on Ubuntu 4 of 10 failed on 1-2 px layout differences (17 Nov).
   browser:
-    runs-on: ubuntu-24.04
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -70,5 +72,4 @@ jobs:
       - name: Real-browser checks
         env:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
-          CHROME_EXTRA_FLAGS: --no-sandbox
         run: tools/run_browser_checks.sh

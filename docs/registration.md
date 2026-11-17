@@ -16,7 +16,7 @@ mesc-io register recording.mesc recording_MC.mesc
 - **Every unit gets its own reference.** A file usually holds several different fields, and
   registering one field onto another's reference returns displaced frames with nothing to say
   so.
-- **The settings are those of the calcium-imaging pipeline:** non-rigid, 64 px blocks, a 3 px
+- **The defaults are the settings we use on our own recordings:** non-rigid, 64 px blocks, a 3 px
   cap on the per-block warp and a rigid cap of 0.1 of the frame. Non-rigid corrects the
   peripheral warp from the immersion gel drying over a session. It also resamples every frame,
   so the output is softer than the input even where nothing moved. `--rigid` turns it off.
@@ -128,14 +128,15 @@ settings that were resolved, so a corrected file can be traced to exactly what p
 - **The output appears when it is complete.** It is written as `<out>.partial` and renamed at
   the end; a run that fails or is stopped removes the partial file and leaves nothing under
   the name asked for. The output cannot be the source.
-- **Batch size follows the frame size.** By default Suite2p gets `BATCH_PIXELS` worth of frames
-  at a time — 1000 frames of 256², 250 of 512² — which keeps its FFT buffers small (1000 frames
+- **Batch size follows the frame size.** By default Suite2p gets a fixed number of pixels at a
+  time (`registration.BATCH_PIXELS`, 1000 × 256²): 1000 frames of 256², 250 of 512². This keeps
+  its FFT buffers small (1000 frames
   of 512² asked for ~2 GB of them and ran at half the speed). Every frame is registered on its
   own, so the output does not change. `register_file(..., batch=N)` fixes it; do that with
   `batch=1000` to reproduce an older run exactly if you set `smooth_sigma_time` or
   `do_bidiphase`, the two Suite2p options that mix frames within a batch.
 - **Frames are deflated in threads.** MESc stores one gzip chunk per frame. Those frames are
-  compressed with zlib in a few threads and handed to HDF5 as finished chunks — the same bytes
+  compressed with zlib in a few threads and handed to HDF5 as finished chunks, the same bytes
   HDF5's own deflate stores, checked on the first frame of every channel (if they differ, that
   channel is written through h5py). Only zlib runs in the threads; every HDF5 call is made from
   one thread, under h5py's lock. Any other layout is written through h5py as before.

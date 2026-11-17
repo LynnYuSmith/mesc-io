@@ -1,7 +1,9 @@
 # The viewer, second layout
 
-Sketched by hand on 2026-09-18, then worked out. This is the shape; the page is built from it,
-not the other way round. Anything marked **?** is still open.
+Sketched by hand on 2026-09-18, then worked out. This file is the record of how the viewer got
+its shape: the first sketch, then what was decided while building it and after using it, dated.
+Later sections overrule earlier ones. The viewer as it is now is described in the
+[README](../README.md#the-viewer).
 
 ## The picture
 
@@ -41,16 +43,18 @@ The arrow in the sketch means exactly this: the panel is context for the picture
 **image** — the unit's frames. Under it, one thin strip: play/pause, the frame slider with the
 frame number, the channel choice. No other control lives here.
 
-*Averaged frames.* A window of N frames is shown instead of the single frame — the running
+*Averaged frames.* A window of N frames is shown instead of the single frame: the running
 mean centred on the slider position. N is set in instruments; N=1 is the raw frame. This is
 what makes a dim bouton visible while scrubbing.
 
-*Zoom by selection.* Drag a rectangle on the image → the view zooms to it, as the report does.
+*Zoom by selection.* Drag a rectangle on the image → the view zooms to it.
 Double-click or a small ⤢ returns to the whole frame. Wheel zooms around the cursor, drag pans
 when zoomed. ROIs are drawn in image coordinates so they stay put under any zoom.
 
-*Contrast* lives in instruments, folded away: by default a **fixed** window in reader units, from the file's own LUT and editable per unit and channel; **auto %** (lo/hi percentiles of each frame) is the alternative; a palette per channel and an **overlay** of all channels sit beside it — set once per file, not once
-a minute.
+*Contrast* lives in instruments, folded away: by default a **fixed** window in reader units,
+from the file's own LUT and editable per unit and channel; **auto %** (lo/hi percentiles of the
+whole unit, one window for every frame) is the alternative; a palette per channel and an
+**overlay** of all channels sit beside it. All of it is set once per file, not once a minute.
 
 **instruments**
 
@@ -67,7 +71,7 @@ shows at once*, mean is *the whole recording collapsed into one picture*.
 **rois** — a list that scrolls, with a filter box above it (matters at 200 ROIs, harmless at 8).
 Each row: name, kind, size in px. Click selects (image outline brightens, trace highlights);
 checkbox chooses whether it is drawn in the trace strip. Under the list: `traces` (compute for
-the unit/channel), and the exports — csv · imagej · json.
+the unit/channel), and the exports: csv · imagej · json.
 
 **traces** — full width.
 
@@ -79,7 +83,7 @@ ROI, for comparing shapes. The mode persists.
 When zoomed, the frame slider's range follows the zoom so scrubbing stays inside what you are
 looking at.
 
-*A real grid*: labelled time ticks (seconds, not frames — fs is known), a faint line per
+*A real grid*: labelled time ticks (seconds, not frames; fs is known), a faint line per
 tick, y-ticks in reader units. The cursor line in the trace strip and the frame slider are the
 same number: move one, the other moves.
 
@@ -87,10 +91,10 @@ same number: move one, the other moves.
 
 ## Session, saved by itself
 
-Like pupil-monitor: no button. `<file>.mesc-io.json` beside the .mesc, written on every change
-(debounced): unit, channel, frame, AVG window, contrast, zoom rectangle, trace mode, trace
-zoom, selected ROI, which ROIs are drawn. The ROI set stays where it is (`PUT /api/rois`, the
-same file as now). Reopening the file restores the view.
+No button. The view is written on every change (debounced) to `~/mesc-viewer/`, never beside
+the raw file: unit, channel, frame, AVG window, contrast, zoom rectangle, trace mode, trace
+zoom, selected ROI, which ROIs are drawn. The ROI set is kept in the same folder
+(`PUT /api/rois`). Reopening the file restores the view.
 
 ## Calm
 
@@ -103,7 +107,7 @@ always-visible controls are the four instrument buttons, the trace mode, and the
 * The filter box filters by name. The row shows the kind (spot · poly) and the point count
   beside it, which is what the eye was going to use anyway.
 * Stack mode: every trace gets the same vertical room (64 px) and is scaled to its own range
-  **within the visible time window** — so zooming in time re-scales each band to what is on
+  **within the visible time window**, so zooming in time re-scales each band to what is on
   screen, and a weak bouton beside a strong one stays readable. The range is printed under
   the name so nothing about the size is hidden.
 * The unit list carries a thumbnail of each unit's mean image (`/api/thumb`, ≤ 96 px). One
@@ -111,14 +115,14 @@ always-visible controls are the four instrument buttons, the trace mode, and the
 * Keys: Enter computes the traces; space plays; ← → slide the time window when zoomed in (shift: half a window) and step
   a frame otherwise (shift: ten); ↑ ↓ walk the ROI list; Delete removes the selected ROI; Esc
   drops a polygon draft. Clicking in the trace strip moves the frame there; double-click goes
-  home. An ROI's name is renamed by double-clicking it — it is a label, not an input, so a
+  home. An ROI's name is renamed by double-clicking it. It is a label, not an input, so a
   click on the row selects and Delete deletes.
 * The trace strip's height is dragged from its top edge and remembered; so is the metadata
   panel's, from its top edge (30 units want a longer list than the default).
 
 ## First use (2026-09-18, on the synthetic file)
 
-* The AVG window is **typed as a number**, not stepped through a ladder — `AVG [ 13 ]`.
+* The AVG window is **typed as a number**, not stepped through a ladder: `AVG [ 13 ]`.
 * An ROI can be **dragged** to correct its place; a polygon's corner can be dragged on its
   own. Pressing on an ROI and dragging moves it; pressing on empty image and dragging is the
   zoom box. Told apart by what is under the cursor at the press, so no mode switch.
@@ -128,15 +132,15 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   waits 230 ms; a second click or a double-click within that cancels it. One gesture, one
   meaning.
 
-## On the real file (260916, 11.5 GB, 30 units — 2026-09-18)
+## On the real file (260916, 11.5 GB, 30 units; 2026-09-18)
 
 * The server is **threaded** now. Thirty thumbnails at once, six connections from Chrome,
   and a single-threaded server with its five-deep backlog refused the rest: the page sat
   blank while the process was busy. Each request opens its own file handle, so there was
-  nothing to protect. Thumbnails use 40 frames, not 300 — at 96 px nobody can tell.
+  nothing to protect. Thumbnails use 40 frames, not 300; at 96 px nobody can tell.
   Measured: 30 thumbnails in 4 s, traces over 4953 frames in 4 s.
 * **Axis limits adapt**: the 1st–99th percentile of what is on screen, padded,
-  in both modes — min/max let one odd frame flatten everything. In overlay a box sets the
+  in both modes (min/max let one odd frame flatten everything). In overlay a box sets the
   value range too, but any change of the time window (arrows, wheel, a new box) lets the
   y limits follow the data again.
 
@@ -144,19 +148,20 @@ always-visible controls are the four instrument buttons, the trace mode, and the
   apply to every band in stack and to the overlay, survive time zooms and mode switches, and
   are released by `auto`. When on auto the boxes show, greyed, the limits in force (in stack:
   of the selected band). An inverted range is refused with a word in the badge.
-* The ROI store's read-modify-write is under a lock now — the server is threaded, and two
+* The ROI store's read-modify-write is under a lock now: the server is threaded, and two
   quick saves used to be able to write over each other.
 
 * **Hover readouts**: on the image, `x · y · value (3×3 mean)` in reader units,
-  of the frame window on screen or of the mean — fetched from the server, debounced, since
+  of the frame window on screen or of the mean, fetched from the server (debounced), since
   the page only holds a PNG. On the traces, the ROI under the cursor (the band in stack, the
   nearest in overlay), its frame, its second, its value.
 
-## raw | dF/F by the pipeline's method (2026-09-18)
+## raw | dF/F by the analysis pipeline's method (2026-09-18)
 
 `raw | dF/F` in the trace bar, with the two knobs that matter beside it: the baseline's
-quantile **q** (0.3, what the sessions use) and its window (60 s). The chain is the signal
-stage's, step for step, in numpy alone — `src/mesc_io/dff.py`: dark current off the darkest
+quantile **q** (0.3, what our sessions use) and its window (60 s). The chain is the signal
+stage of the calcium-imaging pipeline this viewer was written beside, step for step, in numpy
+alone (`src/mesc_io/dff.py`): dark current off the darkest
 patch's first frames, Savitzky–Golay 5/3, the darkest 10×10 patch's trace smoothed and
 polynomial-fitted (degree 5) as the background, rolling quantile + Gaussian smooth as F0,
 (F − F0)/max(F0, eps). **Each piece is held against the pipeline's own function on the same
@@ -164,12 +169,12 @@ trace to 1e-9** (`tests/test_dff.py`; skipped, visibly, where the pipeline is no
 Both signals come from one pass; the switch is instant, the knobs refetch. The darkest patch
 is drawn on the image (`bg`), the numbers used sit in the bar (dark, patch, eps, head).
 
-What it is not: the master's number. The ROI is what was drawn here (a 3-px disc, not a
+What it is not: the pipeline's own number for that bouton. The ROI is what was drawn here (a 3-px disc, not a
 Suite2p mask) and the leading trim is not applied (the frames stay aligned with the movie;
 the black head is greyed instead). Same method, this ROI.
 
 Typed vertical limits are kept **per signal**: raw and dF/F live on different scales, so a
-switch neither throws yours away nor applies raw's numbers to dF/F — each signal comes back
+switch neither throws yours away nor applies raw's numbers to dF/F; each signal comes back
 with the limits it had.
 
 ## Three kinds of ROI, and a size you can change (2026-09-18)
@@ -194,15 +199,14 @@ log saying to check it.
 
 ## Two channels in 3D (2026-10-27)
 
-With **overlay** on (the same button
-as in 2D), a two-channel stack goes to the GPU as one RG8 texture — channel 0 in r, channel 1 in
-g — and the shader draws them green and magenta, added: where both are bright the voxel is white.
+With **overlay** on (the same button as in 2D), a two-channel stack goes to the GPU as one RG8
+texture (channel 0 in r, channel 1 in g), and the shader draws them green and magenta, added: where both are bright the voxel is white.
 The file's own colours (green and red, on our rig) are not used here: their sum is yellow, which
 is hard to tell from green. A palette picked for a channel in instruments still wins.
 
 * **A window each.** The red channel is often ten times brighter than the green; one window
-  would leave the green black. Each channel is fetched on its own through its own window — the
-  fixed limits typed for it, or percentiles of that channel alone — and has its own floor in the
+  would leave the green black. Each channel is fetched on its own through its own window (the
+  fixed limits typed for it, or percentiles of that channel alone) and has its own floor in the
   3D bar, set from its own histogram when it opens. The ceiling and cut/clip stay shared (a
   fraction of each window), and the cut works on each channel's bytes, so a red blob does not
   take the green around it.
@@ -211,8 +215,8 @@ is hard to tell from green. A palette picked for a channel in instruments still 
   the pair costs the GPU what one channel did. The page refuses a pair that does not line up.
 * **Modes.** MIP: each channel's brightest along the ray, coloured, added. Glass: both add light
   and hide what is behind; a voxel's colour is the two colours weighted by how solid each channel
-  is there. Depth stays one channel — the hue already says how deep, a second colour on top of it
-  would say nothing — and the info line says which.
+  is there. Depth stays one channel, since the hue already says how deep and a second colour on top of it
+  would say nothing; the info line says which.
 * **XYZ** shows the same two colours (each channel's bytes as sent, no floor, as the grey views).
   A switch per channel hides it in 3D and XYZ.
 * Overlay off, or a one-channel unit, is the old path untouched: same request, same R8 texture,
@@ -225,14 +229,14 @@ rule throughout: the picture does not change; only what is redrawn, and when.
 
 * **The trace strip is two layers.** The canvas holds the traces, grid and labels and is redrawn
   only when one of the things it shows changes (payload, time or value window, mode, signal,
-  size, grid, selection, shown set — one key). The frame cursor is a 1-px element under the
+  size, grid, selection, shown set: one key). The frame cursor is a 1-px element under the
   canvas, whose background is clear, so it still sits beneath the traces. Playing and
   scrubbing move it and nothing else.
 * **Past one frame per pixel, M4.** Each pixel column draws its first, lowest, highest and last
   frame, in time order. The column spans what it spanned and joins its neighbours by the same
   segment; at one frame per pixel or fewer every frame is drawn. The old dense line also grew
-  miter points past its peaks, which the new one has fewer of — the one visible difference,
-  and in the right direction.
+  miter points past its peaks, which the new one has fewer of. That is the one visible
+  difference, and in the right direction.
 * **Limits are cached** per payload, signal, time window and trace; the overlay's by the
   payload's identity, not its unit and channel, so a refetch with another q is new numbers.
 * **One frame request in flight.** A slider step while a frame is on its way only marks that

@@ -68,6 +68,23 @@ started with trigger mode on) and is slightly off. Z-stacks have no stamps (None
 `read` refuses over 4 GB by default (`max_gb=None` to override). A unit name that matches in
 more than one session is refused, not resolved to the first; `MSession_1/MUnit_0` always works.
 
+### Limits of the reader
+
+**Not tested yet.** The PMT A/D inversion is a recording setting (`ad_invert` in the unit's
+`MeasurementParamsXML`, next to the A/D offsets; added in MESc 3.5.7). mesc-io reads it per channel
+(`Channel.ad_invert`) and has been tested on files recorded with `ad_invert = 1`, where its values match what MESc
+shows. A channel recorded with `ad_invert = 0` is read, but with an `InvertWarning` on reads in reader units, and
+`mesc-io check` reports it (`pmt-not-inverted`): those values have not been compared with MESc (some readers apply
+`65535 − x` by hand).
+
+**8-bit acquisition.** A unit acquired at 8 bits (`BitCompression = 8` in `MeasurementParamsXML`) is still stored as
+uint16, each sample shifted up (`compression_shift_8bit`, 7 on the files tested: values are multiples of 128), so
+one frame holds only a few dozen grey levels. The values are read as they are; `Unit.acquired_bits` and
+`Unit.sample_shift` say which mode it was, and `mesc-io check` notes such units (`8-bit-acquisition`), because an
+offset or an SNR read off one of their frames is coarse.
+
+Files written by MES 7 or older (`.mes`) are a different format and are not read.
+
 ## Command line
 
 ```
@@ -145,8 +162,8 @@ scrubbing does not flicker.
 Each channel has a palette: its colour from the file, a single colour, or one of 25 of Fabio
 Crameri's perceptually uniform Scientific colour maps (batlow, oslo, lajolla, vik, roma, …).
 **Overlay** puts all channels in one picture, each through its own limits and colour.
-**Brightness, contrast and gamma** (slider or a typed number) change only the picture on screen — gamma below 1
-lifts dim boutons — never the numbers or the data exports.
+**Brightness, contrast and gamma** (slider or a typed number) change only the picture on screen, never the numbers or
+the data exports. Gamma below 1 lifts dim boutons.
 
 #### Z-stacks: 3D and XYZ
 
@@ -168,7 +185,7 @@ A z-stack is shown in slices and microns, with a max projection, a **3D** view y
 #### Where the tissue begins
 
 **surface** in XYZ: a few clicks in the XZ / YZ panes, just above the first slice where the
-label appears, and a surface is fitted through them — flat from one mark, a tilted plane from
+label appears, and a surface is fitted through them: flat from one mark, a tilted plane from
 three, a curved one from six spread over the stack (a brain under a window is rarely level). It
 is drawn in the panes, the tilt is given in degrees, and every 3D point and the crosshair get
 their depth below it in µm, into the tissue: the brighter side of the stack, or the side you
@@ -178,7 +195,7 @@ set. **csv** saves the marks, the fit and the points' depths; the marks are kept
 
 ![the mosaic on a synthetic file: six two-channel z-stack tiles stitched from their overlaps, each seam labelled with its correlation](https://raw.githubusercontent.com/LynnYuSmith/mesc-io/main/docs/mosaic.png)
 
-Shown when a file holds two or more z-stacks with a stage position: every tile laid out as one
+The mosaic appears when a file holds two or more z-stacks with a stage position: every tile laid out as one
 field where the stage put it, a plane at a time, with hard seams (each pixel from the tile whose
 centre is nearest, never an average of two places).
 
@@ -192,11 +209,10 @@ centre is nearest, never an average of two places).
 
 The same is in Python: `mesc_io.mosaic.tiles / register / compose / to_tiff`.
 
-#### Measuring and figures
+#### Figures
 
-**ruler** (beside the ROI tools) measures in µm between two clicks on the image. **PNG** saves
-what is on screen for a figure: the image at whole pixels with the ROIs, the ruler, a scale bar
-and a caption, or the 3D view. **Export** in the traces bar saves the traces as csv or as drawn, as a PNG.
+**PNG** saves what is on screen for a figure: the image at whole pixels with the ROIs, the
+ruler (µm between two clicks), a scale bar and a caption, or the 3D view.
 
 Layout and decisions: [docs/viewer_design.md](docs/viewer_design.md).
 
@@ -219,21 +235,6 @@ a running, licensed MESc. The other open Python readers return the stored intege
 MESc installed: frames in the units MESc shows (each channel's conversion, including the PMT offset), z-stacks
 read as stacks, the per-frame hardware timestamps, the ROIs drawn on the rig, safe write-back into a copy of the
 `.mesc`, export to Fiji, and the browser viewer with mosaics.
-
-**Not tested yet.** The PMT A/D inversion is a recording setting (`ad_invert` in the unit's
-`MeasurementParamsXML`, next to the A/D offsets; added in MESc 3.5.7). mesc-io reads it per channel
-(`Channel.ad_invert`) and has been tested on files recorded with `ad_invert = 1`, where its values match what MESc
-shows. A channel recorded with `ad_invert = 0` is read, but with an `InvertWarning` on reads in reader units, and
-`mesc-io check` reports it (`pmt-not-inverted`): those values have not been compared with MESc (some readers apply
-`65535 − x` by hand).
-
-**8-bit acquisition.** A unit acquired at 8 bits (`BitCompression = 8` in `MeasurementParamsXML`) is still stored as
-uint16, each sample shifted up (`compression_shift_8bit`, 7 on the files tested: values are multiples of 128), so
-one frame holds only a few dozen grey levels. The values are read as they are; `Unit.acquired_bits` and
-`Unit.sample_shift` say which mode it was, and `mesc-io check` notes such units (`8-bit-acquisition`), because an
-offset or an SNR read off one of their frames is coarse.
-
-Files written by MES 7 or older (`.mes`) are a different format and are not read.
 
 ## Development
 

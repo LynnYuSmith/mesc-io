@@ -51,3 +51,24 @@ jobs:
       - run: pip install ".[tiff,register,dev]"
       - working-directory: ${{ runner.temp }}
         run: python -m pytest ${{ github.workspace }}/tests -q
+
+  # The viewer's real-Chrome checks (tools/run_browser_checks.sh): the page is JavaScript that
+  # pytest never runs, and these checks sat red for days with nobody running them by hand.
+  browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+      - run: pip install ".[tiff]"
+      - name: Real-browser checks
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+          CHROME_EXTRA_FLAGS: --no-sandbox
+        run: tools/run_browser_checks.sh

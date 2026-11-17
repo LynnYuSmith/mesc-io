@@ -19,7 +19,9 @@
   (264 vs 264); it now compares against slice 40, where neither is. The wheel-zoom check in `view_zstack3d` bounded the
   drift in pixels (4 px; 4.9 at a 2 px wider canvas, with unchanged zoom code); it is now bounded in voxels (half a
   voxel; measured 0.22 of a 22 px voxel). `view_3dtools` still fails: the slab draws nothing in headless Chrome, as it
-  did at the commit that added the check (28 Oct); not yet known whether a real browser shows the same.
+  did at the commit that added the check (28 Oct). In a real Chrome the slab works (checked by hand on a 10-stack
+  file, 17 Nov), so the runner leaves it out unless `ALL=1` until the check itself is fixed.
+- CI: a `browser` job runs `tools/run_browser_checks.sh` on Ubuntu with Chrome and Node 22 (10 checks).
 
 - Docs: `docs/viewer_design.md` said the view was saved beside the `.mesc` and that **auto %** stretched each frame;
   the viewer keeps both the view and the ROIs in `~/mesc-viewer/`, and **auto %** uses one window for the whole unit.

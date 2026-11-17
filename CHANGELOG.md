@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Reader: `Unit.laser_im_percent`, MESc's "Im %" (the `APTMotor` named `Im` in `MeasurementParamsXML`, the imaging
+  laser's attenuator), next to the Pockels setting and the PMT voltages; also in `Unit.info` ("Imaging attenuator (Im)")
+  and in the viewer's Metadata panel ("laser (Im)").
+- Reader: a unit whose HDF5 metadata cannot be read is skipped with an `UnreadableUnitWarning` instead of making the
+  whole file unreadable. A .mesc copied while MESc was still writing (or a copy broken at the 4 GiB mark) tears its
+  last units' metadata ("incorrect metadata checksum"); the finished units now open.
+
 - Export: a TIFF above 4 GB no longer prints tifffile's "truncating ImageJ file" warning. The file is ImageJ's own
   layout for large stacks (data contiguous after the first page; ImageJ cannot read BigTIFF), and Fiji opens it whole:
   checked in headless Fiji on 4.4 GB, one channel (4200 frames) and two channels (2 × 2100), and on a mosaic-shaped

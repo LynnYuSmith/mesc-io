@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.7.2 — 2026-11-17
+
+The laser's attenuator ("Im %") beside the Pockels and PMT settings; a file copied mid-recording still opens; TIFF
+exports over 4 GB without a false alarm; the viewer's real-browser checks run in CI.
+
 - Reader: `Unit.laser_im_percent`, MESc's "Im %" (the `APTMotor` named `Im` in `MeasurementParamsXML`, the imaging
   laser's attenuator), next to the Pockels setting and the PMT voltages; also in `Unit.info` ("Imaging attenuator (Im)")
   and in the viewer's Metadata panel ("laser (Im)").

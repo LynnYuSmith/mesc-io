@@ -4,7 +4,7 @@ from .reader import Channel, MescError, MescFile, Unit, UnreadableUnitWarning
 from .rig_rois import RigRoi, RigRoiWarning
 from .values import ConversionError, ConversionWarning, InvertWarning, clamp_raw, from_reader_units, to_reader_units
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 __all__ = ["UnreadableUnitWarning", "MescFile", "Unit", "Channel", "RigRoi", "RigRoiWarning", "MescError", "MescIOError",
            "to_reader_units", "from_reader_units", "clamp_raw", "ConversionError", "ConversionWarning", "InvertWarning",
            "__version__"]

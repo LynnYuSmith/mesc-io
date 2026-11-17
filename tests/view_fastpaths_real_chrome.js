@@ -22,7 +22,7 @@
      last one shown is where the slider stopped. */
 const { spawn } = require("node:child_process"); const http = require("node:http");
 const REC = process.argv[2], STK = process.argv[3];
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; const PORT = 9338;
+const CHROME = (process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"); const PORT = 9338;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; r.on("data", d => b += d); r.on("end", () => res(JSON.parse(b))); }).on("error", rej));
 

@@ -7,7 +7,7 @@ const { spawn } = require("node:child_process"); const http = require("node:http
 const URL_ = process.argv[2]; const sleep = ms => new Promise(r => setTimeout(r, ms));
 const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on("data", d => b += d); r.on("end", () => res(JSON.parse(b))); }).on("error", rej));
 (async () => {
-  const ch = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", ["--headless=new","--remote-debugging-port=9484","--user-data-dir=/tmp/view_layout_profile","--window-size=1440,900","about:blank"], {stdio:"ignore"});
+  const ch = spawn((process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"), ["--headless=new","--remote-debugging-port=9484","--user-data-dir=/tmp/view_layout_profile","--window-size=1440,900","about:blank"], {stdio:"ignore"});
   process.on("exit", () => { try { ch.kill(); } catch(_){} });
   let t; for (let i=0;i<40;i++){ try { t=await getJSON("http://127.0.0.1:9484/json"); break; } catch { await sleep(300);} }
   const ws=new WebSocket(t.find(x=>x.type==="page").webSocketDebuggerUrl); await new Promise(r=>ws.onopen=r);

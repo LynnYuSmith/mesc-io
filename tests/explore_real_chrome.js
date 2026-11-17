@@ -16,7 +16,7 @@ let rnd = (() => { let s = (+SEED * 2654435761) >>> 0 || 1; return () => (s = (s
 const pick = a => a[Math.floor(rnd() * a.length)];
 (async () => {
   const port = 9400 + (+SEED % 50);
-  const ch = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", ["--headless=new", `--remote-debugging-port=${port}`,
+  const ch = spawn((process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"), ["--headless=new", `--remote-debugging-port=${port}`,
     "--no-first-run", `--user-data-dir=/tmp/view_explore_${SEED}`, "--window-size=1440,900", "--enable-unsafe-swiftshader", "--use-angle=swiftshader", "about:blank"], { stdio: "ignore" });
   process.on("exit", () => { try { ch.kill(); } catch (_) {} });
   let t; for (let i = 0; i < 40; i++) { try { t = await getJSON(`http://127.0.0.1:${port}/json`); break; } catch { await sleep(300); } }

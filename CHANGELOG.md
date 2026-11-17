@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Export: a TIFF above 4 GB no longer prints tifffile's "truncating ImageJ file" warning. The file is ImageJ's own
+  layout for large stacks (data contiguous after the first page; ImageJ cannot read BigTIFF), and Fiji opens it whole:
+  checked in headless Fiji on 4.4 GB, one channel (4200 frames) and two channels (2 × 2100), and on a mosaic-shaped
+  stack. `mosaic.to_tiff` now passes `bigtiff=False` as `export.to_tiff` does. `tests/test_export_tiff_large.py`
+  (the 4.4 GB round trip runs with `MESC_IO_SLOW=1`).
+- Browser checks: `tools/run_browser_checks.sh` runs the viewer's real-Chrome checks one after another, each against
+  a fresh `mesc-io view` on a synthetic file with its own empty HOME, and exits with the number of failures. The
+  checks take the browser from `CHROME` (default: Chrome on macOS); the runner adds a mock keychain, so a fresh
+  profile no longer asks for the login keychain on macOS.
+
 - Docs: `docs/viewer_design.md` said the view was saved beside the `.mesc` and that **auto %** stretched each frame;
   the viewer keeps both the view and the ROIs in `~/mesc-viewer/`, and **auto %** uses one window for the whole unit.
   It now opens with a note that it is the dated record of the design, with the README describing the viewer as it is.

@@ -14,6 +14,8 @@ usual way a export goes bad:
 """
 from __future__ import annotations
 
+import contextlib
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -124,7 +126,8 @@ def to_tiff(mesc, unit: str, out_path, channel=0, frames=None,
     carries its slice spacing, a time series its frame interval; x and y keep their own pixel
     sizes. The comment, the units and each channel's conversion go into the image's Info
     (Image ▸ Show Info in Fiji). Frames are read and written a block at a time, so a long unit
-    never sits in memory whole.
+    never sits in memory whole. Above 4 GB the file is written as ImageJ writes large stacks
+    (data contiguous after the first page); Fiji opens it whole.
 
     Needs `tifffile` (`pip install mesc-io[tiff]`).
     """
@@ -178,6 +181,21 @@ def to_tiff(mesc, unit: str, out_path, channel=0, frames=None,
                     yield stack[k][t]
 
     shape = (n, nc, h, w) if nc > 1 else (n, h, w)
-    tifffile.imwrite(str(out_path), pages(), shape=shape, dtype=dtype, imagej=True,
-                     metadata=meta, resolution=res, bigtiff=False)
+    with _imagej_over_4gb_ok():
+        tifffile.imwrite(str(out_path), pages(), shape=shape, dtype=dtype, imagej=True,
+                         metadata=meta, resolution=res, bigtiff=False)
     return out_path
+
+
+@contextlib.contextmanager
+def _imagej_over_4gb_ok():
+    """Silence tifffile's 'truncating ImageJ file' warning, and only that one.
+
+    ImageJ cannot read BigTIFF. Above 4 GB, tifffile writes what ImageJ itself writes: the data
+    contiguous after the first page, with the image count in the ImageJ description. Fiji opens
+    such a file whole (checked on 4.4 GB, one and two channels). The warning describes this
+    format, not a fault.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r".*truncating ImageJ file", category=UserWarning)
+        yield

@@ -12,7 +12,7 @@
    * the picture it shows is the PNG path's, pixel for pixel (the frame on screen when ▶ is pressed again). */
 const { spawn } = require("node:child_process"); const http = require("node:http");
 const URL_ = process.argv[2], UNIT = +(process.argv[3] || 0), SETUP = process.argv[4] || "";   // e.g. "V.avg=10; V.overlay=true;"
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; const PORT = 9341;
+const CHROME = (process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"); const PORT = 9341;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; r.on("data", d => b += d); r.on("end", () => res(JSON.parse(b))); }).on("error", rej));
 

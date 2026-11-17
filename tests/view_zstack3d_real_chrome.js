@@ -5,7 +5,7 @@
    node tests/view_zstack3d_real_chrome.js <viewer url> <out prefix> */
 const { spawn } = require("node:child_process"); const http = require("node:http"); const fs = require("node:fs");
 const URL_ = process.argv[2], OUT = process.argv[3];
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; const PORT = 9341;
+const CHROME = (process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"); const PORT = 9341;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on("data",d=>b+=d); r.on("end",()=>res(JSON.parse(b))); }).on("error", rej));
 (async () => {

@@ -11,7 +11,7 @@
    is the zoom box; a drag on the traces shows a rubber band and zooms time, and in overlay
    also crops the value range; AVG typed as a number reaches the request. */
 const { spawn } = require("node:child_process"); const http = require("node:http"); const fs = require("node:fs");
-const URL_ = process.argv[2]; const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; const PORT = 9336;
+const URL_ = process.argv[2]; const CHROME = (process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"); const PORT = 9336;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const getJSON = (u) => new Promise((res, rej) => http.get(u, r => { let b = ""; r.on("data", d => b += d); r.on("end", () => res(JSON.parse(b))); }).on("error", rej));
 (async () => {

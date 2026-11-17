@@ -667,7 +667,7 @@ def to_tiff(mesc, ts: List[Tile], layout, out_path, channels=None, planes=None, 
         import tifffile
     except ImportError as exc:  # noqa: BLE001
         raise ImportError("writing TIFF needs tifffile — pip install mesc-io[tiff]") from exc
-    from .export import _DEFAULT_COLOURS, _lut
+    from .export import _DEFAULT_COLOURS, _imagej_over_4gb_ok, _lut
     g = geometry(ts, layout)
     first = mesc.unit(g["order"][0])
     chans = list(range(len(first.channels))) if channels is None else [int(c) for c in channels]
@@ -705,6 +705,7 @@ def to_tiff(mesc, ts: List[Tile], layout, out_path, channels=None, planes=None, 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     shape = (len(planes), len(chans), h, w) if len(chans) > 1 else (len(planes), h, w)
-    tifffile.imwrite(str(out_path), pages(), shape=shape, dtype=np.float32, imagej=True, metadata=meta,
-                     resolution=(1.0 / g["px"], 1.0 / g["py"]))
+    with _imagej_over_4gb_ok():
+        tifffile.imwrite(str(out_path), pages(), shape=shape, dtype=np.float32, imagej=True, metadata=meta,
+                         resolution=(1.0 / g["px"], 1.0 / g["py"]), bigtiff=False)
     return out_path

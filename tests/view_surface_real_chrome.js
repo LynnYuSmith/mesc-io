@@ -11,7 +11,7 @@
    marks placed on a known plane and a known paraboloid, exactly representable in whole slices. */
 const { spawn } = require("node:child_process"); const http = require("node:http"); const fs = require("node:fs");
 const URL_ = process.argv[2], OUT = process.argv[3] || "/tmp/surface";
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; const PORT = 9347;
+const CHROME = (process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"); const PORT = 9347;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const getJSON = u => new Promise((res, rej) => http.get(u, r => { let b=""; r.on("data",d=>b+=d); r.on("end",()=>res(JSON.parse(b))); }).on("error", rej));
 // a bouton of axon 1 at slice bz, where make_synthetic.py puts it: (z, y, x), sub-pixel

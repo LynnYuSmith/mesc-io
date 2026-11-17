@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Docs: `docs/viewer_design.md` said the view was saved beside the `.mesc` and that **auto %** stretched each frame;
+  the viewer keeps both the view and the ROIs in `~/mesc-viewer/`, and **auto %** uses one window for the whole unit.
+  It now opens with a note that it is the dated record of the design, with the README describing the viewer as it is.
+  README: the reader's limits (`ad_invert`, 8-bit acquisition, `.mes`) moved under the Python section; the PNG
+  export is described once. `docs/registration.md` says what `BATCH_PIXELS` is. README and both docs rewritten in
+  shorter sentences, one point per paragraph; the dF/F steps in `viewer_design.md` are a numbered list.
+
 ## 0.7.1 — 2026-11-16
 
 The Metadata panel shows how the unit was recorded: laser (Pockels) and PMT next to the stage position.
